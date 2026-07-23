@@ -1,0 +1,35 @@
+:root {
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  background: transparent;
+}
+
+html,
+body,
+#surface {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: transparent;
+}
+
+#surface {
+  display: grid;
+}
+
+#loading {
+  place-self: center;
+  color: color-mix(in srgb, CanvasText 55%, transparent);
+  font-size: 13px;
+}
+
+#napplet-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+}

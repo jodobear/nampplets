@@ -1,0 +1,7 @@
+/target/
+/Packages/NMPNativeRuntime/.build/
+/Packages/NMPNativeRuntime/NMPNativeRuntime.xcframework/
+*.swp
+.DS_Store
+__pycache__/
+*.pyc

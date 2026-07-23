@@ -1,0 +1,16 @@
+{
+  "kind": 35129,
+  "id": "b330bfaefd2ddf268ebe4196403e6163533c54f41dabc3518bdc1a896c68f40e",
+  "pubkey": "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5",
+  "created_at": 1784732192,
+  "tags": [
+    ["d", "good-morning"],
+    ["path", "/index.html", "ffd35eea5c84d03cdda74c23e1bbb2c40500f503833503aa688036faa52f3808"],
+    ["x", "828a6df02afd56782ea20f805084acce65c53f7c37554948c1e0a64aa5a2b0a8", "aggregate"],
+    ["server", "https://cdn.hzrd149.com"],
+    ["server", "https://blossom.ditto.pub"],
+    ["title", "Good Morning Protocol"]
+  ],
+  "content": "",
+  "sig": "78f9225eec934bbcc65c9ba3ca441ac78472a0edd567aa9df404d8a273b88cda46f2e4b3c9e94bb2e83550dff705ae76423c025319dc9b04f87f772cfa0f6ce3"
+}

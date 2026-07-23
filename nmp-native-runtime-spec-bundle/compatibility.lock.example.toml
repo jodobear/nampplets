@@ -1,0 +1,74 @@
+# Filled and committed during M0. Every value must be exact and reproducible.
+
+[baseline]
+name = "native-runtime-compat-v1"
+created_at = "2026-07-23"
+status = "unratified"
+
+[nip_5d]
+repository = "nostr-protocol/nips"
+source_branch_or_pr = ""
+commit = ""
+manifest_kinds = [5129, 15129, 35129]
+
+[nap_registry]
+repository = "napplet/naps"
+commit = ""
+
+[napplet_packages]
+repository = "napplet/web"
+commit = ""
+core = ""
+shim = ""
+sdk = ""
+nap = ""
+conformance = ""
+
+[kehto]
+repository = "kehto/web"
+commit = ""
+corpus_path = "apps/playground"
+
+[nmp]
+repository = "pablof7z/nmp"
+commit = ""
+public_surface_snapshot = ""
+
+[artifacts]
+accepted_modes = []
+requires_verified_index = true
+requires_per_path_sha256 = true
+requires_aggregate_verification = true
+
+[web_projection]
+sandbox_tokens = ["allow-scripts"]
+forbid_allow_same_origin = true
+require_srcdoc = true
+require_source_window_binding = true
+forbid_window_nostr = true
+unknown_message_policy = "ignore"
+
+# Populate one table per platform. A domain is advertised only when its provider
+# passes the baseline contract suite on that platform.
+[platform.macos]
+supported_domains = []
+unsupported_domains = []
+
+[platform.ios]
+supported_domains = []
+unsupported_domains = []
+
+[platform.android]
+supported_domains = []
+unsupported_domains = []
+
+[corpus]
+reference_fixture_digest = ""
+kehto_fixture_digest = ""
+published_fixture_digest = ""
+
+[signoff]
+product_owner = ""
+compatibility_reviewer = ""
+security_reviewer = ""
+nmp_boundary_reviewer = ""

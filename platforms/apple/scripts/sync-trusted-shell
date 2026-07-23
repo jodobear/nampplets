@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+apple_root=$(dirname "$script_directory")
+repository_root=$(dirname "$(dirname "$apple_root")")
+source_root="$repository_root/web/trusted-shell"
+destination_root="$apple_root/Sources/NMPNativeRuntimeApple/Resources/TrustedShell"
+
+rm -rf "$destination_root"
+mkdir -p "$destination_root"
+rsync -a \
+  --exclude README.md \
+  --exclude /scripts \
+  --exclude tests \
+  "$source_root/" \
+  "$destination_root/"

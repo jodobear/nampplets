@@ -1,0 +1,145 @@
+{
+  "schema": 1,
+  "clock": {
+    "kind": "manual",
+    "initial_unix_seconds": 1700000000
+  },
+  "limits": {
+    "max_frame_bytes": 1048576,
+    "max_connections": 32,
+    "max_requests_per_connection": 256,
+    "max_blob_bytes": 4194304
+  },
+  "relay": [
+    {
+      "id": "eose-empty",
+      "script": ["accept", "eose"],
+      "observable": "connected-eose-no-match"
+    },
+    {
+      "id": "event-then-eose",
+      "script": ["accept", "event:public-note", "eose"],
+      "observable": "event-and-scoped-eose"
+    },
+    {
+      "id": "auth-required",
+      "script": ["accept", "auth:challenge-1", "await-auth", "event:public-note", "eose"],
+      "observable": "auth-challenge-and-success"
+    },
+    {
+      "id": "auth-denied",
+      "script": ["accept", "auth:challenge-1", "closed:auth-denied"],
+      "observable": "auth-denied"
+    },
+    {
+      "id": "relay-error",
+      "script": ["accept", "closed:programmed-error"],
+      "observable": "typed-relay-error"
+    },
+    {
+      "id": "disconnect-reconnect",
+      "script": ["accept", "disconnect", "accept", "event:public-note", "eose"],
+      "observable": "two-connection-generations"
+    },
+    {
+      "id": "replacement",
+      "script": ["accept", "event:replaceable-old", "event:replaceable-new", "eose"],
+      "observable": "canonical-replacement-input"
+    },
+    {
+      "id": "deletion",
+      "script": ["accept", "event:public-note", "event:delete-public-note", "eose"],
+      "observable": "canonical-deletion-input"
+    },
+    {
+      "id": "expiry",
+      "script": ["accept", "event:expiring-note", "clock:+61", "eose"],
+      "observable": "expiry-input-after-clock-advance"
+    }
+  ],
+  "blob": [
+    {
+      "id": "verified-index",
+      "status": 200,
+      "fixture": "reference/prelude-order/index.html",
+      "mutation": "none"
+    },
+    {
+      "id": "one-byte-corrupt",
+      "status": 200,
+      "fixture": "reference/prelude-order/index.html",
+      "mutation": "flip-byte:0"
+    },
+    {
+      "id": "missing",
+      "status": 404,
+      "fixture": null,
+      "mutation": "none"
+    },
+    {
+      "id": "redirect-refused",
+      "status": 302,
+      "fixture": null,
+      "mutation": "location:https://example.invalid/untrusted"
+    },
+    {
+      "id": "mime-mismatch",
+      "status": 200,
+      "fixture": "reference/prelude-order/index.html",
+      "content_type": "application/octet-stream",
+      "mutation": "none"
+    },
+    {
+      "id": "oversized",
+      "status": 200,
+      "fixture": null,
+      "generated_bytes": 4194305,
+      "mutation": "none"
+    },
+    {
+      "id": "slow-stream",
+      "status": 200,
+      "fixture": "reference/prelude-order/index.html",
+      "chunk_bytes": 1,
+      "clock_steps": 32,
+      "mutation": "none"
+    }
+  ],
+  "signer": [
+    {
+      "id": "local-approved",
+      "request": "unsigned-public-note",
+      "response_fixture": "signed-public-note",
+      "result": "approved"
+    },
+    {
+      "id": "remote-approved",
+      "request": "unsigned-public-note",
+      "response_fixture": "signed-public-note",
+      "result": "approved"
+    },
+    {
+      "id": "user-rejected",
+      "request": "unsigned-public-note",
+      "response_fixture": null,
+      "result": "rejected"
+    },
+    {
+      "id": "wrong-author",
+      "request": "unsigned-public-note",
+      "response_fixture": "signed-wrong-author",
+      "result": "invalid"
+    },
+    {
+      "id": "unavailable",
+      "request": "unsigned-public-note",
+      "response_fixture": null,
+      "result": "unavailable"
+    }
+  ],
+  "secrets": {
+    "fixture_policy": "no-secret-keys",
+    "signatures": "precomputed-public-events-only",
+    "event_fixtures": "conformance/test-services/events.json"
+  }
+}

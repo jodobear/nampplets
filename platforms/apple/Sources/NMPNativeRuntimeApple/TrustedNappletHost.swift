@@ -1,0 +1,417 @@
+import Foundation
+import SwiftUI
+import WebKit
+
+public struct NappletArtifact: Sendable {
+    public let title: String
+    let reader: any VerifiedArtifactByteReader
+    let runtimeSession: (any TrustedNappletRuntimeSession)?
+    let negotiatedDomains: [String]
+
+    init(
+        title: String,
+        reader: any VerifiedArtifactByteReader,
+        runtimeSession: (any TrustedNappletRuntimeSession)? = nil,
+        negotiatedDomains: [String] = ["shell"]
+    ) {
+        self.title = title
+        self.reader = reader
+        self.runtimeSession = runtimeSession
+        self.negotiatedDomains = negotiatedDomains
+    }
+
+    init(title: String, html: String) {
+        self = Self.internalM1Canary(title: title, html: html)
+    }
+
+    var html: String {
+        guard let index = try? reader.readSealed(logicalPath: "/index.html") else {
+            return ""
+        }
+        return String(data: index.bytes, encoding: .utf8) ?? ""
+    }
+
+    /// Internal M1 canary construction. This is deliberately not public API:
+    /// production executable bytes must arrive through the Rust-owned verified
+    /// artifact handle adapter.
+    static func internalM1Canary(title: String, html: String) -> Self {
+        NappletArtifact(
+            title: title,
+            reader: InMemoryVerifiedArtifactReader(files: [
+                SealedArtifactBytes(
+                    logicalPath: "/index.html",
+                    sha256: String(repeating: "0", count: 64),
+                    bytes: Data(html.utf8)
+                )
+            ])
+        )
+    }
+
+    static func bundledCompatibilityFixture() -> Self? {
+        guard let url = TrustedShellResources.fixtureURL,
+              let html = try? String(contentsOf: url, encoding: .utf8)
+        else {
+            return nil
+        }
+        return NappletArtifact.internalM1Canary(
+            title: "Workbench Welcome",
+            html: html
+        )
+    }
+}
+
+public enum TrustedNappletActivity: Sendable, Equatable {
+    case loading
+    case mounted
+    case request(type: String)
+    case refused(reason: String)
+    case crashed
+}
+
+public struct TrustedNappletView: NSViewRepresentable {
+    private let artifact: NappletArtifact
+    private let onActivity: @MainActor @Sendable (TrustedNappletActivity) -> Void
+
+    public init(
+        artifact: NappletArtifact,
+        onActivity: @escaping @MainActor @Sendable (TrustedNappletActivity) -> Void = { _ in }
+    ) {
+        self.artifact = artifact
+        self.onActivity = onActivity
+    }
+
+    public func makeCoordinator() -> Coordinator {
+        Coordinator(artifact: artifact, onActivity: onActivity)
+    }
+
+    public func makeNSView(context: Context) -> WKWebView {
+        context.coordinator.makeWebView()
+    }
+
+    public func updateNSView(_ webView: WKWebView, context: Context) {}
+
+    public static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.stop(webView)
+    }
+
+    @MainActor
+    public final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        private static let bridgeName = "runtimeBridge"
+        private static let bridgeWorld = WKContentWorld.world(name: "io.f7z.nmp.native-runtime.bridge")
+        private static let maxEnvelopeBytes = 64 * 1024
+
+        private let artifact: NappletArtifact
+        private let sessionID: String
+        private let artifactSchemeHandler: VerifiedArtifactSchemeHandler
+        private let onActivity: @MainActor @Sendable (TrustedNappletActivity) -> Void
+        private var trustedShellURL: URL?
+        private var navigationGeneration: UInt64 = 0
+        private var activeTrustedGeneration: UInt64?
+        private var stopped = false
+        private weak var currentWebView: WKWebView?
+
+        init(
+            artifact: NappletArtifact,
+            onActivity: @escaping @MainActor @Sendable (TrustedNappletActivity) -> Void
+        ) {
+            self.artifact = artifact
+            self.onActivity = onActivity
+            let sessionID = UUID().uuidString.lowercased()
+            self.sessionID = sessionID
+            self.artifactSchemeHandler = VerifiedArtifactSchemeHandler(
+                sessionID: sessionID,
+                reader: artifact.reader
+            )
+            super.init()
+            artifact.runtimeSession?.setResponseSink { [weak self] bytes in
+                Task { @MainActor [weak self] in
+                    self?.deliverRuntimeResponse(bytes)
+                }
+            }
+        }
+
+        func makeWebView() -> WKWebView {
+            let contentController = WKUserContentController()
+            contentController.add(
+                self,
+                contentWorld: Self.bridgeWorld,
+                name: Self.bridgeName
+            )
+            contentController.addUserScript(Self.bridgeRelayScript)
+
+            let configuration = WKWebViewConfiguration()
+            configuration.userContentController = contentController
+            configuration.websiteDataStore = .nonPersistent()
+            configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+            configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+            configuration.mediaTypesRequiringUserActionForPlayback = .all
+            configuration.setURLSchemeHandler(
+                artifactSchemeHandler,
+                forURLScheme: VerifiedArtifactSchemeHandler.scheme
+            )
+
+            let webView = WKWebView(frame: .zero, configuration: configuration)
+            currentWebView = webView
+            webView.navigationDelegate = self
+            webView.underPageBackgroundColor = .clear
+            onActivity(.loading)
+
+            guard let shellURL = TrustedShellResources.shellURL else {
+                onActivity(.refused(reason: "Trusted shell resource is unavailable"))
+                return webView
+            }
+            trustedShellURL = shellURL.resolvingSymlinksInPath().standardizedFileURL
+            webView.loadFileURL(
+                shellURL,
+                allowingReadAccessTo: shellURL.deletingLastPathComponent()
+            )
+            return webView
+        }
+
+        func stop(_ webView: WKWebView) {
+            guard !stopped else { return }
+            stopped = true
+            activeTrustedGeneration = nil
+            currentWebView = nil
+            artifact.runtimeSession?.setResponseSink(nil)
+            artifact.runtimeSession?.stop()
+            artifactSchemeHandler.teardown()
+            webView.stopLoading()
+            webView.navigationDelegate = nil
+            webView.configuration.userContentController.removeScriptMessageHandler(
+                forName: Self.bridgeName,
+                contentWorld: Self.bridgeWorld
+            )
+            webView.configuration.userContentController.removeAllUserScripts()
+        }
+
+        public func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            guard !stopped else { return }
+            guard activeTrustedGeneration == navigationGeneration,
+                  message.frameInfo.isMainFrame,
+                  isTrustedShellURL(message.frameInfo.request.url),
+                  isTrustedShellURL(message.webView?.url)
+            else {
+                onActivity(.refused(reason: "Bridge message did not originate in the trusted main frame"))
+                return
+            }
+            guard let raw = message.body as? String,
+                  raw.utf8.count <= Self.maxEnvelopeBytes,
+                  let data = raw.data(using: .utf8),
+                  let bridgeMessage = try? JSONSerialization.jsonObject(with: data)
+                    as? [String: Any],
+                  let envelope = bridgeMessage["envelope"] as? [String: Any],
+                  let messageType = envelope["type"] as? String,
+                  !messageType.isEmpty,
+                  let encodedEnvelope = try? JSONSerialization.data(
+                    withJSONObject: envelope
+                  ),
+                  encodedEnvelope.count <= Self.maxEnvelopeBytes
+            else {
+                onActivity(.refused(reason: "Malformed or oversized bridge envelope"))
+                return
+            }
+
+            // The caller-supplied session is deliberately ignored. Session
+            // authority comes from the sealed Rust session attached to this
+            // exact mapped frame.
+            route(
+                messageType: messageType,
+                encodedEnvelope: encodedEnvelope
+            )
+        }
+
+        public func webView(
+            _ webView: WKWebView,
+            didStartProvisionalNavigation navigation: WKNavigation!
+        ) {
+            guard !stopped else { return }
+            navigationGeneration &+= 1
+            activeTrustedGeneration = nil
+        }
+
+        public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard !stopped else { return }
+            guard isTrustedShellURL(webView.url) else {
+                onActivity(.refused(reason: "A non-shell navigation cannot activate the bridge"))
+                return
+            }
+            let generation = navigationGeneration
+            activeTrustedGeneration = generation
+            let artifactHTML: String
+            do {
+                guard let index = try artifact.reader.readSealed(logicalPath: "/index.html"),
+                      index.logicalPath == "/index.html",
+                      index.bytes.count <= VerifiedArtifactSchemeLimits.production.maximumFileBytes,
+                      let decoded = String(data: index.bytes, encoding: .utf8)
+                else {
+                    throw VerifiedArtifactReaderError.unavailable
+                }
+                artifactHTML = decoded
+            } catch {
+                activeTrustedGeneration = nil
+                onActivity(.refused(reason: "Verified artifact index is unavailable"))
+                return
+            }
+            let configuration: [String: Any] = [
+                "session": sessionID,
+                "artifactHTML": artifactHTML,
+                "artifactBaseURL": artifactSchemeHandler.baseURL.absoluteString,
+                "title": artifact.title,
+                "domains": artifact.negotiatedDomains
+            ]
+            Task { @MainActor [weak self, weak webView] in
+                guard let self else { return }
+                guard let webView else { return }
+                do {
+                    _ = try await webView.callAsyncJavaScript(
+                        "return window.__nmpTrustedShellMount(configuration)",
+                        arguments: ["configuration": configuration],
+                        in: nil,
+                        contentWorld: .page
+                    )
+                    guard !self.stopped,
+                          self.activeTrustedGeneration == generation,
+                          self.isTrustedShellURL(webView.url)
+                    else {
+                        return
+                    }
+                    self.onActivity(.mounted)
+                } catch {
+                    if !self.stopped {
+                        self.onActivity(.refused(reason: "The trusted shell refused the artifact"))
+                    }
+                }
+            }
+        }
+
+        public func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
+        ) {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.cancel)
+                return
+            }
+
+            let isMainFrame = navigationAction.targetFrame?.isMainFrame == true
+            if isMainFrame, isTrustedShellURL(url) {
+                decisionHandler(.allow)
+                return
+            }
+
+            if url.scheme == "about", !isMainFrame {
+                decisionHandler(.allow)
+                return
+            }
+
+            if isMainFrame {
+                onActivity(.refused(reason: "Trusted shell navigation was denied"))
+            }
+            decisionHandler(.cancel)
+        }
+
+        public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            guard !stopped else { return }
+            activeTrustedGeneration = nil
+            artifact.runtimeSession?.crash(
+                reason: "The mapped WebKit content process terminated"
+            )
+            onActivity(.crashed)
+        }
+
+        private func isTrustedShellURL(_ candidate: URL?) -> Bool {
+            guard let trustedShellURL, let candidate, candidate.isFileURL else {
+                return false
+            }
+            return candidate.resolvingSymlinksInPath().standardizedFileURL == trustedShellURL
+        }
+
+        private func route(
+            messageType: String,
+            encodedEnvelope: Data
+        ) {
+            onActivity(.request(type: messageType))
+            artifact.runtimeSession?.mappedEnvelope(encodedEnvelope)
+        }
+
+        private func deliverRuntimeResponse(_ bytes: Data) {
+            guard !stopped,
+                  activeTrustedGeneration == navigationGeneration,
+                  let webView = currentWebView,
+                  isTrustedShellURL(webView.url),
+                  bytes.count <= Self.maxEnvelopeBytes,
+                  let envelope = try? JSONSerialization.jsonObject(with: bytes),
+                  envelope is [String: Any]
+            else {
+                return
+            }
+            Task { @MainActor [weak self, weak webView] in
+                guard let self,
+                      !self.stopped,
+                      self.activeTrustedGeneration == self.navigationGeneration,
+                      let webView,
+                      self.isTrustedShellURL(webView.url)
+                else {
+                    return
+                }
+                _ = try? await webView.callAsyncJavaScript(
+                    "return window.__nmpTrustedShellReceive(envelope)",
+                    arguments: ["envelope": envelope],
+                    in: nil,
+                    contentWorld: .page
+                )
+            }
+        }
+
+        private static let bridgeRelayScript = WKUserScript(
+            source: """
+            document.addEventListener("nmp-native-envelope", function () {
+              const root = document.documentElement;
+              const raw = root.getAttribute("data-nmp-native-envelope");
+              if (raw !== null) {
+                window.webkit.messageHandlers.runtimeBridge.postMessage(raw);
+              }
+            });
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true,
+            in: bridgeWorld
+        )
+    }
+}
+
+enum TrustedShellResources {
+    static var shellURL: URL? {
+        Bundle.module.url(
+            forResource: "trusted-shell",
+            withExtension: "html",
+            subdirectory: "TrustedShell"
+        )
+    }
+
+    static var fixtureURL: URL? {
+        Bundle.module.url(
+            forResource: "minimal-conformant-napplet",
+            withExtension: "html",
+            subdirectory: "TrustedShell/fixtures"
+        )
+    }
+
+    static func externalFixtureURL(_ logicalPath: String) -> URL? {
+        guard logicalPath.first == "/" else { return nil }
+        let relative = String(logicalPath.dropFirst())
+        let path = (relative as NSString).deletingPathExtension
+        let pathExtension = (relative as NSString).pathExtension
+        return Bundle.module.url(
+            forResource: (path as NSString).lastPathComponent,
+            withExtension: pathExtension.isEmpty ? nil : pathExtension,
+            subdirectory: "TrustedShell/fixtures/external-assets/"
+                + (path as NSString).deletingLastPathComponent
+        )
+    }
+}

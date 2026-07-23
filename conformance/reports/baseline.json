@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "baseline": "native-runtime-compat-v1",
+  "captured_at": "2026-07-24",
+  "status": "unratified",
+  "authorities": {
+    "nip_5d": "78efc118278e3ed42201eba9b60530b65835d7ed",
+    "nap_registry": "6461e4b37c29dc09a20dff35d9515889c4433874",
+    "napplet_web": "b335c40c77f55547f23af81d6d999e2e4e3a3623",
+    "kehto": "bb3929b3523b75356fd65f658f9bd14c7ff697e4",
+    "nmp": "005dc2a5f12aa414961b313d05ebb021934e385c"
+  },
+  "drift": [
+    {
+      "id": "artifact-shape",
+      "nip_5d": "single self-contained /index.html",
+      "package_baseline": "single-file and external-assets",
+      "decision": "accept both package modes with per-path and aggregate verification"
+    },
+    {
+      "id": "shell-handshake",
+      "nap_registry": "shell.ready and shell.init",
+      "package_baseline": "no shell domain or shell envelope validator",
+      "decision": "inventory as registry-only handshake and do not advertise before adapter conformance"
+    },
+    {
+      "id": "domain-breadth",
+      "nap_registry": "identity, inc, intent, shell, theme",
+      "package_baseline": "22 package domains; 18 have no pinned registry document",
+      "decision": "inventory package types but advertise no provider until explicit contract ratification"
+    },
+    {
+      "id": "conformance-depth",
+      "upstream_suite": "manifest shape, boot, envelopes, degradation, teardown",
+      "runtime_requirement": "signature, all path hashes, aggregate, redirect, executable closure, bridge security",
+      "decision": "require upstream conformance plus stronger runtime artifact and adversarial gates"
+    },
+    {
+      "id": "principal",
+      "nip_5d": "(dTag, aggregateHash)",
+      "runtime_security": "(manifestAuthor, dTag, aggregateHash)",
+      "decision": "keep protocol identity and use stronger internal grant/storage principal"
+    }
+  ],
+  "nmp_local_reference": {
+    "head": "68310f88a31bf80e6b73d018b1374e73efda0041",
+    "clean": false,
+    "authority": false,
+    "note": "The local reference checkout had user-owned conflicts and untracked data. It was not modified."
+  },
+  "advertised_domains": {
+    "macos": [],
+    "ios": [],
+    "android": []
+  }
+}

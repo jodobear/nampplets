@@ -1,0 +1,1480 @@
+{
+  "counts": {
+    "pinned_conformance": 207,
+    "registry_only_handshake": 2,
+    "total": 209
+  },
+  "entries": [
+    {
+      "direction": "napplet-to-shell",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.close",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.close.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.event",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.open",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.open.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.read",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.read.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.services",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.services.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.subscribe",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.subscribe.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.unsubscribe",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.unsubscribe.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.write",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "ble",
+      "runtime_support": "not-advertised-m0",
+      "type": "ble.write.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.decodeNip19",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.decodeNip19.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.encodeNip19",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.encodeNip19.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.follow",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.follow.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.follows",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.follows.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.getProfile",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.getProfile.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.react",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.react.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.report",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.report.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.unfollow",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "common",
+      "runtime_support": "not-advertised-m0",
+      "type": "common.unfollow.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "config",
+      "runtime_support": "not-advertised-m0",
+      "type": "config.get",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "config",
+      "runtime_support": "not-advertised-m0",
+      "type": "config.openSettings",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "config",
+      "runtime_support": "not-advertised-m0",
+      "type": "config.registerSchema",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "config",
+      "runtime_support": "not-advertised-m0",
+      "type": "config.registerSchema.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "config",
+      "runtime_support": "not-advertised-m0",
+      "type": "config.schemaError",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "config",
+      "runtime_support": "not-advertised-m0",
+      "type": "config.subscribe",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "config",
+      "runtime_support": "not-advertised-m0",
+      "type": "config.unsubscribe",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "config",
+      "runtime_support": "not-advertised-m0",
+      "type": "config.values",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "count",
+      "runtime_support": "not-advertised-m0",
+      "type": "count.query",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "count",
+      "runtime_support": "not-advertised-m0",
+      "type": "count.query.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.close",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.close.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.discover",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.discover.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.event",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.registry.call",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.registry.call.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.registry.describe",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.registry.describe.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.registry.has",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.registry.has.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.registry.list",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.registry.list.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.request",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "cvm",
+      "runtime_support": "not-advertised-m0",
+      "type": "cvm.request.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.conversations",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.conversations.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.message",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.messages",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.messages.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.send",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.send.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.status",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.status.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.subscribe",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.subscribe.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.unsubscribe",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "dm",
+      "runtime_support": "not-advertised-m0",
+      "type": "dm.unsubscribe.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.changed",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getBadges",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getBadges.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getBlocked",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getBlocked.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getFollows",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getFollows.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getList",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getList.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getMutes",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getMutes.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getProfile",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getProfile.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getPublicKey",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getPublicKey.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getRelays",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getRelays.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getZaps",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "identity",
+      "runtime_support": "not-advertised-m0",
+      "type": "identity.getZaps.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.channel.broadcast",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.channel.close",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.channel.closed",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.channel.emit",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.channel.event",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.channel.list",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.channel.list.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.channel.open",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.channel.open.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.emit",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.event",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.subscribe",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.subscribe.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.unsubscribe",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "intent",
+      "runtime_support": "not-advertised-m0",
+      "type": "intent.available",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "intent",
+      "runtime_support": "not-advertised-m0",
+      "type": "intent.available.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "intent",
+      "runtime_support": "not-advertised-m0",
+      "type": "intent.changed",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "intent",
+      "runtime_support": "not-advertised-m0",
+      "type": "intent.handlers",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "intent",
+      "runtime_support": "not-advertised-m0",
+      "type": "intent.handlers.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "intent",
+      "runtime_support": "not-advertised-m0",
+      "type": "intent.invoke",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "intent",
+      "runtime_support": "not-advertised-m0",
+      "type": "intent.invoke.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "keys",
+      "runtime_support": "not-advertised-m0",
+      "type": "keys.action",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "keys",
+      "runtime_support": "not-advertised-m0",
+      "type": "keys.bindings",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "keys",
+      "runtime_support": "not-advertised-m0",
+      "type": "keys.forward",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "keys",
+      "runtime_support": "not-advertised-m0",
+      "type": "keys.registerAction",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "keys",
+      "runtime_support": "not-advertised-m0",
+      "type": "keys.registerAction.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "keys",
+      "runtime_support": "not-advertised-m0",
+      "type": "keys.unregisterAction",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "link",
+      "runtime_support": "not-advertised-m0",
+      "type": "link.open",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "link",
+      "runtime_support": "not-advertised-m0",
+      "type": "link.open.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "lists",
+      "runtime_support": "not-advertised-m0",
+      "type": "lists.add",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "lists",
+      "runtime_support": "not-advertised-m0",
+      "type": "lists.add.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "lists",
+      "runtime_support": "not-advertised-m0",
+      "type": "lists.remove",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "lists",
+      "runtime_support": "not-advertised-m0",
+      "type": "lists.remove.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "lists",
+      "runtime_support": "not-advertised-m0",
+      "type": "lists.supported",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "lists",
+      "runtime_support": "not-advertised-m0",
+      "type": "lists.supported.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "media",
+      "runtime_support": "not-advertised-m0",
+      "type": "media.capabilities",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "media",
+      "runtime_support": "not-advertised-m0",
+      "type": "media.command",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "media",
+      "runtime_support": "not-advertised-m0",
+      "type": "media.controls",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "media",
+      "runtime_support": "not-advertised-m0",
+      "type": "media.session.create",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "media",
+      "runtime_support": "not-advertised-m0",
+      "type": "media.session.create.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "media",
+      "runtime_support": "not-advertised-m0",
+      "type": "media.session.destroy",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "media",
+      "runtime_support": "not-advertised-m0",
+      "type": "media.session.update",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "media",
+      "runtime_support": "not-advertised-m0",
+      "type": "media.state",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "notify",
+      "runtime_support": "not-advertised-m0",
+      "type": "notify.action",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "notify",
+      "runtime_support": "not-advertised-m0",
+      "type": "notify.badge",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "notify",
+      "runtime_support": "not-advertised-m0",
+      "type": "notify.channel.register",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "notify",
+      "runtime_support": "not-advertised-m0",
+      "type": "notify.clicked",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "notify",
+      "runtime_support": "not-advertised-m0",
+      "type": "notify.controls",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "notify",
+      "runtime_support": "not-advertised-m0",
+      "type": "notify.dismiss",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "notify",
+      "runtime_support": "not-advertised-m0",
+      "type": "notify.dismissed",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "notify",
+      "runtime_support": "not-advertised-m0",
+      "type": "notify.permission.request",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "notify",
+      "runtime_support": "not-advertised-m0",
+      "type": "notify.permission.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "notify",
+      "runtime_support": "not-advertised-m0",
+      "type": "notify.send",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "notify",
+      "runtime_support": "not-advertised-m0",
+      "type": "notify.send.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.close",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.closed",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.event",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.getEvent",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.getEvent.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.publish",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.publish.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.query",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.query.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.resolveRelays",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.resolveRelays.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "outbox",
+      "runtime_support": "not-advertised-m0",
+      "type": "outbox.subscribe",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "relay",
+      "runtime_support": "not-advertised-m0",
+      "type": "relay.close",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "relay",
+      "runtime_support": "not-advertised-m0",
+      "type": "relay.closed",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "relay",
+      "runtime_support": "not-advertised-m0",
+      "type": "relay.eose",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "relay",
+      "runtime_support": "not-advertised-m0",
+      "type": "relay.event",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "relay",
+      "runtime_support": "not-advertised-m0",
+      "type": "relay.publish",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "relay",
+      "runtime_support": "not-advertised-m0",
+      "type": "relay.publish.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "relay",
+      "runtime_support": "not-advertised-m0",
+      "type": "relay.publishEncrypted",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "relay",
+      "runtime_support": "not-advertised-m0",
+      "type": "relay.publishEncrypted.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "relay",
+      "runtime_support": "not-advertised-m0",
+      "type": "relay.query",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "relay",
+      "runtime_support": "not-advertised-m0",
+      "type": "relay.query.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "relay",
+      "runtime_support": "not-advertised-m0",
+      "type": "relay.subscribe",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "resource",
+      "runtime_support": "not-advertised-m0",
+      "type": "resource.bytes",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "resource",
+      "runtime_support": "not-advertised-m0",
+      "type": "resource.bytes.error",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "resource",
+      "runtime_support": "not-advertised-m0",
+      "type": "resource.bytes.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "resource",
+      "runtime_support": "not-advertised-m0",
+      "type": "resource.bytesMany",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "resource",
+      "runtime_support": "not-advertised-m0",
+      "type": "resource.bytesMany.error",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "resource",
+      "runtime_support": "not-advertised-m0",
+      "type": "resource.bytesMany.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "resource",
+      "runtime_support": "not-advertised-m0",
+      "type": "resource.cancel",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "resource",
+      "runtime_support": "not-advertised-m0",
+      "type": "resource.info",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "resource",
+      "runtime_support": "not-advertised-m0",
+      "type": "resource.info.error",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "resource",
+      "runtime_support": "not-advertised-m0",
+      "type": "resource.info.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "serial",
+      "runtime_support": "not-advertised-m0",
+      "type": "serial.close",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "serial",
+      "runtime_support": "not-advertised-m0",
+      "type": "serial.close.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "serial",
+      "runtime_support": "not-advertised-m0",
+      "type": "serial.event",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "serial",
+      "runtime_support": "not-advertised-m0",
+      "type": "serial.open",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "serial",
+      "runtime_support": "not-advertised-m0",
+      "type": "serial.open.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "serial",
+      "runtime_support": "not-advertised-m0",
+      "type": "serial.write",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "serial",
+      "runtime_support": "not-advertised-m0",
+      "type": "serial.write.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "shell",
+      "runtime_support": "not-advertised-m0",
+      "type": "shell.init",
+      "validator": "registry-only-handshake"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "shell",
+      "runtime_support": "not-advertised-m0",
+      "type": "shell.ready",
+      "validator": "registry-only-handshake"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "storage",
+      "runtime_support": "not-advertised-m0",
+      "type": "storage.get",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "storage",
+      "runtime_support": "not-advertised-m0",
+      "type": "storage.get.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "storage",
+      "runtime_support": "not-advertised-m0",
+      "type": "storage.keys",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "storage",
+      "runtime_support": "not-advertised-m0",
+      "type": "storage.keys.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "storage",
+      "runtime_support": "not-advertised-m0",
+      "type": "storage.remove",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "storage",
+      "runtime_support": "not-advertised-m0",
+      "type": "storage.remove.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "storage",
+      "runtime_support": "not-advertised-m0",
+      "type": "storage.set",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "storage",
+      "runtime_support": "not-advertised-m0",
+      "type": "storage.set.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "theme",
+      "runtime_support": "not-advertised-m0",
+      "type": "theme.changed",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "theme",
+      "runtime_support": "not-advertised-m0",
+      "type": "theme.get",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "theme",
+      "runtime_support": "not-advertised-m0",
+      "type": "theme.get.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "upload",
+      "runtime_support": "not-advertised-m0",
+      "type": "upload.info",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "upload",
+      "runtime_support": "not-advertised-m0",
+      "type": "upload.info.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "upload",
+      "runtime_support": "not-advertised-m0",
+      "type": "upload.status",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "upload",
+      "runtime_support": "not-advertised-m0",
+      "type": "upload.status.changed",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "upload",
+      "runtime_support": "not-advertised-m0",
+      "type": "upload.status.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "upload",
+      "runtime_support": "not-advertised-m0",
+      "type": "upload.upload",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "upload",
+      "runtime_support": "not-advertised-m0",
+      "type": "upload.upload.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "webrtc",
+      "runtime_support": "not-advertised-m0",
+      "type": "webrtc.close",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "webrtc",
+      "runtime_support": "not-advertised-m0",
+      "type": "webrtc.close.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "webrtc",
+      "runtime_support": "not-advertised-m0",
+      "type": "webrtc.event",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "webrtc",
+      "runtime_support": "not-advertised-m0",
+      "type": "webrtc.open",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "webrtc",
+      "runtime_support": "not-advertised-m0",
+      "type": "webrtc.open.result",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "napplet-to-shell",
+      "domain": "webrtc",
+      "runtime_support": "not-advertised-m0",
+      "type": "webrtc.send",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "webrtc",
+      "runtime_support": "not-advertised-m0",
+      "type": "webrtc.send.result",
+      "validator": "pinned-conformance"
+    }
+  ],
+  "schema": 1,
+  "source": {
+    "commit": "b335c40c77f55547f23af81d6d999e2e4e3a3623",
+    "file": "packages/conformance/src/validators/envelope.ts",
+    "repository": "napplet/web",
+    "sha256": "5f842ca74fd69a63fd3f4ebb4f68a738ba689ec39af1df05562732bc74dcb2ba"
+  },
+  "unknown_message_policy": "ignore"
+}

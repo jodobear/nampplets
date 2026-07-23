@@ -1,0 +1,228 @@
+{
+  "applications": [
+    {
+      "name": "ble-demo",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "ble"
+      ],
+      "source_tree": "035f7da7e4ceafb35eee3762dbb0b66ed65dd97c",
+      "status": "not-run"
+    },
+    {
+      "name": "bot",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "inc",
+        "storage",
+        "theme"
+      ],
+      "source_tree": "ae77609686efb4c0299c23d0859dc5048e40dcc9",
+      "status": "not-run"
+    },
+    {
+      "name": "chat",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "inc",
+        "storage",
+        "relay",
+        "theme"
+      ],
+      "source_tree": "6cd9e903bbe88a450bcbe3139b27f6d036dacab7",
+      "status": "not-run"
+    },
+    {
+      "name": "common-demo",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "common"
+      ],
+      "source_tree": "e3b9224836efb73d43265b54b31e83a31f132457",
+      "status": "not-run"
+    },
+    {
+      "name": "composer",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "relay",
+        "theme"
+      ],
+      "source_tree": "32dd4b345b099848d0f2418512b24ab1cf6458f1",
+      "status": "not-run"
+    },
+    {
+      "name": "cvm-relatr",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "cvm",
+        "theme"
+      ],
+      "source_tree": "13293cebd9447194030a204595ea09ec0bcab9b8",
+      "status": "not-run"
+    },
+    {
+      "name": "feed",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "identity",
+        "relay",
+        "inc",
+        "theme"
+      ],
+      "source_tree": "8a146f7511a4fc887cecc0f29ccbf4871234bc56",
+      "status": "not-run"
+    },
+    {
+      "name": "link-demo",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "link"
+      ],
+      "source_tree": "3a92aeab2a94003b7f595cd72bfb06b8b34a720a",
+      "status": "not-run"
+    },
+    {
+      "name": "lists-demo",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "lists"
+      ],
+      "source_tree": "ef7b40d8d2528c31a05f9883747dfc7c59aaaedd",
+      "status": "not-run"
+    },
+    {
+      "name": "preferences",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "storage",
+        "theme"
+      ],
+      "source_tree": "3232c28b1a532553f9cc52694a155dcd78e9ee49",
+      "status": "not-run"
+    },
+    {
+      "name": "profile-viewer",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "inc",
+        "relay",
+        "theme"
+      ],
+      "source_tree": "beeadad9f8589d8a572f03763540666e797066d7",
+      "status": "not-run"
+    },
+    {
+      "name": "resource-demo",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "resource",
+        "theme"
+      ],
+      "source_tree": "3926e7884802c3e11f78dcfb9676dc02efcc6558",
+      "status": "not-run"
+    },
+    {
+      "name": "serial-demo",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "serial"
+      ],
+      "source_tree": "624cd649d32d0d90e4a77dfadfa2453f11eb5e31",
+      "status": "not-run"
+    },
+    {
+      "name": "toaster",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "notify",
+        "theme"
+      ],
+      "source_tree": "97ae89c3d64bb098691063baedaee701edc622e5",
+      "status": "not-run"
+    },
+    {
+      "name": "webrtc-demo",
+      "reason": {
+        "code": "offline-dependency-missing",
+        "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+      },
+      "requires": [
+        "webrtc"
+      ],
+      "source_tree": "1b0246b67622c1ab41c3df9a8f34e612e6861f74",
+      "status": "not-run"
+    }
+  ],
+  "baseline": "native-runtime-compat-v1",
+  "claim": "A build or preflight result is not a native-host boot result. No Kehto application is green unless its unchanged built bytes execute through the native host.",
+  "counts": {
+    "not-run": 15
+  },
+  "dependency_mode": "offline-frozen-lockfile",
+  "install": {
+    "reason": {
+      "code": "offline-dependency-missing",
+      "missing_tarball": "https://registry.npmjs.org/@snort/worker-relay/-/worker-relay-2.0.1.tgz"
+    },
+    "status": "not-run"
+  },
+  "limits": {
+    "build_timeout_seconds_per_application": 60,
+    "install_timeout_seconds": 120,
+    "maximum_artifact_bytes": 33554432,
+    "maximum_artifact_files": 512,
+    "maximum_process_output_bytes": 262144
+  },
+  "package_manager": "pnpm@10.8.0",
+  "schema": 1,
+  "source": {
+    "commit": "bb3929b3523b75356fd65f658f9bd14c7ff697e4",
+    "corpus_tree": "a7685ad88f0639855ce540129119aa76830153d0",
+    "exact_source_trees_verified": true,
+    "repository": "kehto/web"
+  },
+  "status": "incomplete"
+}

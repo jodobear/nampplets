@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/artifact",
+    "crates/nap-bridge",
+    "crates/nmp-adapter",
+    "crates/provider-identity",
+    "crates/providers",
+    "crates/runtime-app",
+    "crates/runtime-core",
+    "crates/runtime-ffi",
+    "crates/runtime-store",
+    "crates/surface",
+    "crates/test-harness",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+hex = "0.4.3"
+nmp = { git = "https://github.com/pablof7z/nmp.git", rev = "005dc2a5f12aa414961b313d05ebb021934e385c" }
+parking_lot = "0.12.3"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+serde = { version = "1.0.217", features = ["derive", "rc"] }
+serde_json = "1.0.138"
+sha2 = "0.10.8"
+tempfile = "3.16.0"
+thiserror = "2.0.11"
+tokio = { version = "1.43.0", features = ["macros", "rt", "sync", "time"] }
+uniffi = "0.29"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+large_futures = "warn"

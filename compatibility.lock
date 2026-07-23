@@ -1,0 +1,137 @@
+# NMP Native Runtime compatibility baseline.
+# Status remains unratified until every signoff is a real reviewer identity.
+
+[baseline]
+schema = 1
+name = "native-runtime-compat-v1"
+created_at = "2026-07-24"
+status = "unratified"
+
+[nip_5d]
+repository = "nostr-protocol/nips"
+source_branch_or_pr = "pull/2303"
+commit = "78efc118278e3ed42201eba9b60530b65835d7ed"
+document = "5D.md"
+document_sha256 = "c2cdd096b13ea68c1083aeba2d781c3eb9ded5ee8db98a6101a70b7fcb846948"
+manifest_kinds = [5129, 15129, 35129]
+
+[nap_registry]
+repository = "napplet/naps"
+commit = "6461e4b37c29dc09a20dff35d9515889c4433874"
+naps_tree = "5360afa966e7deb6ece63fc07344cf0aeeba10a9"
+web_projection_blob = "5681cdc59c775b770fd139bd97abfa80b5656e13"
+
+[napplet_packages]
+repository = "napplet/web"
+commit = "b335c40c77f55547f23af81d6d999e2e4e3a3623"
+core = "0.28.0"
+shim = "0.26.8"
+sdk = "0.24.4"
+nap = "0.28.0"
+conformance = "0.13.0"
+
+[napplet_packages.source_trees]
+core = "1ac54b70b5e8ced1109ce1b81a434677d4d3b38d"
+shim = "83ed07c1f077b005d34343b731cfb81ad82a0573"
+sdk = "2a8c7eac2aae8d775753f803ff14f330be52d295"
+nap = "af54481d3dea57f31d5c00cf31e473888773213e"
+conformance = "d815c6b2ada31f04157f02beae197d1214ebbc49"
+
+[napplet_packages.npm_sha256]
+core = "812d92f5f1f926e952c5a59cdcd1b2a45bf0356e9b025b3666a5ec30df68429a"
+shim = "1c0ed94a2164776721b4755156d81581280a0d99716dbdcc2300b171f9764e46"
+sdk = "2fcf5cafe8d65b3d204d8b885eb77da4f3e4efcff86be5fe8361ed4006d9ca2c"
+nap = "ff51a33cd35e06b5067b09407fb3e381c6bfe4ef229ce8c082b3beb156ebd5b6"
+conformance = "d26d943ee5423e7d3234ad4929605667d407ee06b804038e5175022be3f5df8b"
+
+[kehto]
+repository = "kehto/web"
+commit = "bb3929b3523b75356fd65f658f9bd14c7ff697e4"
+corpus_path = "apps/playground/napplets"
+playground_tree = "27f3eec83a89539d89e96208bf5c7e421b56dcd4"
+corpus_tree = "a7685ad88f0639855ce540129119aa76830153d0"
+
+[nmp]
+repository = "pablof7z/nmp"
+commit = "005dc2a5f12aa414961b313d05ebb021934e385c"
+version = "0.1.0"
+rust_facade_sha256 = "f9d1fdef284cef1a34c322f13304042f1ee43a00ab5f55bcdadb31505ced6103"
+ffi_component_sha256 = "444885846d6238cb82c67376eb62a3851ae763b3f68f4ee43345ddae64820f4c"
+public_surface_snapshot = "sha256:78baf6f5879df72fbcd75e80689725193a3ce3a7fced559b9ffccec92d3de2be"
+
+[artifacts]
+accepted_modes = ["single-file", "external-assets"]
+requires_verified_index = true
+requires_per_path_sha256 = true
+requires_aggregate_verification = true
+remote_navigation = false
+
+[web_projection]
+sandbox_tokens = ["allow-scripts"]
+forbid_allow_same_origin = true
+require_srcdoc = true
+require_source_window_binding = true
+forbid_window_nostr = true
+unknown_message_policy = "ignore"
+
+[domain_versions]
+relay = "napplet-web@0.28.0"
+identity = "napplet-web@0.28.0"
+storage = "napplet-web@0.28.0"
+inc = "napplet-web@0.28.0"
+theme = "napplet-web@0.28.0"
+keys = "napplet-web@0.28.0"
+media = "napplet-web@0.28.0"
+notify = "napplet-web@0.28.0"
+config = "napplet-web@0.28.0"
+resource = "napplet-web@0.28.0"
+cvm = "napplet-web@0.28.0"
+outbox = "napplet-web@0.28.0"
+upload = "napplet-web@0.28.0"
+intent = "napplet-web@0.28.0"
+ble = "napplet-web@0.28.0"
+webrtc = "napplet-web@0.28.0"
+link = "napplet-web@0.28.0"
+count = "napplet-web@0.28.0"
+lists = "napplet-web@0.28.0"
+serial = "napplet-web@0.28.0"
+common = "napplet-web@0.28.0"
+dm = "napplet-web@0.28.0"
+shell_handshake = "NAP-SHELL@6461e4b37c29"
+
+# M0 advertises no executable provider. Domains move to supported only after
+# their platform implementation passes the pinned contract suite.
+[platform.macos]
+supported_domains = []
+unsupported_domains = [
+  "relay", "identity", "storage", "inc", "theme", "keys", "media",
+  "notify", "config", "resource", "cvm", "outbox", "upload", "intent",
+  "ble", "webrtc", "link", "count", "lists", "serial", "common", "dm",
+]
+
+[platform.ios]
+supported_domains = []
+unsupported_domains = [
+  "relay", "identity", "storage", "inc", "theme", "keys", "media",
+  "notify", "config", "resource", "cvm", "outbox", "upload", "intent",
+  "ble", "webrtc", "link", "count", "lists", "serial", "common", "dm",
+]
+
+[platform.android]
+supported_domains = []
+unsupported_domains = [
+  "relay", "identity", "storage", "inc", "theme", "keys", "media",
+  "notify", "config", "resource", "cvm", "outbox", "upload", "intent",
+  "ble", "webrtc", "link", "count", "lists", "serial", "common", "dm",
+]
+
+[corpus]
+reference_fixture_digest = "5013983282a03741305b2f9740e2268ea6c038843b6e2214b0f34cbd611fd70a"
+kehto_fixture_digest = "ea51178f523a911615ab84a0083d464aa729322384eda3ee35cffc09bbd506b2"
+published_fixture_digest = "4bbd1218609000deaa273ef43c232211a90515c481dbd1929c40536c1e44e466"
+
+[signoff]
+product_owner = ""
+compatibility_reviewer = ""
+security_reviewer = ""
+nmp_boundary_reviewer = ""

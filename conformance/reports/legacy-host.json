@@ -1,0 +1,751 @@
+{
+  "baseline": "native-runtime-compat-v1",
+  "baseline_status": "unratified",
+  "claim": "This report does not claim M2 compatibility while any fixture fails, is not run, or the registry-only shell handshake is absent.",
+  "classification_findings": [
+    {
+      "code": "reference-probe-rejected-by-pinned-wire-validator",
+      "effect": "These fixtures prove host edge behavior but cannot be called accepted conformant napplets without changing their emitted probe envelopes or classifying them as negative probes.",
+      "fixtures": [
+        "external-assets",
+        "prelude-order",
+        "unknown-message"
+      ]
+    }
+  ],
+  "domain_contract": {
+    "macos_advertised_domains": [],
+    "package_active_domains": [
+      "ble",
+      "common",
+      "config",
+      "count",
+      "cvm",
+      "dm",
+      "identity",
+      "inc",
+      "intent",
+      "keys",
+      "link",
+      "lists",
+      "media",
+      "notify",
+      "outbox",
+      "relay",
+      "resource",
+      "serial",
+      "storage",
+      "theme",
+      "upload",
+      "webrtc"
+    ],
+    "registry_only_shell_handshake": {
+      "authoritative_supports_for_all_executed_fixtures": true,
+      "authority": "registry-only",
+      "init_exactly_once_for_all_executed_fixtures": true,
+      "observed_by_all_executed_fixtures": true,
+      "reason": null,
+      "status": "pass",
+      "types": [
+        "shell.ready",
+        "shell.init"
+      ]
+    }
+  },
+  "fixtures": [
+    {
+      "artifact_mode": "external-assets",
+      "bytes_unchanged": true,
+      "corpus": "reference",
+      "host": {
+        "assertions": {
+          "external_asset_module_executed": false,
+          "mounted": true,
+          "package_domains_not_advertised": true,
+          "prelude_before_authored_scripts": true,
+          "registry_shell_handshake_observed": true,
+          "registry_shell_init_exactly_once": true,
+          "registry_shell_supports_authoritative": true,
+          "sandbox_allow_scripts_only": true,
+          "window_nostr_absent": true
+        },
+        "conformance": {
+          "package": "@napplet/conformance",
+          "run": {
+            "checks": [
+              {
+                "area": "manifest",
+                "detail": "No NIP-5D manifest event was resolved",
+                "id": "manifest/event-kind",
+                "severity": "error",
+                "status": "skip",
+                "title": "Resolved event is a NIP-5D napplet manifest"
+              },
+              {
+                "area": "manifest",
+                "detail": "No NIP-5D manifest event was resolved",
+                "id": "manifest/index-html",
+                "severity": "error",
+                "status": "skip",
+                "title": "Manifest declares a hashed /index.html"
+              },
+              {
+                "area": "manifest",
+                "detail": "No NIP-5D manifest event was resolved",
+                "id": "manifest/requires",
+                "severity": "error",
+                "status": "skip",
+                "title": "requires tags are bare known NAP domains"
+              },
+              {
+                "area": "boot",
+                "id": "boot/sandbox-allow-scripts",
+                "severity": "error",
+                "status": "pass",
+                "title": "Runs under allow-scripts without allow-same-origin"
+              },
+              {
+                "area": "boot",
+                "id": "boot/installs-global",
+                "severity": "error",
+                "status": "pass",
+                "title": "Runs after runtime-injected window.napplet is installed"
+              },
+              {
+                "area": "boot",
+                "id": "boot/no-boot-error",
+                "severity": "error",
+                "status": "pass",
+                "title": "Boots without an uncaught error"
+              },
+              {
+                "area": "boot",
+                "id": "boot/no-forbidden-globals",
+                "severity": "error",
+                "status": "pass",
+                "title": "Does not access forbidden browser authority surfaces"
+              },
+              {
+                "area": "wire",
+                "detail": "1/1 emitted envelope(s) invalid",
+                "diagnostics": [
+                  {
+                    "envelope": {
+                      "type": "shell.ready"
+                    },
+                    "errors": [
+                      {
+                        "code": "unknown-domain",
+                        "message": "\"shell\" is not a known NAP domain"
+                      }
+                    ]
+                  }
+                ],
+                "id": "wire/envelope-well-formed",
+                "severity": "error",
+                "status": "fail",
+                "title": "Every emitted envelope is well-formed"
+              },
+              {
+                "area": "degradation",
+                "id": "degrade/domain-absence",
+                "severity": "error",
+                "status": "pass",
+                "title": "Does not crash when no NAP domains are injected"
+              },
+              {
+                "area": "lifecycle",
+                "detail": "Lifecycle not measured",
+                "id": "lifecycle/clean-teardown",
+                "severity": "warning",
+                "status": "skip",
+                "title": "Tears down listeners on unload"
+              }
+            ],
+            "finishedAt": 1,
+            "ok": false,
+            "startedAt": 0,
+            "summary": {
+              "errors": 1,
+              "failed": 1,
+              "passed": 5,
+              "skipped": 4,
+              "total": 10,
+              "warnings": 0
+            }
+          },
+          "status": "fail",
+          "version": "0.13.0"
+        },
+        "emitted": [
+          {
+            "type": "shell.ready"
+          }
+        ],
+        "execution_observed": true,
+        "observed_domains": [
+          "shell"
+        ],
+        "page_errors": [],
+        "pre_execution_refusal": false,
+        "reason": "chromium-harness-cannot-register-the-native-nmp-artifact-url-scheme",
+        "status": "not-run"
+      },
+      "missing_required_domains": [],
+      "name": "external-assets",
+      "requires": [],
+      "verified_committed_bytes": {
+        "/index.html": true,
+        "/main.js": true,
+        "/style.css": true
+      }
+    },
+    {
+      "artifact_mode": "single-file",
+      "bytes_unchanged": true,
+      "corpus": "reference",
+      "host": {
+        "assertions": {
+          "fixture_not_mounted": true,
+          "no_envelope_emitted": true
+        },
+        "conformance": {
+          "reason": "manifest-requires-preflight-refused",
+          "status": "not-run"
+        },
+        "emitted": [],
+        "execution_observed": false,
+        "page_errors": [],
+        "pre_execution_refusal": true,
+        "status": "pass"
+      },
+      "missing_required_domains": [
+        "ble"
+      ],
+      "name": "missing-domain",
+      "requires": [
+        "ble"
+      ],
+      "verified_committed_bytes": {
+        "/index.html": true
+      }
+    },
+    {
+      "artifact_mode": "single-file",
+      "bytes_unchanged": true,
+      "corpus": "reference",
+      "host": {
+        "assertions": {
+          "first_authored_script_observed_prelude": true,
+          "mounted": true,
+          "package_domains_not_advertised": true,
+          "prelude_before_authored_scripts": true,
+          "registry_shell_handshake_observed": true,
+          "registry_shell_init_exactly_once": true,
+          "registry_shell_supports_authoritative": true,
+          "sandbox_allow_scripts_only": true,
+          "window_nostr_absent": true
+        },
+        "conformance": {
+          "package": "@napplet/conformance",
+          "run": {
+            "checks": [
+              {
+                "area": "manifest",
+                "detail": "No NIP-5D manifest event was resolved",
+                "id": "manifest/event-kind",
+                "severity": "error",
+                "status": "skip",
+                "title": "Resolved event is a NIP-5D napplet manifest"
+              },
+              {
+                "area": "manifest",
+                "detail": "No NIP-5D manifest event was resolved",
+                "id": "manifest/index-html",
+                "severity": "error",
+                "status": "skip",
+                "title": "Manifest declares a hashed /index.html"
+              },
+              {
+                "area": "manifest",
+                "detail": "No NIP-5D manifest event was resolved",
+                "id": "manifest/requires",
+                "severity": "error",
+                "status": "skip",
+                "title": "requires tags are bare known NAP domains"
+              },
+              {
+                "area": "boot",
+                "id": "boot/sandbox-allow-scripts",
+                "severity": "error",
+                "status": "pass",
+                "title": "Runs under allow-scripts without allow-same-origin"
+              },
+              {
+                "area": "boot",
+                "id": "boot/installs-global",
+                "severity": "error",
+                "status": "pass",
+                "title": "Runs after runtime-injected window.napplet is installed"
+              },
+              {
+                "area": "boot",
+                "id": "boot/no-boot-error",
+                "severity": "error",
+                "status": "pass",
+                "title": "Boots without an uncaught error"
+              },
+              {
+                "area": "boot",
+                "id": "boot/no-forbidden-globals",
+                "severity": "error",
+                "status": "pass",
+                "title": "Does not access forbidden browser authority surfaces"
+              },
+              {
+                "area": "wire",
+                "detail": "2/2 emitted envelope(s) invalid",
+                "diagnostics": [
+                  {
+                    "envelope": {
+                      "type": "shell.ready"
+                    },
+                    "errors": [
+                      {
+                        "code": "unknown-domain",
+                        "message": "\"shell\" is not a known NAP domain"
+                      }
+                    ]
+                  },
+                  {
+                    "envelope": {
+                      "nappletPresent": true,
+                      "nostrAbsent": true,
+                      "type": "conformance.prelude-observed"
+                    },
+                    "errors": [
+                      {
+                        "code": "unknown-domain",
+                        "message": "\"conformance\" is not a known NAP domain"
+                      }
+                    ]
+                  }
+                ],
+                "id": "wire/envelope-well-formed",
+                "severity": "error",
+                "status": "fail",
+                "title": "Every emitted envelope is well-formed"
+              },
+              {
+                "area": "degradation",
+                "id": "degrade/domain-absence",
+                "severity": "error",
+                "status": "pass",
+                "title": "Does not crash when no NAP domains are injected"
+              },
+              {
+                "area": "lifecycle",
+                "detail": "Lifecycle not measured",
+                "id": "lifecycle/clean-teardown",
+                "severity": "warning",
+                "status": "skip",
+                "title": "Tears down listeners on unload"
+              }
+            ],
+            "finishedAt": 1,
+            "ok": false,
+            "startedAt": 0,
+            "summary": {
+              "errors": 1,
+              "failed": 1,
+              "passed": 5,
+              "skipped": 4,
+              "total": 10,
+              "warnings": 0
+            }
+          },
+          "status": "fail",
+          "version": "0.13.0"
+        },
+        "emitted": [
+          {
+            "type": "shell.ready"
+          },
+          {
+            "nappletPresent": true,
+            "nostrAbsent": true,
+            "type": "conformance.prelude-observed"
+          }
+        ],
+        "execution_observed": true,
+        "observed_domains": [
+          "shell"
+        ],
+        "page_errors": [],
+        "pre_execution_refusal": false,
+        "reason": null,
+        "status": "pass"
+      },
+      "missing_required_domains": [],
+      "name": "prelude-order",
+      "requires": [],
+      "verified_committed_bytes": {
+        "/index.html": true
+      }
+    },
+    {
+      "artifact_mode": "single-file",
+      "bytes_unchanged": true,
+      "corpus": "reference",
+      "host": {
+        "assertions": {
+          "mounted": true,
+          "package_domains_not_advertised": true,
+          "prelude_before_authored_scripts": true,
+          "registry_shell_handshake_observed": true,
+          "registry_shell_init_exactly_once": true,
+          "registry_shell_supports_authoritative": true,
+          "sandbox_allow_scripts_only": true,
+          "unknown_message_did_not_abort_session": true,
+          "window_nostr_absent": true
+        },
+        "conformance": {
+          "package": "@napplet/conformance",
+          "run": {
+            "checks": [
+              {
+                "area": "manifest",
+                "detail": "No NIP-5D manifest event was resolved",
+                "id": "manifest/event-kind",
+                "severity": "error",
+                "status": "skip",
+                "title": "Resolved event is a NIP-5D napplet manifest"
+              },
+              {
+                "area": "manifest",
+                "detail": "No NIP-5D manifest event was resolved",
+                "id": "manifest/index-html",
+                "severity": "error",
+                "status": "skip",
+                "title": "Manifest declares a hashed /index.html"
+              },
+              {
+                "area": "manifest",
+                "detail": "No NIP-5D manifest event was resolved",
+                "id": "manifest/requires",
+                "severity": "error",
+                "status": "skip",
+                "title": "requires tags are bare known NAP domains"
+              },
+              {
+                "area": "boot",
+                "id": "boot/sandbox-allow-scripts",
+                "severity": "error",
+                "status": "pass",
+                "title": "Runs under allow-scripts without allow-same-origin"
+              },
+              {
+                "area": "boot",
+                "id": "boot/installs-global",
+                "severity": "error",
+                "status": "pass",
+                "title": "Runs after runtime-injected window.napplet is installed"
+              },
+              {
+                "area": "boot",
+                "id": "boot/no-boot-error",
+                "severity": "error",
+                "status": "pass",
+                "title": "Boots without an uncaught error"
+              },
+              {
+                "area": "boot",
+                "id": "boot/no-forbidden-globals",
+                "severity": "error",
+                "status": "pass",
+                "title": "Does not access forbidden browser authority surfaces"
+              },
+              {
+                "area": "wire",
+                "detail": "2/3 emitted envelope(s) invalid",
+                "diagnostics": [
+                  {
+                    "envelope": {
+                      "type": "shell.ready"
+                    },
+                    "errors": [
+                      {
+                        "code": "unknown-domain",
+                        "message": "\"shell\" is not a known NAP domain"
+                      }
+                    ]
+                  },
+                  {
+                    "envelope": {
+                      "type": "future-domain.operation",
+                      "value": 1
+                    },
+                    "errors": [
+                      {
+                        "code": "unknown-domain",
+                        "message": "\"future-domain\" is not a known NAP domain"
+                      }
+                    ]
+                  }
+                ],
+                "id": "wire/envelope-well-formed",
+                "severity": "error",
+                "status": "fail",
+                "title": "Every emitted envelope is well-formed"
+              },
+              {
+                "area": "degradation",
+                "id": "degrade/domain-absence",
+                "severity": "error",
+                "status": "pass",
+                "title": "Does not crash when no NAP domains are injected"
+              },
+              {
+                "area": "lifecycle",
+                "detail": "Lifecycle not measured",
+                "id": "lifecycle/clean-teardown",
+                "severity": "warning",
+                "status": "skip",
+                "title": "Tears down listeners on unload"
+              }
+            ],
+            "finishedAt": 1,
+            "ok": false,
+            "startedAt": 0,
+            "summary": {
+              "errors": 1,
+              "failed": 1,
+              "passed": 5,
+              "skipped": 4,
+              "total": 10,
+              "warnings": 0
+            }
+          },
+          "status": "fail",
+          "version": "0.13.0"
+        },
+        "emitted": [
+          {
+            "type": "shell.ready"
+          },
+          {
+            "type": "future-domain.operation",
+            "value": 1
+          },
+          {
+            "id": "still-healthy",
+            "type": "theme.get"
+          }
+        ],
+        "execution_observed": true,
+        "observed_domains": [
+          "shell"
+        ],
+        "page_errors": [],
+        "pre_execution_refusal": false,
+        "reason": null,
+        "status": "pass"
+      },
+      "missing_required_domains": [],
+      "name": "unknown-message",
+      "requires": [],
+      "verified_committed_bytes": {
+        "/index.html": true
+      }
+    },
+    {
+      "artifact_mode": "single-file",
+      "bytes_unchanged": true,
+      "corpus": "published",
+      "host": {
+        "assertions": {
+          "graceful_capability_absence_visible": true,
+          "mounted": true,
+          "package_domains_not_advertised": true,
+          "prelude_before_authored_scripts": true,
+          "registry_shell_handshake_observed": true,
+          "registry_shell_init_exactly_once": true,
+          "registry_shell_supports_authoritative": true,
+          "sandbox_allow_scripts_only": true,
+          "window_nostr_absent": true
+        },
+        "conformance": {
+          "package": "@napplet/conformance",
+          "run": {
+            "checks": [
+              {
+                "area": "manifest",
+                "id": "manifest/event-kind",
+                "severity": "error",
+                "status": "pass",
+                "title": "Resolved event is a NIP-5D napplet manifest"
+              },
+              {
+                "area": "manifest",
+                "id": "manifest/index-html",
+                "severity": "error",
+                "status": "pass",
+                "title": "Manifest declares a hashed /index.html"
+              },
+              {
+                "area": "manifest",
+                "id": "manifest/requires",
+                "severity": "error",
+                "status": "pass",
+                "title": "requires tags are bare known NAP domains"
+              },
+              {
+                "area": "boot",
+                "id": "boot/sandbox-allow-scripts",
+                "severity": "error",
+                "status": "pass",
+                "title": "Runs under allow-scripts without allow-same-origin"
+              },
+              {
+                "area": "boot",
+                "id": "boot/installs-global",
+                "severity": "error",
+                "status": "pass",
+                "title": "Runs after runtime-injected window.napplet is installed"
+              },
+              {
+                "area": "boot",
+                "id": "boot/no-boot-error",
+                "severity": "error",
+                "status": "pass",
+                "title": "Boots without an uncaught error"
+              },
+              {
+                "area": "boot",
+                "id": "boot/no-forbidden-globals",
+                "severity": "error",
+                "status": "pass",
+                "title": "Does not access forbidden browser authority surfaces"
+              },
+              {
+                "area": "wire",
+                "detail": "1/1 emitted envelope(s) invalid",
+                "diagnostics": [
+                  {
+                    "envelope": {
+                      "type": "shell.ready"
+                    },
+                    "errors": [
+                      {
+                        "code": "unknown-domain",
+                        "message": "\"shell\" is not a known NAP domain"
+                      }
+                    ]
+                  }
+                ],
+                "id": "wire/envelope-well-formed",
+                "severity": "error",
+                "status": "fail",
+                "title": "Every emitted envelope is well-formed"
+              },
+              {
+                "area": "degradation",
+                "id": "degrade/domain-absence",
+                "severity": "error",
+                "status": "pass",
+                "title": "Does not crash when no NAP domains are injected"
+              },
+              {
+                "area": "lifecycle",
+                "detail": "Lifecycle not measured",
+                "id": "lifecycle/clean-teardown",
+                "severity": "warning",
+                "status": "skip",
+                "title": "Tears down listeners on unload"
+              }
+            ],
+            "finishedAt": 1,
+            "napplet": "good-morning",
+            "ok": false,
+            "startedAt": 0,
+            "summary": {
+              "errors": 1,
+              "failed": 1,
+              "passed": 8,
+              "skipped": 1,
+              "total": 10,
+              "warnings": 0
+            }
+          },
+          "status": "fail",
+          "version": "0.13.0"
+        },
+        "emitted": [
+          {
+            "type": "shell.ready"
+          }
+        ],
+        "execution_observed": true,
+        "observed_domains": [
+          "shell"
+        ],
+        "page_errors": [],
+        "pre_execution_refusal": false,
+        "reason": null,
+        "status": "pass"
+      },
+      "missing_required_domains": [],
+      "name": "good-morning",
+      "requires": [],
+      "verified_committed_bytes": {
+        "/index.html": true
+      }
+    }
+  ],
+  "limits": {
+    "browser_timeout_ms": 10000,
+    "maximum_captured_envelopes": 256,
+    "maximum_fixture_or_package_bytes": 8388608,
+    "maximum_process_output_bytes": 262144,
+    "process_timeout_seconds": 30
+  },
+  "schema": 1,
+  "sources": {
+    "conformance_package": {
+      "name": "@napplet/conformance",
+      "npm_sha256": "d26d943ee5423e7d3234ad4929605667d407ee06b804038e5175022be3f5df8b",
+      "version": "0.13.0"
+    },
+    "kehto_commit": "bb3929b3523b75356fd65f658f9bd14c7ff697e4",
+    "napplet_web_commit": "b335c40c77f55547f23af81d6d999e2e4e3a3623",
+    "package_dependency_archives": {
+      "@napplet/core": {
+        "npm_sha256": "812d92f5f1f926e952c5a59cdcd1b2a45bf0356e9b025b3666a5ec30df68429a",
+        "version": "0.28.0"
+      },
+      "@napplet/nap": {
+        "npm_sha256": "ff51a33cd35e06b5067b09407fb3e381c6bfe4ef229ce8c082b3beb156ebd5b6",
+        "version": "0.28.0"
+      }
+    },
+    "trusted_shell_sha256": {
+      "trusted-shell-policy.js": "d130c02862f8934caba77bfaca4a72cc2f94158daecfaf888830c0807e2352c4",
+      "trusted-shell.css": "28ff9d810763208c5ee6acf9ec31950c7f3a5bcc02ba7156fdcf4acc74a2aa4c",
+      "trusted-shell.html": "f9b64b0ddae5e01aaaeafebf4387de4c7e2dc911007955caa21c3838b68fdc0a",
+      "trusted-shell.js": "bc0624f1828a9b14e296254604d81bfdca0c8eac6abffcecc1c61cc537c0e5ca"
+    }
+  },
+  "status": "incomplete",
+  "summary": {
+    "host": {
+      "fail": 0,
+      "not-run": 1,
+      "pass": 4
+    },
+    "pinned_conformance_engine": {
+      "fail": 4,
+      "not-run": 1,
+      "pass": 0
+    }
+  }
+}

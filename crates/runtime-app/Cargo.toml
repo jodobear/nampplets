@@ -1,0 +1,25 @@
+[package]
+name = "nmp-native-runtime-app"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+nmp-native-artifact = { path = "../artifact" }
+nmp-native-nap-bridge = { path = "../nap-bridge" }
+nmp-native-providers = { path = "../providers" }
+nmp-native-runtime-core = { path = "../runtime-core" }
+nmp-native-runtime-store = { path = "../runtime-store" }
+nmp-native-surface = { path = "../surface" }
+parking_lot.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+nmp-native-test-harness = { path = "../test-harness" }
+tempfile.workspace = true
+
+[lints]
+workspace = true

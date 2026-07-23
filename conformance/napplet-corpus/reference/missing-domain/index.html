@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Must not execute without BLE</title>
+  <script>
+    window.parent.postMessage({ type: "conformance.forbidden-execution" }, "*");
+  </script>
+</head>
+<body>This artifact requires BLE and must be rejected before execution.</body>
+</html>

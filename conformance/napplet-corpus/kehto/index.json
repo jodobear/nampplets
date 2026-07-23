@@ -1,0 +1,549 @@
+{
+  "applications": [
+    {
+      "files": [
+        {
+          "git_blob": "1581d9556dab0abcad24a75faafc97dc1dcabf85",
+          "path": "index.html",
+          "sha256": "e9bfe31fb94228bac49fd34d0a17f438afa5dce8967f53d77f67fce1abe85c38"
+        },
+        {
+          "git_blob": "8d348313b117859a009ca069fe64ca7ff94645c9",
+          "path": "package.json",
+          "sha256": "0bb89670c8742862b840db97ed02ea7e159639ff82a1f9f48fba8c2e5f3ede50"
+        },
+        {
+          "git_blob": "a2281ee158469247e12cce362ac14c79568e469d",
+          "path": "src/main.ts",
+          "sha256": "a6c1d5f3faf1c83d92fa5166bea793e7e4a5f205240858757e93bca86fa74b3d"
+        },
+        {
+          "git_blob": "9ea34dadf4b10044576c295f9ad1f0fab762bb4a",
+          "path": "tsconfig.json",
+          "sha256": "51f3a479d07b6aacfebf3b6df573d2502b8edfd62e489ecbc653806c3e692bb4"
+        },
+        {
+          "git_blob": "222febef956f7b37ba11ec1fa4f05947ebd0c107",
+          "path": "vite.config.ts",
+          "sha256": "1d3d92fbc4e5e40be9de5d724f67891337a2e4f65eeae3759dd7bfe1a2b08446"
+        }
+      ],
+      "git_tree": "035f7da7e4ceafb35eee3762dbb0b66ed65dd97c",
+      "name": "ble-demo",
+      "requires": [
+        "ble"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "a0e41e634a1a7dd96023d4d1449b4d830bdbea1c",
+          "path": "index.html",
+          "sha256": "694fc11ddb21aa0a7de5d5422325ae4980e3562f19d40104ae784816297f532a"
+        },
+        {
+          "git_blob": "38fb90149f495525cfe39df5a66124ebf87aba97",
+          "path": "package.json",
+          "sha256": "55e9152cbae90a92d695e4395ce0ecb357987b7a50ead24a410cf6b12d62fe6b"
+        },
+        {
+          "git_blob": "28f777cc2e74f0e989a50edf3d079f569a4b5dc5",
+          "path": "src/main.ts",
+          "sha256": "1d037c6b131d11b64df18c5abce65d340df145222b279a8014d74a3237959307"
+        },
+        {
+          "git_blob": "9fe893581685e4e9229920eb0369bd26b386604b",
+          "path": "tsconfig.json",
+          "sha256": "5df24314ca6bf17f3dc579a4897735fc6b7f622e15ea96f5f4f15f95f98abae9"
+        },
+        {
+          "git_blob": "018edbad0fc63d1ad0c95a40bf6b8fc396a2939d",
+          "path": "vite.config.ts",
+          "sha256": "3f4617f0ebf4c1ca5a24d511b5b6f08c63599e31c146515365f341973727e917"
+        }
+      ],
+      "git_tree": "ae77609686efb4c0299c23d0859dc5048e40dcc9",
+      "name": "bot",
+      "requires": [
+        "inc",
+        "storage",
+        "theme"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "da53110fe86a9cb1346821cf39feee20b535bc3f",
+          "path": "index.html",
+          "sha256": "93eab81b7f6b3e10c0c3eb559cdb03ebb55b1083cc4b33dccf61efe679b98db0"
+        },
+        {
+          "git_blob": "c62a92b32aacc8718c43b3372148b0069675f665",
+          "path": "package.json",
+          "sha256": "dd028254b5c19e687a99de5a0ea101676aae100bc034ba633ff1168e17a5e387"
+        },
+        {
+          "git_blob": "046ae664f666a95cec6389056e7ebc5605cf18c8",
+          "path": "src/main.ts",
+          "sha256": "1d96c1f434deeac2582cbb618e106ffc8a8b07f067a63ac599bb9bfb7e63d092"
+        },
+        {
+          "git_blob": "9fe893581685e4e9229920eb0369bd26b386604b",
+          "path": "tsconfig.json",
+          "sha256": "5df24314ca6bf17f3dc579a4897735fc6b7f622e15ea96f5f4f15f95f98abae9"
+        },
+        {
+          "git_blob": "4b15b298118782e461b347665056a2ce6ac6aa15",
+          "path": "vite.config.ts",
+          "sha256": "a45b1294313d8159ddb69194da6f8ebfac7e141ecdfad8b5feb734b23e54b85e"
+        }
+      ],
+      "git_tree": "6cd9e903bbe88a450bcbe3139b27f6d036dacab7",
+      "name": "chat",
+      "requires": [
+        "inc",
+        "storage",
+        "relay",
+        "theme"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "2ed80a9ab32c2df9ac5ca76a5bb3332379de2ffe",
+          "path": "index.html",
+          "sha256": "631cad3adbc2d534bcfb924c0d5321817bcc2fa526159ccf611ec55cce5073bb"
+        },
+        {
+          "git_blob": "a8c46b9944f278a33bd6ff6ec5927d548919f074",
+          "path": "package.json",
+          "sha256": "c63a8ef2d1dcf9d751d07f47319da3ef04a0175f63313bde50b8fef46eed697e"
+        },
+        {
+          "git_blob": "90562525ae66be3861e38c9d88577e28c87f6206",
+          "path": "src/main.ts",
+          "sha256": "8cd900f3cede3179b31b08eb448cca31783369860a1a12ad2c4705673244363f"
+        },
+        {
+          "git_blob": "9ea34dadf4b10044576c295f9ad1f0fab762bb4a",
+          "path": "tsconfig.json",
+          "sha256": "51f3a479d07b6aacfebf3b6df573d2502b8edfd62e489ecbc653806c3e692bb4"
+        },
+        {
+          "git_blob": "875cf580d6793f787e1561dc465998fd0ed5f2b8",
+          "path": "vite.config.ts",
+          "sha256": "1a02ec517719b8970c8df86820e78c0b5ba2b6d25257bbe7722537bd4822d0e6"
+        }
+      ],
+      "git_tree": "e3b9224836efb73d43265b54b31e83a31f132457",
+      "name": "common-demo",
+      "requires": [
+        "common"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "97bd7fce7f4498b48d29ca6e5cf9c3eecbf181b7",
+          "path": "index.html",
+          "sha256": "0c2cc7ae48eb24952a0327d4f1b4dfb8563094476da3debd7e980b70cbe87146"
+        },
+        {
+          "git_blob": "357c346b4e1d58b970af8135a620b2af73e8f000",
+          "path": "package.json",
+          "sha256": "1f2e4096a7a15de279c72ea32c8c53202e99fcabd43d58a40ed48ff459ef2781"
+        },
+        {
+          "git_blob": "b769afea9767ba608426c5f8f2d4d1e5ccc3c670",
+          "path": "src/main.ts",
+          "sha256": "1f7885d988e4119791ba7240ee0fb49f2a82bf0e4bd5cb09c4dded42c0ec0881"
+        },
+        {
+          "git_blob": "9fe893581685e4e9229920eb0369bd26b386604b",
+          "path": "tsconfig.json",
+          "sha256": "5df24314ca6bf17f3dc579a4897735fc6b7f622e15ea96f5f4f15f95f98abae9"
+        },
+        {
+          "git_blob": "bccc018200597a287ce52d6288d2133bb24418c1",
+          "path": "vite.config.ts",
+          "sha256": "c4665dcfac24bfce7a17e5b038cad440d52bb0bd92d35e32f298d4a7cdd89a7a"
+        }
+      ],
+      "git_tree": "32dd4b345b099848d0f2418512b24ab1cf6458f1",
+      "name": "composer",
+      "requires": [
+        "relay",
+        "theme"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "555fec16b0158e010feda8061aa6e831fd58df9c",
+          "path": "index.html",
+          "sha256": "31d2b3af51edf86778ba39b60880f279c68eeb328f81f58644df0d2443146400"
+        },
+        {
+          "git_blob": "0d27301ce11fe9f4a0b11baf890710307300dbda",
+          "path": "package.json",
+          "sha256": "90ebc6282dce6ec500c5e406f72cea9b12d5fc08762c952664514981b115ba5e"
+        },
+        {
+          "git_blob": "8142827d88eb72bf1bacb64570923fd5dc8b9058",
+          "path": "src/main.ts",
+          "sha256": "5a36f43c1bfd0d57123b0d3e2af3737a1bb2ee7c8e1f2e22e40674f479401466"
+        },
+        {
+          "git_blob": "9fe893581685e4e9229920eb0369bd26b386604b",
+          "path": "tsconfig.json",
+          "sha256": "5df24314ca6bf17f3dc579a4897735fc6b7f622e15ea96f5f4f15f95f98abae9"
+        },
+        {
+          "git_blob": "5d74ddf95815da234399be17fdd75d26a1b48c14",
+          "path": "vite.config.ts",
+          "sha256": "e3c1c9b56445d64c890f04dfda629575b013ead48b77e1220500ed57c2f71aa0"
+        }
+      ],
+      "git_tree": "13293cebd9447194030a204595ea09ec0bcab9b8",
+      "name": "cvm-relatr",
+      "requires": [
+        "cvm",
+        "theme"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "cb9736c1c72a4b795ccd66677ce25d0a841270c7",
+          "path": "index.html",
+          "sha256": "dab004bcfe0ee42a4da354aa251296f02a3ec8ae3d92a5f4118ee7ba055f5e58"
+        },
+        {
+          "git_blob": "6808f7ea8611ffdaf421e12df1d119a9cea8f7a5",
+          "path": "package.json",
+          "sha256": "6f7f88be08da38cf1017afd90ed467132ea79ab6a85b931cc577bca3a2cd9543"
+        },
+        {
+          "git_blob": "14a82869c380a2dfb3701cbce054bd1fe7735353",
+          "path": "src/feed-identity-events.ts",
+          "sha256": "c3e4cdbc80fd27f0b911f740b920f834cf7ab63c600348ebd1ad60cbd731a6e9"
+        },
+        {
+          "git_blob": "332afc8793e3f37662b755cea34fddaa11a85bb8",
+          "path": "src/feed-store.ts",
+          "sha256": "2cb4ee509d569862d0da4cbd8845d6a538af22daf91bccb32d841b6fda1db12d"
+        },
+        {
+          "git_blob": "e4c407ab933acb2cca6bca889ea67804a86eb696",
+          "path": "src/main.ts",
+          "sha256": "ad23dabd486750c30de1f16b31c0773bbaaa96c53f6ccc5d081eab7e69b0166d"
+        },
+        {
+          "git_blob": "9fe893581685e4e9229920eb0369bd26b386604b",
+          "path": "tsconfig.json",
+          "sha256": "5df24314ca6bf17f3dc579a4897735fc6b7f622e15ea96f5f4f15f95f98abae9"
+        },
+        {
+          "git_blob": "d6911b547ae493136b61a63b065a20ac264f55a0",
+          "path": "vite.config.ts",
+          "sha256": "acc212e8fa811af5dadb7149f7a271ba9675a600ee412dcf8ac515a7c235fce3"
+        }
+      ],
+      "git_tree": "8a146f7511a4fc887cecc0f29ccbf4871234bc56",
+      "name": "feed",
+      "requires": [
+        "identity",
+        "relay",
+        "inc",
+        "theme"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "5f1f514ceb60bb98973252019fb869bfc4e6aaf3",
+          "path": "index.html",
+          "sha256": "3120f60f7655db645da1f2bbb02082c497f03bac242e9cd30b1adf1c6e6ffb10"
+        },
+        {
+          "git_blob": "c24e6b226ab5026c99ed5a3da0d9c1135f08db0f",
+          "path": "package.json",
+          "sha256": "34f950cd06f8eb3bb27b662b58f4b78c45e21b92998a9f10394a6e368fdd54ce"
+        },
+        {
+          "git_blob": "82a16e3ce90e35b0224328877abbf962e5b1d09e",
+          "path": "src/main.ts",
+          "sha256": "9411c30bb3796385c7877a8da118149e664a5a99715995163a052aa83b809f7f"
+        },
+        {
+          "git_blob": "9ea34dadf4b10044576c295f9ad1f0fab762bb4a",
+          "path": "tsconfig.json",
+          "sha256": "51f3a479d07b6aacfebf3b6df573d2502b8edfd62e489ecbc653806c3e692bb4"
+        },
+        {
+          "git_blob": "11925441056f498af24c19bbc16b14ba4257d129",
+          "path": "vite.config.ts",
+          "sha256": "39a6ea8ac04de9e8069bce1652683d603237ba2864946f2ee81cb6c1e72dc756"
+        }
+      ],
+      "git_tree": "3a92aeab2a94003b7f595cd72bfb06b8b34a720a",
+      "name": "link-demo",
+      "requires": [
+        "link"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "344c4f1492f9cdc4ad188a4e1431b35d395c68f9",
+          "path": "index.html",
+          "sha256": "7abf794ce8cf2693e1674acf55735620ba752b42ad632d77e061193eae55d58b"
+        },
+        {
+          "git_blob": "f30b3abc5d732208bfb4719665e8762acaf12893",
+          "path": "package.json",
+          "sha256": "800c0f2c1ecb41a7d2a4720c8ea2eae7cabf3bf646c0093f42c6cdd958e4fef9"
+        },
+        {
+          "git_blob": "19f2d9b2fa49987b03909d2f464449fb2ab6b7b1",
+          "path": "src/main.ts",
+          "sha256": "64fde1e4d231291742a005c096e8a981618e138bbb0c9702dbebf2106c7fb89a"
+        },
+        {
+          "git_blob": "9ea34dadf4b10044576c295f9ad1f0fab762bb4a",
+          "path": "tsconfig.json",
+          "sha256": "51f3a479d07b6aacfebf3b6df573d2502b8edfd62e489ecbc653806c3e692bb4"
+        },
+        {
+          "git_blob": "ec24488fdf175cf8f1afc628a69d912bd5b3e27b",
+          "path": "vite.config.ts",
+          "sha256": "11d13d75281527465838efebd9c9cdfe783126c71fbeaa575cad3c8d43620271"
+        }
+      ],
+      "git_tree": "ef7b40d8d2528c31a05f9883747dfc7c59aaaedd",
+      "name": "lists-demo",
+      "requires": [
+        "lists"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "b17dfdd210c857fe3c9fe3061255046c55f72663",
+          "path": "index.html",
+          "sha256": "51eee3e8f592d5908da42036ffadb0955af0ddb84a198c1c2b6b06ae0daddae9"
+        },
+        {
+          "git_blob": "43f9e1635056783283553720def9c6a989be6b3a",
+          "path": "package.json",
+          "sha256": "49ef70a60d24fa21794d2dd583dc2eaf8676a2d1662056dd454b04b99a0987e7"
+        },
+        {
+          "git_blob": "edd5f70608f1c8bc8632893e549bd61d73c155f1",
+          "path": "src/main.ts",
+          "sha256": "4d724daf75febc552b8b08d512e5c54250577b133cad4f92f5a83d9cf991216c"
+        },
+        {
+          "git_blob": "9fe893581685e4e9229920eb0369bd26b386604b",
+          "path": "tsconfig.json",
+          "sha256": "5df24314ca6bf17f3dc579a4897735fc6b7f622e15ea96f5f4f15f95f98abae9"
+        },
+        {
+          "git_blob": "d458a95f2302384eeec234d3ffa15583c05c2dde",
+          "path": "vite.config.ts",
+          "sha256": "64b912ce2d5f299a7bc490d477029f5cadd28646ce7caba58b291fbf3bbdfdfc"
+        }
+      ],
+      "git_tree": "3232c28b1a532553f9cc52694a155dcd78e9ee49",
+      "name": "preferences",
+      "requires": [
+        "storage",
+        "theme"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "9c2a09e29e5ca8f37cb92380a652390832c91be5",
+          "path": "index.html",
+          "sha256": "b32d893b4b645f0a637d09f0152335e04a9beaea8bda58d70267f0e7fe3a2edc"
+        },
+        {
+          "git_blob": "537b474a88b07f5f1f8387a71d974fe2b7ae67ee",
+          "path": "package.json",
+          "sha256": "49d5906e68e4787c614d005fb73d571588919bcc5736eb6dbb8d3ba18bd671a4"
+        },
+        {
+          "git_blob": "711e87b4578c1b281badfe3f7f3f47e5c9b64bc6",
+          "path": "src/main.ts",
+          "sha256": "933f3a13e86bb16ec20e191ffffc5533f59cab9067434024ddb4d1bf7b4cdc2c"
+        },
+        {
+          "git_blob": "9fe893581685e4e9229920eb0369bd26b386604b",
+          "path": "tsconfig.json",
+          "sha256": "5df24314ca6bf17f3dc579a4897735fc6b7f622e15ea96f5f4f15f95f98abae9"
+        },
+        {
+          "git_blob": "c7d35904afba4c27e79e318836d44e694b04c808",
+          "path": "vite.config.ts",
+          "sha256": "38f153bd526cb111953308843f8e3fff5c8dceca78de9158a06864663a83499f"
+        }
+      ],
+      "git_tree": "beeadad9f8589d8a572f03763540666e797066d7",
+      "name": "profile-viewer",
+      "requires": [
+        "inc",
+        "relay",
+        "theme"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "78f96bbbd698f9a44437c5e3e4deea31923894d2",
+          "path": "index.html",
+          "sha256": "abe1ce0b5b36bfd29506c43fb33043aba0f588f23562c35e4c489e27e3e879fe"
+        },
+        {
+          "git_blob": "80cc2f68f1252aba0d167fe7ea4c72d7f2018f1a",
+          "path": "package.json",
+          "sha256": "bfd9db4840cf04c1d2baccceb66cb3c71a91113106e8654c66b8f42392a214bd"
+        },
+        {
+          "git_blob": "0db2d6451f8b1cf204b2345010456d6c63f3ba91",
+          "path": "src/main.ts",
+          "sha256": "ea0da59752c9f60fc42a46cce02c8db85424a880d624485f99fc4e54c7c7cab3"
+        },
+        {
+          "git_blob": "9fe893581685e4e9229920eb0369bd26b386604b",
+          "path": "tsconfig.json",
+          "sha256": "5df24314ca6bf17f3dc579a4897735fc6b7f622e15ea96f5f4f15f95f98abae9"
+        },
+        {
+          "git_blob": "e32b3e0ce37daf2928633ca43da2998259601ce3",
+          "path": "vite.config.ts",
+          "sha256": "9401e10b7236e7465519741512dc23da348627457c0da1cdcf6ae004a97a1e2f"
+        }
+      ],
+      "git_tree": "3926e7884802c3e11f78dcfb9676dc02efcc6558",
+      "name": "resource-demo",
+      "requires": [
+        "resource",
+        "theme"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "6edea6294b5e3e59517d27c9395ec3bc8f3715ed",
+          "path": "index.html",
+          "sha256": "7119b730f5770d46ad80e2ad3172d8d1c70ea8d6a958e0e1dc546786b10a4b6d"
+        },
+        {
+          "git_blob": "03997b28eff1788c64f2ffd8c00b43d94ea8aa99",
+          "path": "package.json",
+          "sha256": "1d68905c105cb2f87b842db4127b97dc1d5f53e442971de62c3006aa39b3c6fa"
+        },
+        {
+          "git_blob": "a81da5e4c7879b1c0adaaf912dbdd4101c6cd116",
+          "path": "src/main.ts",
+          "sha256": "95ec69bda4aab17e96559654773f5e27913533bf9541e76f96c0db3740f0c630"
+        },
+        {
+          "git_blob": "9ea34dadf4b10044576c295f9ad1f0fab762bb4a",
+          "path": "tsconfig.json",
+          "sha256": "51f3a479d07b6aacfebf3b6df573d2502b8edfd62e489ecbc653806c3e692bb4"
+        },
+        {
+          "git_blob": "bdf67c92380516b3791fb20628830c23aa0c9fd8",
+          "path": "vite.config.ts",
+          "sha256": "a0add218c2a9d9ab048ee8d8a2d6c53e31f0e340d102e51cf0f05e5c2d2c9f6e"
+        }
+      ],
+      "git_tree": "624cd649d32d0d90e4a77dfadfa2453f11eb5e31",
+      "name": "serial-demo",
+      "requires": [
+        "serial"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "e7cc2b5f3c1a9f4838044821ff39ce28e753edcc",
+          "path": "index.html",
+          "sha256": "a6018a9fdefd8223f3b72cf81e622654c0f1c995327ecc72fdefe3045014d200"
+        },
+        {
+          "git_blob": "546f01e7853eac015693c828a19952d1e7bee234",
+          "path": "package.json",
+          "sha256": "88774554a0a2b3977374f11e6e676b4079fdb841d14bf1375f447d1374096d9e"
+        },
+        {
+          "git_blob": "95abe8e45a9da09f84ef5a88e15d03479eefa010",
+          "path": "src/main.ts",
+          "sha256": "382ef2a78c97ddd208fbb7782b3fa56a35b4199de457f8b1eb7fbc9736a98f0f"
+        },
+        {
+          "git_blob": "9fe893581685e4e9229920eb0369bd26b386604b",
+          "path": "tsconfig.json",
+          "sha256": "5df24314ca6bf17f3dc579a4897735fc6b7f622e15ea96f5f4f15f95f98abae9"
+        },
+        {
+          "git_blob": "0123ee4ba9e58ea9c4c14f5c6c4e8bbe8233e123",
+          "path": "vite.config.ts",
+          "sha256": "d908dc13460babf4d0973c68cae8fb18d70d18e1f71da057e019679683374b10"
+        }
+      ],
+      "git_tree": "97ae89c3d64bb098691063baedaee701edc622e5",
+      "name": "toaster",
+      "requires": [
+        "notify",
+        "theme"
+      ]
+    },
+    {
+      "files": [
+        {
+          "git_blob": "a13f49d99d29574720aa8bfb2025948277d00b62",
+          "path": "index.html",
+          "sha256": "a213c921cf5727e7ad9ce2d6f7c8f01e35a5485e2e86f687a655d7b725b19d9d"
+        },
+        {
+          "git_blob": "dcd4ec0de8cc4e0b3290d6c001b777f6ba420eb6",
+          "path": "package.json",
+          "sha256": "a20c23777cf2e057fcff53094ee201a4ac00a0d4dfe40a2a816560bc08d538f0"
+        },
+        {
+          "git_blob": "2d3977271c329e5800caa145ea6220afc94548c1",
+          "path": "src/main.ts",
+          "sha256": "1d17a35fe53695283966efda813a2d42ee895fee2dd9b9c151cce7d489671ef7"
+        },
+        {
+          "git_blob": "9ea34dadf4b10044576c295f9ad1f0fab762bb4a",
+          "path": "tsconfig.json",
+          "sha256": "51f3a479d07b6aacfebf3b6df573d2502b8edfd62e489ecbc653806c3e692bb4"
+        },
+        {
+          "git_blob": "3ee6860d70ca48a02e2e7deb4b67978219c997c5",
+          "path": "vite.config.ts",
+          "sha256": "efbf834302007f1328801613daaf388fdd41a5735ad0b06ed34ca2abc7c30423"
+        }
+      ],
+      "git_tree": "1b0246b67622c1ab41c3df9a8f34e612e6861f74",
+      "name": "webrtc-demo",
+      "requires": [
+        "webrtc"
+      ]
+    }
+  ],
+  "artifact_obligation": false,
+  "classification": "kehto-source-corpus",
+  "digest": "ea51178f523a911615ab84a0083d464aa729322384eda3ee35cffc09bbd506b2",
+  "schema": 1,
+  "source": {
+    "commit": "bb3929b3523b75356fd65f658f9bd14c7ff697e4",
+    "git_tree": "a7685ad88f0639855ce540129119aa76830153d0",
+    "path": "apps/playground/napplets",
+    "repository": "kehto/web"
+  }
+}

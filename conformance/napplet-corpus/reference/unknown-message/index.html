@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Unknown message forward compatibility</title>
+  <script>
+    window.parent.postMessage({ type: "future-domain.operation", value: 1 }, "*");
+    window.parent.postMessage({ type: "theme.get", id: "still-healthy" }, "*");
+  </script>
+</head>
+<body>Unknown messages must not kill the session.</body>
+</html>

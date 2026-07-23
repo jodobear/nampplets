@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "baseline": "native-runtime-compat-v1",
+  "entries": [
+    {
+      "invariant": "I-01",
+      "scenario": "Run an existing conformant napplet without modification",
+      "milestone": "M2",
+      "current_expected": "red",
+      "falsifier": "Run a pinned published artifact byte-for-byte and fail if any source, build, manifest, or runtime import change is required."
+    },
+    {
+      "invariant": "I-02",
+      "scenario": "Drop a message from an unmapped source window",
+      "milestone": "M1",
+      "current_expected": "red",
+      "falsifier": "A sibling frame sends a valid privileged envelope; any native provider observation fails the invariant."
+    },
+    {
+      "invariant": "I-03",
+      "scenario": "Restore a workspace and reattach a receipt",
+      "milestone": "M5",
+      "current_expected": "red",
+      "falsifier": "Static dependency inspection and restart proof fail if a mechanism crate is imported or receipt semantics are reimplemented outside the NMP facade."
+    },
+    {
+      "invariant": "I-04",
+      "scenario": "Publication survives component destruction",
+      "milestone": "M5",
+      "current_expected": "red",
+      "falsifier": "Destroy the originating component and fail if the accepted write obligation or canonical pending row disappears."
+    },
+    {
+      "invariant": "I-05",
+      "scenario": "Mount a renderer with an initial snapshot",
+      "milestone": "M4",
+      "current_expected": "red",
+      "falsifier": "Mutate only component-local state and fail if it can become the authoritative host binding value."
+    },
+    {
+      "invariant": "I-06",
+      "scenario": "Never expose ambient signing capability",
+      "milestone": "M1",
+      "current_expected": "red",
+      "falsifier": "Inspect iframe globals and bridge reachability; any key, signer, native bridge, or window.nostr fails."
+    },
+    {
+      "invariant": "I-07",
+      "scenario": "Do not silently inherit sensitive grants on update",
+      "milestone": "M3",
+      "current_expected": "red",
+      "falsifier": "Install a same-author/dTag artifact with a new aggregate hash and fail if an upload grant transfers without a new explicit approval."
+    },
+    {
+      "invariant": "I-08",
+      "scenario": "One napplet exceeds its message-rate limit",
+      "milestone": "M7",
+      "current_expected": "red",
+      "falsifier": "Flood one session and fail if memory is unbounded, refusal is silent, or a healthy sibling stops responding."
+    },
+    {
+      "invariant": "I-09",
+      "scenario": "Launch an installed component while offline",
+      "milestone": "M5",
+      "current_expected": "red",
+      "falsifier": "Launch from cached rows with no network and fail if evidence claims global sync, completeness, or authoritative emptiness."
+    },
+    {
+      "invariant": "I-10",
+      "scenario": "Replace a feed renderer without restarting demand",
+      "milestone": "M4",
+      "current_expected": "red",
+      "falsifier": "Record binding/NMP observation identity across A-to-B replacement and fail on close, reopen, state loss, write retarget, or navigation reset."
+    }
+  ]
+}
