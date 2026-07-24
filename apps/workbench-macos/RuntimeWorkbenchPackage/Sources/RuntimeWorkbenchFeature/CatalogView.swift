@@ -295,6 +295,12 @@ private struct CatalogBrowseEvidenceView: View {
         .padding(.vertical, 10)
         .background(.bar)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(scopeTitle) · \(evidence.projectedRows) candidates · \(scopeDetail)"
+        )
+        .accessibilityValue(
+            "\(scopeTitle) · \(evidence.projectedRows) candidates · \(scopeDetail)"
+        )
         .accessibilityIdentifier("catalog-feed-evidence")
     }
 
