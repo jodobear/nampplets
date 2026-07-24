@@ -59,6 +59,19 @@ public final class CatalogViewModel {
             return
         }
         started = true
+        if client.feedScope == .liveNMPWindow, evidence == nil {
+            evidence = CatalogBrowseEvidence(
+                scope: .liveNMPWindow,
+                queryWasLocalFilter: !query.isEmpty,
+                locallyFilteredRows: 0,
+                projectedRows: 0,
+                projectionLimitedRows: 0,
+                refusedRows: 0,
+                window: .requesting,
+                sourceEvidence: [],
+                shortfalls: []
+            )
+        }
         feedObservation = client.observeChanges { [weak self] in
             guard let self else {
                 return

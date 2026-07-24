@@ -170,7 +170,9 @@ public struct CatalogSheet: View {
 
     @ViewBuilder
     private var resultRows: some View {
-        if model.entries.isEmpty, model.connectingEvidence != nil {
+        if model.entries.isEmpty,
+           model.evidence?.window == .requesting
+        {
             ContentUnavailableView(
                 "Connecting to the live catalog",
                 systemImage: "antenna.radiowaves.left.and.right",
