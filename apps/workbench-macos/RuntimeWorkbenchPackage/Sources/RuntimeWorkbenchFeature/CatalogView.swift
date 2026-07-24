@@ -43,7 +43,9 @@ public struct CatalogSheet: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(minWidth: 720, idealWidth: 860, minHeight: 540, idealHeight: 680)
+        #endif
         .sheet(
             item: Binding(
                 get: { model.review },
@@ -519,7 +521,9 @@ private struct CatalogInstallReviewSheet: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 720)
+        #endif
         .interactiveDismissDisabled(isInstalling)
     }
 

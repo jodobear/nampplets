@@ -252,7 +252,9 @@ public struct WorkbenchSettingsSheet: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(minWidth: 620, minHeight: 560)
+        #endif
     }
 
     private func ownershipRow(

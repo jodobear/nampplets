@@ -112,37 +112,8 @@ public struct ContentView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            workspaceControlStrip
-            if let pendingWrite = pendingWrites.writes.first {
-                PendingWriteApprovalBar(write: pendingWrite) { approve in
-                    pendingWrites.decide(
-                        pendingWrite,
-                        approve: approve,
-                        profile: profile
-                    )
-                }
-            }
-            if let receipt = receipts.receipts.last {
-                ReceiptStatusBar(receipt: receipt)
-            }
-            HStack(spacing: 0) {
-                WorkbenchWorkspaceView(
-                    layout: $layout,
-                    onLayoutChange: scheduleLayoutSave,
-                    onClose: closeWindow,
-                    windowContent: windowContent
-                )
-                if isInspectorPresented {
-                    Divider()
-                    nappletInspector
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
-            }
-            activityBar
-        }
-        .background(.background)
-        .sheet(isPresented: $isAccountSheetPresented) {
+        platformBody
+            .sheet(isPresented: $isAccountSheetPresented) {
             WorkbenchAccountSheet(manager: accountManager)
         }
         .sheet(isPresented: $isCatalogSheetPresented) {
@@ -184,7 +155,9 @@ public struct ContentView: View {
                         )
                     )
                     .navigationTitle("Runtime Activity")
+                    #if os(macOS)
                     .frame(minWidth: 620, minHeight: 420)
+                    #endif
                 }
             }
         }
@@ -202,7 +175,9 @@ public struct ContentView: View {
                         )
                     )
                     .navigationTitle("Review Permissions")
+                    #if os(macOS)
                     .frame(minWidth: 620, minHeight: 420)
+                    #endif
                 }
             }
         }
@@ -222,7 +197,9 @@ public struct ContentView: View {
                         )
                     )
                     .navigationTitle("Settings")
+                    #if os(macOS)
                     .frame(minWidth: 620, minHeight: 420)
+                    #endif
                 }
             }
         }
@@ -323,7 +300,89 @@ public struct ContentView: View {
             persistLayoutImmediately()
             profile?.native.setIncActionHandler(nil)
         }
+        #if os(macOS)
         .frame(minWidth: 1_050, minHeight: 660)
+        #endif
+    }
+
+    @ViewBuilder
+    private var platformBody: some View {
+        #if os(iOS)
+        NavigationStack {
+            canvasBody
+                .navigationTitle("Workbench")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        accountMenu
+                    }
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button {
+                            isCatalogSheetPresented = true
+                        } label: {
+                            Label("Add Napplet", systemImage: "plus")
+                        }
+                        .accessibilityIdentifier("add-napplet")
+                        .accessibilityHint("Opens the network napplet catalog")
+
+                        workspaceActionsMenu
+
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                isInspectorPresented.toggle()
+                            }
+                        } label: {
+                            Label(
+                                isInspectorPresented ? "Hide Inspector" : "Show Inspector",
+                                systemImage: "sidebar.right"
+                            )
+                        }
+                        .accessibilityIdentifier("toggle-napplet-inspector")
+
+                        layoutMenu
+                    }
+                }
+        }
+        #else
+        VStack(spacing: 0) {
+            workspaceControlStrip
+            canvasBody
+        }
+        #endif
+    }
+
+    private var canvasBody: some View {
+        VStack(spacing: 0) {
+            if let pendingWrite = pendingWrites.writes.first {
+                PendingWriteApprovalBar(write: pendingWrite) { approve in
+                    pendingWrites.decide(
+                        pendingWrite,
+                        approve: approve,
+                        profile: profile
+                    )
+                }
+            }
+            if let receipt = receipts.receipts.last {
+                ReceiptStatusBar(receipt: receipt)
+            }
+            HStack(spacing: 0) {
+                WorkbenchWorkspaceView(
+                    layout: $layout,
+                    onLayoutChange: scheduleLayoutSave,
+                    onClose: closeWindow,
+                    windowContent: windowContent
+                )
+                if isInspectorPresented {
+                    Divider()
+                    nappletInspector
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+            #if os(macOS)
+            activityBar
+            #endif
+        }
+        .background(.background)
     }
 
     private var workspaceControlStrip: some View {

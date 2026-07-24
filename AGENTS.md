@@ -43,6 +43,9 @@ These rules apply to the whole repository.
 - `crates/test-harness` owns deterministic service implementations; scenario
   contracts live under `conformance/test-services`.
 - `apps/workbench-macos` owns the macOS reference shell and native presentation.
+- `apps/workbench-ios` owns the iOS reference shell and native presentation; it
+  shares `RuntimeWorkbenchFeature` and `platforms/apple` with the macOS shell
+  rather than redefining them.
 
 Do not redefine another workstream's public envelope, principal, persistence
 schema, or lifecycle state machine. Coordinate changes at the owning boundary.
@@ -81,5 +84,6 @@ cargo test --workspace
 ```
 
 For Apple changes, build and test the shared `RuntimeWorkbench` scheme in the
-macOS destination. For NMP-sensitive application work, run the architecture
-scanner and document which D0-D10 rules the design discharges.
+macOS destination, and build the `RuntimeWorkbenchiOS` scheme in an iOS
+Simulator destination. For NMP-sensitive application work, run the
+architecture scanner and document which D0-D10 rules the design discharges.
