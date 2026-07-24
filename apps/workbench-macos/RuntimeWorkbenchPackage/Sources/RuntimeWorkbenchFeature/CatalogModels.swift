@@ -1,7 +1,7 @@
 import Foundation
 
 public enum CatalogLimits {
-    public static let maximumQueryUTF8Bytes = 512
+    public static let maximumQueryUTF8Bytes = 256
     public static let maximumCoordinateUTF8Bytes = 2_048
     public static let maximumEntryUTF8Bytes = 16_384
     public static let maximumSearchPageUTF8Bytes = 512 * 1_024
@@ -12,6 +12,9 @@ public enum CatalogLimits {
     public static let maximumDomainsPerClass = 64
     public static let maximumPlatformRows = 16
     public static let maximumWarningsPerReview = 32
+    public static let maximumBrowseSources = 64
+    public static let maximumBrowseShortfalls = 3
+    public static let maximumSourceLabelUTF8Bytes = 512
 }
 
 public struct CatalogSearchRequest: Equatable, Sendable {
@@ -53,12 +56,15 @@ public struct CatalogPublisher: Equatable, Sendable {
 }
 
 public enum CatalogCompatibilitySummary: Equatable, Sendable {
+    case unreviewed
     case compatible
     case incompatible(reason: String)
     case unknown(reason: String)
 
     public var title: String {
         switch self {
+        case .unreviewed:
+            "Review required"
         case .compatible:
             "Compatible"
         case .incompatible:
@@ -70,6 +76,8 @@ public enum CatalogCompatibilitySummary: Equatable, Sendable {
 
     public var detail: String? {
         switch self {
+        case .unreviewed:
+            "Verify the exact signed manifest before installation."
         case .compatible:
             nil
         case let .incompatible(reason), let .unknown(reason):
@@ -134,12 +142,152 @@ public struct CatalogEntry: Identifiable, Equatable, Sendable {
     }
 }
 
+/// The authority from which a catalog page was projected.
+///
+/// A live page is one finite NMP observation, not a globally complete network
+/// result. The offline fixture is kept solely for deterministic previews and
+/// UI automation.
+public enum CatalogBrowseScope: Equatable, Sendable {
+    case liveNMPWindow
+    case offlineFixture
+}
+
+public enum CatalogBrowseSourceStatus: Equatable, Sendable {
+    case requesting
+    case connecting
+    case disconnected
+    case awaitingAuthentication
+    case authenticationDenied
+    case error
+}
+
+public enum CatalogBrowseAccessContext: Equatable, Sendable {
+    case `public`
+    case nip42(publicKey: String)
+}
+
+public struct CatalogBrowseSourceEvidence:
+    Identifiable,
+    Equatable,
+    Sendable
+{
+    public let id: String
+    public let source: String
+    public let access: CatalogBrowseAccessContext
+    public let status: CatalogBrowseSourceStatus
+    public let reconciledThrough: UInt64?
+
+    public init?(
+        id: String,
+        source: String,
+        access: CatalogBrowseAccessContext,
+        status: CatalogBrowseSourceStatus,
+        reconciledThrough: UInt64?
+    ) {
+        let accessPublicKey: String
+        switch access {
+        case .public:
+            accessPublicKey = ""
+        case let .nip42(publicKey):
+            accessPublicKey = publicKey
+        }
+        guard
+            !id.isEmpty,
+            id.utf8.count <= CatalogLimits.maximumSourceLabelUTF8Bytes,
+            !source.isEmpty,
+            source.utf8.count <= CatalogLimits.maximumSourceLabelUTF8Bytes,
+            accessPublicKey.utf8.count
+                <= CatalogLimits.maximumSourceLabelUTF8Bytes,
+            id.catalogIsControlFree,
+            source.catalogIsControlFree,
+            accessPublicKey.catalogIsControlFree
+        else {
+            return nil
+        }
+        self.id = id
+        self.source = source
+        self.access = access
+        self.status = status
+        self.reconciledThrough = reconciledThrough
+    }
+}
+
+public enum CatalogBrowseShortfall: Hashable, Sendable {
+    case noPlannedSource
+    case noResolvedDemand
+    case localLimit
+}
+
+public enum CatalogBrowseWindowState: Equatable, Sendable {
+    case idle
+    case requesting
+    case returned(addedRows: UInt64)
+    case atBound(maximumRows: UInt64)
+    case unknown
+}
+
+/// Bounded evidence displayed beside every page.
+///
+/// `locallyFilteredRows` is supplied by the Rust projection; Swift never
+/// interprets relay completeness or derives routing/search claims from rows.
+public struct CatalogBrowseEvidence: Equatable, Sendable {
+    public let scope: CatalogBrowseScope
+    public let queryWasLocalFilter: Bool
+    public let locallyFilteredRows: UInt
+    public let projectedRows: UInt
+    public let projectionLimitedRows: UInt
+    public let refusedRows: UInt
+    public let window: CatalogBrowseWindowState
+    public let sourceEvidence: [CatalogBrowseSourceEvidence]
+    public let shortfalls: [CatalogBrowseShortfall]
+
+    public init?(
+        scope: CatalogBrowseScope,
+        queryWasLocalFilter: Bool,
+        locallyFilteredRows: UInt,
+        projectedRows: UInt,
+        projectionLimitedRows: UInt,
+        refusedRows: UInt,
+        window: CatalogBrowseWindowState,
+        sourceEvidence: [CatalogBrowseSourceEvidence],
+        shortfalls: [CatalogBrowseShortfall]
+    ) {
+        guard
+            projectedRows <= UInt(CatalogLimits.maximumEntriesPerPage),
+            queryWasLocalFilter || locallyFilteredRows == 0,
+            sourceEvidence.count <= CatalogLimits.maximumBrowseSources,
+            Set(sourceEvidence.map(\.id)).count == sourceEvidence.count,
+            shortfalls.count <= CatalogLimits.maximumBrowseShortfalls,
+            Set(shortfalls).count == shortfalls.count
+        else {
+            return nil
+        }
+        self.scope = scope
+        self.queryWasLocalFilter = queryWasLocalFilter
+        self.locallyFilteredRows = locallyFilteredRows
+        self.projectedRows = projectedRows
+        self.projectionLimitedRows = projectionLimitedRows
+        self.refusedRows = refusedRows
+        self.window = window
+        self.sourceEvidence = sourceEvidence
+        self.shortfalls = shortfalls
+    }
+}
+
 public struct CatalogSearchPage: Equatable, Sendable {
     public let entries: [CatalogEntry]
     public let hasMore: Bool
+    public let evidence: CatalogBrowseEvidence
 
-    public init?(entries: [CatalogEntry], hasMore: Bool) {
-        guard entries.count <= CatalogLimits.maximumEntriesPerPage,
+    public init?(
+        entries: [CatalogEntry],
+        hasMore: Bool,
+        evidence: CatalogBrowseEvidence
+    ) {
+        guard
+            entries.count <= CatalogLimits.maximumEntriesPerPage,
+            evidence.projectedRows == UInt(entries.count),
+            hasMore == (evidence.projectionLimitedRows > 0),
               entries.reduce(0, { $0 + $1.catalogUTF8ByteCount })
                 <= CatalogLimits.maximumSearchPageUTF8Bytes
         else {
@@ -147,6 +295,7 @@ public struct CatalogSearchPage: Equatable, Sendable {
         }
         self.entries = entries
         self.hasMore = hasMore
+        self.evidence = evidence
     }
 }
 
@@ -235,6 +384,7 @@ public struct CatalogWarning: Identifiable, Equatable, Sendable {
 }
 
 public enum CatalogUpdateRelationship: Equatable, Sendable {
+    case unknown(reason: String)
     case firstInstall
     case sameBuild
     case update(installedHash: String)
@@ -243,6 +393,8 @@ public enum CatalogUpdateRelationship: Equatable, Sendable {
 
     public var title: String {
         switch self {
+        case .unknown:
+            "Install relationship unavailable"
         case .firstInstall:
             "New install"
         case .sameBuild:
@@ -258,13 +410,20 @@ public enum CatalogUpdateRelationship: Equatable, Sendable {
 
     public var installedHash: String? {
         switch self {
-        case .firstInstall, .sameBuild:
+        case .unknown, .firstInstall, .sameBuild:
             nil
         case let .update(installedHash),
              let .rollback(installedHash),
              let .differentBuild(installedHash):
             installedHash
         }
+    }
+
+    public var detail: String? {
+        guard case let .unknown(reason) = self else {
+            return nil
+        }
+        return reason
     }
 }
 
@@ -309,7 +468,10 @@ public struct CatalogInstallReview: Identifiable, Equatable, Sendable {
             [$0.id, $0.platform, $0.detail]
         } + warnings.flatMap {
             [$0.id, $0.message]
-        } + [updateRelationship.installedHash ?? ""]
+        } + [
+            updateRelationship.installedHash ?? "",
+            updateRelationship.detail ?? "",
+        ]
 
         guard coordinate.utf8.count <= CatalogLimits.maximumCoordinateUTF8Bytes,
               textFields.allSatisfy({
@@ -361,17 +523,34 @@ public struct CatalogInstallConfirmation: Equatable, Sendable {
 }
 
 public struct CatalogInstalledBuild: Equatable, Sendable {
-    public let publisherPublicKey: String
-    public let coordinate: String
+    public let title: String
+    public let manifestAuthor: String
+    public let dTag: String
     public let exactAggregateHash: String
 
-    public init(
-        publisherPublicKey: String,
-        coordinate: String,
+    public init?(
+        title: String,
+        manifestAuthor: String,
+        dTag: String,
         exactAggregateHash: String
     ) {
-        self.publisherPublicKey = publisherPublicKey
-        self.coordinate = coordinate
+        let fields = [title, manifestAuthor, dTag, exactAggregateHash]
+        guard
+            !title.isEmpty,
+            !dTag.isEmpty,
+            manifestAuthor.catalogIsLowercaseHexDigest,
+            exactAggregateHash.catalogIsLowercaseHexDigest,
+            dTag.utf8.count <= CatalogLimits.maximumCoordinateUTF8Bytes,
+            fields.allSatisfy({
+                $0.utf8.count <= CatalogLimits.maximumFieldUTF8Bytes
+                    && $0.catalogIsControlFree
+            })
+        else {
+            return nil
+        }
+        self.title = title
+        self.manifestAuthor = manifestAuthor
+        self.dTag = dTag
         self.exactAggregateHash = exactAggregateHash
     }
 }
@@ -379,4 +558,19 @@ public struct CatalogInstalledBuild: Equatable, Sendable {
 public enum CatalogInstallResponse: Equatable, Sendable {
     case installed(CatalogInstalledBuild)
     case refused(CatalogIssue)
+}
+
+private extension String {
+    var catalogIsControlFree: Bool {
+        !unicodeScalars.contains {
+            CharacterSet.controlCharacters.contains($0)
+        }
+    }
+
+    var catalogIsLowercaseHexDigest: Bool {
+        utf8.count == 64
+            && utf8.allSatisfy { byte in
+                (48 ... 57).contains(byte) || (97 ... 102).contains(byte)
+            }
+    }
 }

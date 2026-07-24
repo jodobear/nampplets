@@ -17,11 +17,13 @@ public struct WorkbenchAccountHandle: Hashable, Sendable {
 public enum WorkbenchAccountConnectionKind: String, Equatable, Sendable {
     case localSigner
     case remoteSigner
+    case readOnly
 
     public var title: String {
         switch self {
         case .localSigner: "Local signer"
         case .remoteSigner: "Remote signer"
+        case .readOnly: "Read-only"
         }
     }
 }
@@ -127,6 +129,7 @@ public struct WorkbenchAccountSnapshot: Equatable, Sendable {
 public protocol WorkbenchAccountManaging: AnyObject {
     func snapshot() -> WorkbenchAccountSnapshot
     func register(secret: String) async
+    func registerReadOnly(publicIdentity: String) async
     func activate(handle: WorkbenchAccountHandle) async
     func logout() async
     func remove(handle: WorkbenchAccountHandle) async
@@ -151,6 +154,7 @@ public final class UnavailableWorkbenchAccountManager:
     }
 
     public func register(secret _: String) async {}
+    public func registerReadOnly(publicIdentity _: String) async {}
     public func activate(handle _: WorkbenchAccountHandle) async {}
     public func logout() async {}
     public func remove(handle _: WorkbenchAccountHandle) async {}
@@ -165,6 +169,7 @@ final class WorkbenchAccountSheetModel {
     private(set) var errorMessage: String?
     private(set) var isWorking = false
     var secret = ""
+    var publicIdentity = ""
 
     init(manager: any WorkbenchAccountManaging) {
         self.manager = manager
@@ -190,6 +195,23 @@ final class WorkbenchAccountSheetModel {
         }
     }
 
+    func registerReadOnly() async {
+        let submittedIdentity = publicIdentity
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !submittedIdentity.isEmpty else {
+            errorMessage = "Enter an npub or 64-character hexadecimal public key."
+            return
+        }
+        await perform {
+            await manager.registerReadOnly(
+                publicIdentity: submittedIdentity
+            )
+        }
+        if errorMessage == nil {
+            publicIdentity.removeAll(keepingCapacity: false)
+        }
+    }
+
     func activate(_ handle: WorkbenchAccountHandle) async {
         await perform {
             await manager.activate(handle: handle)
@@ -210,6 +232,7 @@ final class WorkbenchAccountSheetModel {
 
     func clearTransientState() {
         secret.removeAll(keepingCapacity: false)
+        publicIdentity.removeAll(keepingCapacity: false)
         errorMessage = nil
     }
 
@@ -244,6 +267,7 @@ public struct WorkbenchAccountSheet: View {
     @State private var model: WorkbenchAccountSheetModel
     @State private var pendingRemoval: WorkbenchStoredAccount?
     @FocusState private var secretFieldFocused: Bool
+    @FocusState private var readOnlyFieldFocused: Bool
 
     @MainActor
     public init(manager: any WorkbenchAccountManaging) {
@@ -261,6 +285,9 @@ public struct WorkbenchAccountSheet: View {
 
                 if case .available = model.snapshot.availability {
                     registrationSection(secret: $model.secret)
+                    readOnlyRegistrationSection(
+                        publicIdentity: $model.publicIdentity
+                    )
                     accountsSection
                 } else if case let .unavailable(reason) =
                     model.snapshot.availability
@@ -403,6 +430,51 @@ public struct WorkbenchAccountSheet: View {
             Text("Register local signer")
         } footer: {
             Text("Registration and activation are separate. Secrets never enter a napplet.")
+        }
+    }
+
+    private func readOnlyRegistrationSection(
+        publicIdentity: Binding<String>
+    ) -> some View {
+        Section {
+            TextField(
+                "npub or 64-character hex public key",
+                text: publicIdentity
+            )
+            .textContentType(.username)
+            .focused($readOnlyFieldFocused)
+            .onSubmit {
+                Task {
+                    await model.registerReadOnly()
+                    readOnlyFieldFocused = model.errorMessage != nil
+                }
+            }
+            .accessibilityLabel("Read-only account public identity")
+            .accessibilityHint(
+                "Enter an npub or hexadecimal public key. NIP-05 resolution is unavailable in this pinned runtime."
+            )
+
+            Button("Add Read-Only Account") {
+                Task {
+                    await model.registerReadOnly()
+                    readOnlyFieldFocused = model.errorMessage != nil
+                }
+            }
+            .disabled(
+                model.isWorking
+                    || model.publicIdentity
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+            )
+            .accessibilityHint(
+                "Adds the keyless account without making it active"
+            )
+        } header: {
+            Text("Add read-only account")
+        } footer: {
+            Text(
+                "Read-only accounts can browse as an npub without a signer. NIP-05 resolution will be enabled when the pinned NMP facade supports it."
+            )
         }
     }
 

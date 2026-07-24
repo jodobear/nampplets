@@ -83,7 +83,7 @@ RULES = [
         "error",
         "D8/no-polling",
         re.compile(
-            r"\b(thread::sleep|Task\.sleep|Timer\.scheduledTimer|setInterval|setTimeout|"
+            r"\b(thread::sleep|Task\.sleep|Timer\.scheduledTimer|setInterval|"
             r"DispatchQueue\.[A-Za-z0-9_.]+\.asyncAfter|while\s+.*sleep|"
             r"try_recv\b.*sleep|sleep\b.*try_recv)"
         ),

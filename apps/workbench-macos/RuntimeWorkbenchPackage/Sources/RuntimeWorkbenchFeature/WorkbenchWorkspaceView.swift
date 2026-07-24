@@ -1,180 +1,343 @@
 import SwiftUI
 
-struct WorkbenchWorkspaceView<SlotContent: View>: View {
+struct WorkbenchWorkspaceView<WindowContent: View>: View {
     @Binding var layout: WorkbenchLayoutModel
-    var focusedRole: FocusState<WorkbenchSlotRole?>.Binding
     let onLayoutChange: () -> Void
-    @ViewBuilder let slotContent: (WorkbenchSlotRole) -> SlotContent
+    let onClose: (WorkbenchCanvasWindow) -> Void
+    @ViewBuilder let windowContent: (WorkbenchCanvasWindow) -> WindowContent
 
-    private let topRoles: [WorkbenchSlotRole] = [.feed, .detail, .tool]
+    private let canvasPadding = 12.0
+    private let tileSpacing = 12.0
 
     var body: some View {
-        Group {
-            if layout.isVisible(.composer) {
-                VSplitView {
-                    topRow
-                    slot(.composer)
-                }
-            } else {
-                topRow
-            }
-        }
-        .onPreferenceChange(WorkbenchSlotSizePreferenceKey.self) { sizes in
-            var changed = false
-            var next = layout
-            for (role, size) in sizes {
-                changed = next.recordRenderedSize(
-                    role: role,
-                    width: size.width,
-                    height: size.height
-                ) || changed
-            }
-            if changed {
-                layout = next
-                onLayoutChange()
-            }
-        }
-    }
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                canvasBackground
 
-    @ViewBuilder
-    private var topRow: some View {
-        let visibleTopRoles = topRoles.filter(layout.isVisible)
-        if visibleTopRoles.isEmpty {
-            ContentUnavailableView {
-                Label("No top slots are visible", systemImage: "rectangle.slash")
-            } description: {
-                Text("Show the Feed, Detail, or Tool slot from the Layout menu.")
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            HSplitView {
-                ForEach(visibleTopRoles, id: \.self) { role in
-                    slot(role)
+                if layout.windows.isEmpty {
+                    ContentUnavailableView {
+                        Label("Your canvas is empty", systemImage: "macwindow")
+                    } description: {
+                        Text("Choose Add Napplet to place one here.")
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ForEach(layout.windows) { window in
+                        canvasWindow(
+                            window,
+                            canvasSize: proxy.size
+                        )
+                    }
                 }
             }
-        }
-    }
-
-    private func slot(_ role: WorkbenchSlotRole) -> some View {
-        let constraints = role.constraints
-        let size = layout.size(for: role)
-        return VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Label(role.title, systemImage: role.systemImage)
-                    .font(.headline)
-                if let component = layout.component(in: role) {
-                    Text(component.title)
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(.tint.opacity(0.12), in: Capsule())
-                        .accessibilityLabel("\(component.title) assigned")
-                }
-                Spacer()
-                slotMenu(role)
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 36)
-            .background(.bar)
+            .coordinateSpace(name: "workbench-canvas")
             .contentShape(Rectangle())
             .onTapGesture {
-                focus(role)
+                var next = layout
+                next.select(nil)
+                guard next != layout else {
+                    return
+                }
+                layout = next
+                onLayoutChange()
             }
-
-            slotContent(role)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(.background)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(
-                    focusedRole.wrappedValue == role
-                        ? Color.accentColor
-                        : Color.secondary.opacity(0.22),
-                    lineWidth: focusedRole.wrappedValue == role ? 2 : 1
-                )
-        }
-        .contentShape(Rectangle())
-        .focusable()
-        .focused(focusedRole, equals: role)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(role.title) workspace slot")
-        .accessibilityHint(
-            "Use the slot actions menu to focus, hide, or move Good Morning here."
+        .accessibilityLabel("Napplet canvas")
+        .accessibilityIdentifier("napplet-canvas")
+    }
+
+    private var canvasBackground: some View {
+        Rectangle()
+            .fill(.background)
+            .overlay {
+                Canvas { context, size in
+                    let spacing = 24.0
+                    var path = Path()
+                    var x = spacing
+                    while x < size.width {
+                        var y = spacing
+                        while y < size.height {
+                            path.addEllipse(
+                                in: CGRect(
+                                    x: x,
+                                    y: y,
+                                    width: 1.25,
+                                    height: 1.25
+                                )
+                            )
+                            y += spacing
+                        }
+                        x += spacing
+                    }
+                    context.fill(
+                        path,
+                        with: .color(.secondary.opacity(0.16))
+                    )
+                }
+                .allowsHitTesting(false)
+            }
+    }
+
+    private func canvasWindow(
+        _ window: WorkbenchCanvasWindow,
+        canvasSize: CGSize
+    ) -> some View {
+        let frame = renderedFrame(
+            for: window,
+            canvasSize: canvasSize
         )
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: WorkbenchSlotSizePreferenceKey.self,
-                    value: [role: proxy.size]
+        return WorkbenchNappletWindow(
+            window: window,
+            frame: frame,
+            isSelected: layout.snapshot.selectedWindowID == window.id,
+            isFreeform: layout.mode == .freeform,
+            content: { windowContent(window) },
+            select: {
+                var next = layout
+                next.bringToFront(window.id)
+                guard next != layout else {
+                    return
+                }
+                layout = next
+                onLayoutChange()
+            },
+            move: { origin, translation in
+                guard layout.mode == .freeform else {
+                    return
+                }
+                var next = layout
+                next.moveWindow(
+                    id: window.id,
+                    x: origin.x + translation.width,
+                    y: origin.y + translation.height,
+                    canvasSize: canvasSize
                 )
-            }
-        }
-        .frame(
-            minWidth: constraints.minimumWidth,
-            idealWidth: size.width,
-            maxWidth: constraints.maximumWidth,
-            minHeight: constraints.minimumHeight,
-            idealHeight: size.height,
-            maxHeight: constraints.maximumHeight
+                layout = next
+            },
+            resize: { origin, translation in
+                guard layout.mode == .freeform else {
+                    return
+                }
+                var next = layout
+                next.resizeWindow(
+                    id: window.id,
+                    width: origin.width + translation.width,
+                    height: origin.height + translation.height,
+                    canvasSize: canvasSize
+                )
+                layout = next
+            },
+            close: {
+                onClose(window)
+            },
+            commitLayout: onLayoutChange
         )
+        .frame(width: frame.width, height: frame.height)
+        .position(
+            x: frame.minX + frame.width / 2,
+            y: frame.minY + frame.height / 2
+        )
+        .zIndex(Double(window.stackingOrder))
     }
 
-    private func slotMenu(_ role: WorkbenchSlotRole) -> some View {
-        Menu {
-            Button {
-                var next = layout
-                next.move(.goodMorning, to: role)
-                layout = next
-                focusedRole.wrappedValue = role
-                onLayoutChange()
-            } label: {
-                Label("Move Good Morning Here", systemImage: "arrow.right.square")
+    private func renderedFrame(
+        for window: WorkbenchCanvasWindow,
+        canvasSize: CGSize
+    ) -> CGRect {
+        switch layout.mode {
+        case .freeform:
+            let fitted = window.frame.fitted(to: canvasSize)
+            return CGRect(
+                x: fitted.x,
+                y: fitted.y,
+                width: fitted.width,
+                height: fitted.height
+            )
+        case .tiling:
+            let ordered = layout.windows
+            guard
+                let index = ordered.firstIndex(where: { $0.id == window.id })
+            else {
+                return .zero
             }
-
-            Divider()
-
-            Button {
-                focus(role)
-            } label: {
-                Label("Focus \(role.title)", systemImage: "scope")
-            }
-
-            Button(role: .destructive) {
-                var next = layout
-                next.setVisible(false, role: role)
-                layout = next
-                focusedRole.wrappedValue = next.snapshot.focusedRole
-                onLayoutChange()
-            } label: {
-                Label("Hide \(role.title)", systemImage: "eye.slash")
-            }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .imageScale(.large)
-                .frame(width: 28, height: 28)
+            let count = ordered.count
+            let columns = max(Int(ceil(sqrt(Double(count)))), 1)
+            let rows = max(Int(ceil(Double(count) / Double(columns))), 1)
+            let usableWidth = max(
+                canvasSize.width
+                    - canvasPadding * 2
+                    - tileSpacing * Double(columns - 1),
+                WorkbenchWindowFrame.minimumWidth
+            )
+            let usableHeight = max(
+                canvasSize.height
+                    - canvasPadding * 2
+                    - tileSpacing * Double(rows - 1),
+                WorkbenchWindowFrame.minimumHeight
+            )
+            let width = usableWidth / Double(columns)
+            let height = usableHeight / Double(rows)
+            let column = index % columns
+            let row = index / columns
+            return CGRect(
+                x: canvasPadding + Double(column) * (width + tileSpacing),
+                y: canvasPadding + Double(row) * (height + tileSpacing),
+                width: width,
+                height: height
+            )
         }
-        .menuStyle(.borderlessButton)
-        .accessibilityLabel("\(role.title) slot actions")
-    }
-
-    private func focus(_ role: WorkbenchSlotRole) {
-        var next = layout
-        next.focus(role)
-        layout = next
-        focusedRole.wrappedValue = role
-        onLayoutChange()
     }
 }
 
-private struct WorkbenchSlotSizePreferenceKey: PreferenceKey {
-    static let defaultValue: [WorkbenchSlotRole: CGSize] = [:]
+private struct WorkbenchNappletWindow<Content: View>: View {
+    let window: WorkbenchCanvasWindow
+    let frame: CGRect
+    let isSelected: Bool
+    let isFreeform: Bool
+    @ViewBuilder let content: () -> Content
+    let select: () -> Void
+    let move: (CGPoint, CGSize) -> Void
+    let resize: (CGSize, CGSize) -> Void
+    let close: () -> Void
+    let commitLayout: () -> Void
 
-    static func reduce(
-        value: inout [WorkbenchSlotRole: CGSize],
-        nextValue: () -> [WorkbenchSlotRole: CGSize]
-    ) {
-        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    @State private var dragOrigin: CGPoint?
+    @State private var resizeOrigin: CGSize?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            windowBar
+            content()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+        }
+        .background(.background)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(
+                    isSelected
+                        ? Color.accentColor
+                        : Color.secondary.opacity(0.28),
+                    lineWidth: isSelected ? 2 : 1
+                )
+                .allowsHitTesting(false)
+        }
+        .shadow(
+            color: .black.opacity(isSelected ? 0.18 : 0.1),
+            radius: isSelected ? 12 : 7,
+            y: 3
+        )
+        .overlay(alignment: .bottomTrailing) {
+            if isFreeform {
+                resizeHandle
+            }
+        }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                select()
+            }
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(window.title) napplet window")
+        .accessibilityHint(
+            isFreeform
+                ? "Drag the title bar to move and the bottom-right handle to resize."
+                : "Switch to Freeform layout to move or resize this window."
+        )
+        .accessibilityIdentifier("napplet-window-\(window.id.rawValue)")
+    }
+
+    private var windowBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "app.dashed")
+                .foregroundStyle(.tint)
+            Text(window.title)
+                .font(.headline)
+                .lineLimit(1)
+            Spacer()
+            if isSelected {
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 7))
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+            }
+            Button(action: close) {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Close \(window.title)")
+            .accessibilityHint(
+                "Closes this window without uninstalling the napplet"
+            )
+        }
+        .padding(.horizontal, 11)
+        .frame(height: 38)
+        .background(.bar)
+        .contentShape(Rectangle())
+        .gesture(moveGesture)
+        .accessibilityLabel("\(window.title) title bar")
+    }
+
+    private var moveGesture: some Gesture {
+        DragGesture(
+            minimumDistance: 2,
+            coordinateSpace: .named("workbench-canvas")
+        )
+        .onChanged { value in
+            guard isFreeform else {
+                return
+            }
+            if dragOrigin == nil {
+                dragOrigin = frame.origin
+                select()
+            }
+            guard let dragOrigin else {
+                return
+            }
+            move(dragOrigin, value.translation)
+        }
+        .onEnded { _ in
+            guard dragOrigin != nil else {
+                return
+            }
+            dragOrigin = nil
+            commitLayout()
+        }
+    }
+
+    private var resizeHandle: some View {
+        Image(systemName: "arrow.down.right.and.arrow.up.left")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 26, height: 26)
+            .contentShape(Rectangle())
+            .gesture(resizeGesture)
+            .accessibilityLabel("Resize \(window.title)")
+            .accessibilityHint("Drag to resize this napplet window")
+    }
+
+    private var resizeGesture: some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { value in
+                if resizeOrigin == nil {
+                    resizeOrigin = frame.size
+                    select()
+                }
+                guard let resizeOrigin else {
+                    return
+                }
+                resize(resizeOrigin, value.translation)
+            }
+            .onEnded { _ in
+                guard resizeOrigin != nil else {
+                    return
+                }
+                resizeOrigin = nil
+                commitLayout()
+            }
     }
 }

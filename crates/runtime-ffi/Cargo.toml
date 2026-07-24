@@ -20,6 +20,7 @@ bindgen = ["uniffi/cli"]
 [dependencies]
 nmp.workspace = true
 nmp-native-artifact = { path = "../artifact" }
+nmp-native-catalog-resolver = { path = "../catalog-resolver" }
 nmp-native-nap-bridge = { path = "../nap-bridge" }
 nmp-native-nmp-adapter = { path = "../nmp-adapter" }
 nmp-native-provider-identity = { path = "../provider-identity" }

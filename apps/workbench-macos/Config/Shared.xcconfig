@@ -21,7 +21,8 @@ ALWAYS_SEARCH_USER_PATHS = NO
 // ==========================================
 // Info PLIST
 // ==========================================
-GENERATE_INFOPLIST_FILE = YES
+GENERATE_INFOPLIST_FILE = NO
+INFOPLIST_FILE = Config/Info.plist
 
 // ==========================================
 // Entitlements

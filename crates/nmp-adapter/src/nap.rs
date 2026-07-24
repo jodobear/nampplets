@@ -2174,7 +2174,11 @@ mod tests {
     }
 
     fn nap_rig() -> NapRig {
-        let plane = Arc::new(NmpDataPlane::open(EngineConfig::default(), 8).unwrap());
+        nap_rig_with_config(EngineConfig::default())
+    }
+
+    fn nap_rig_with_config(config: EngineConfig) -> NapRig {
+        let plane = Arc::new(NmpDataPlane::open(config, 8).unwrap());
         let providers =
             NapNostrProviderSet::new(Arc::clone(&plane), NapNostrProviderLimits::default())
                 .unwrap();
@@ -2533,6 +2537,116 @@ mod tests {
         assert_eq!(value["ok"], true);
         assert_eq!(value["relays"]["wss://acked.example"], true);
         assert_eq!(value["relays"]["wss://rejected.example"], false);
+
+        rig.registry.close_session(rig.context.id);
+        rig.plane.close();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires explicit public relay access and posts a disposable kind-1 event"]
+    async fn live_outbox_publish_reaches_a_public_relay() {
+        let relays = std::env::var("NMP_LIVE_TEST_RELAYS")
+            .expect("set NMP_LIVE_TEST_RELAYS to a comma-separated operator relay set")
+            .split(',')
+            .map(str::trim)
+            .filter(|relay| !relay.is_empty())
+            .take(3)
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        assert!(!relays.is_empty(), "at least one live relay is required");
+
+        let mut rig = nap_rig_with_config(EngineConfig {
+            indexer_relays: relays.clone(),
+            app_relays: relays.clone(),
+            fallback_relays: relays,
+            ..EngineConfig::default()
+        });
+        let account = rig
+            .plane
+            .register_local_account(&format!("{:064x}", 21_u8))
+            .expect("the disposable signer must register through NMP");
+        rig.plane
+            .activate_local_account(&account)
+            .expect("the disposable signer must become active");
+        let relay_list_filter = Filter {
+            kinds: Some(BTreeSet::from([10_002])),
+            authors: Some(Binding::Literal(BTreeSet::from([account
+                .account
+                .0
+                .to_string()]))),
+            ..Filter::default()
+        };
+        let one = NonZeroUsize::new(1).expect("one is non-zero");
+        let relay_list = rig
+            .plane
+            .engine
+            .observe(
+                LiveQuery::from_filter(relay_list_filter),
+                Some(Window::Expandable {
+                    initial: one,
+                    max: one,
+                }),
+            )
+            .expect("NMP must open disposable-account relay discovery");
+        let mut discovered_write_relays = false;
+        for _ in 0..8 {
+            let frame = relay_list
+                .recv_timeout(Duration::from_secs(6))
+                .expect("relay discovery must advance within its bounded deadline");
+            if frame
+                .window
+                .as_ref()
+                .is_some_and(|window| !window.rows.is_empty())
+            {
+                discovered_write_relays = true;
+                break;
+            }
+        }
+        assert!(
+            discovered_write_relays,
+            "NMP did not ingest the disposable account's NIP-65 relay list"
+        );
+        relay_list.cancel();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the wall clock must be after the Unix epoch")
+            .as_secs();
+        let correlation = format!("nampplets-live-outbox-{now}-{}", std::process::id());
+        let outcome = dispatch(
+            &rig,
+            json!({
+                "type": "outbox.publish",
+                "id": correlation,
+                "event": {
+                    "kind": 1,
+                    "content": format!("nampplets NAP-OUTBOX live verification {now}"),
+                    "tags": [["t", "nampplets-runtime-verification"]],
+                    "created_at": now
+                }
+            }),
+        );
+        let DispatchOutcome::Handled(call) = outcome else {
+            panic!("the NAP-OUTBOX publish must be handled");
+        };
+        assert!(call.response.is_none());
+        assert!(!call.is_active());
+
+        let batch = tokio::time::timeout(Duration::from_secs(45), rig.observer.changed(8))
+            .await
+            .expect("the live NMP receipt must terminate within 45 seconds")
+            .expect("the provider push lane must remain open");
+        let result = batch
+            .pushes
+            .iter()
+            .map(|push| push.envelope.decode().expect("valid provider envelope"))
+            .find(|value| value["type"] == "outbox.publish.result")
+            .expect("the terminal NAP-OUTBOX result must be pushed");
+        assert_eq!(result["ok"], true, "live publish failed: {result}");
+        let event_id = result["eventId"]
+            .as_str()
+            .expect("an acknowledged publish must expose its canonical event id");
+        println!("NMP_LIVE_OUTBOX_EVENT_ID={event_id}");
 
         rig.registry.close_session(rig.context.id);
         rig.plane.close();

@@ -35,6 +35,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod catalog;
 mod nap;
 
 pub use nap::{NapNostrProvider, NapNostrProviderLimits, NapNostrProviderSet};
@@ -43,10 +44,12 @@ const EVENT_COLLECTION_FAMILY: &str = "event.collection";
 const EVENT_COLLECTION_SCHEMA: &str = "nostr.events.collection/1";
 const DEFAULT_INITIAL_ROWS: usize = 20;
 const MIN_FRAME_BYTES: usize = 1_024;
+const MAX_PROFILE_ACCOUNTS: usize = 32;
 
 /// One local trust profile backed by exactly one NMP engine.
 pub struct NmpDataPlane {
     engine: Arc<Engine>,
+    manifest_catalog: catalog::NmpManifestCatalog,
     workers: Arc<WorkerAdmission>,
     accounts: Mutex<AccountState>,
     identity: Arc<Mutex<IdentityState>>,
@@ -55,9 +58,18 @@ pub struct NmpDataPlane {
 
 const MAX_IDENTITY_OBSERVERS: usize = 64;
 
-/// Public, non-secret ownership proof for one exact local-account
-/// installation. The adapter never serializes or retains a secret key; its
-/// private state associates this handle with NMP's opaque registration.
+/// The capability attached to one profile-owned account installation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LocalAccountKind {
+    LocalSigner,
+    ReadOnly,
+}
+
+/// Public, non-secret ownership proof for one exact profile account
+/// installation. The adapter never serializes or retains a secret key. Local
+/// signer installations privately retain NMP's opaque registration; read-only
+/// installations retain only the canonical public key.
 ///
 /// A handle becomes stale when it is removed, or when registering the same
 /// public key replaces its NMP signing capability. A stale handle cannot
@@ -67,6 +79,7 @@ const MAX_IDENTITY_OBSERVERS: usize = 64;
 pub struct LocalAccountHandle {
     pub installation_id: u64,
     pub account: nmp_native_runtime_core::AccountRef,
+    pub kind: LocalAccountKind,
 }
 
 /// Bounded account-lifecycle projection for native account UI. It contains
@@ -87,7 +100,11 @@ pub enum AccountLifecycleError {
     Closed,
     #[error("local account secret key is invalid")]
     InvalidSecretKey,
-    #[error("NMP account capability registry is full at {limit} entries")]
+    #[error("read-only account public key is invalid")]
+    InvalidPublicKey,
+    #[error("the pinned NMP facade cannot resolve NIP-05 identifiers")]
+    Nip05ResolutionUnavailable,
+    #[error("profile account registry is full at {limit} entries")]
     Capacity { limit: usize },
     #[error("NMP account capability instance namespace is exhausted")]
     InstanceExhausted,
@@ -106,7 +123,7 @@ struct AccountState {
 #[derive(Debug)]
 struct InstalledAccount {
     handle: LocalAccountHandle,
-    registration: nmp::AccountRegistration,
+    registration: Option<nmp::AccountRegistration>,
 }
 
 #[derive(Debug)]
@@ -156,8 +173,14 @@ impl NmpDataPlane {
             .ok()
             .flatten()
             .map(|pubkey| nmp_native_runtime_core::AccountRef(Arc::from(pubkey.to_string())));
+        let manifest_catalog = catalog::NmpManifestCatalog::new(
+            Arc::clone(&engine),
+            catalog::ManifestCatalogLimits::default(),
+        )
+        .expect("the built-in manifest catalog limits are valid");
         Self {
             engine,
+            manifest_catalog,
             workers: Arc::new(WorkerAdmission {
                 active: AtomicUsize::new(0),
                 maximum: maximum_bridge_workers,
@@ -175,6 +198,12 @@ impl NmpDataPlane {
 
     pub fn active_bridge_workers(&self) -> usize {
         self.workers.active.load(Ordering::Acquire)
+    }
+
+    /// Returns the one profile-owned catalog facade. Clones share the same
+    /// bounded browse and exact-lookup admission domains.
+    pub fn manifest_catalog(&self) -> catalog::NmpManifestCatalog {
+        self.manifest_catalog.clone()
     }
 
     /// Register one local signer through the supported NMP facade. The secret
@@ -196,15 +225,33 @@ impl NmpDataPlane {
         let installation_id = accounts
             .next_installation_id
             .checked_add(1)
-            .ok_or_else(|| AccountLifecycleError::Failed {
-                reason: Arc::from("local account installation identifier space is exhausted"),
-            })?;
+            .ok_or(AccountLifecycleError::InstanceExhausted)?;
         let registration = self
             .engine
             .add_account(secret_key)
             .map_err(map_account_engine_error)?;
         let account =
             nmp_native_runtime_core::AccountRef(Arc::from(registration.public_key().to_string()));
+        let replaces_existing = accounts
+            .installations
+            .values()
+            .any(|installed| installed.handle.account == account);
+        if !replaces_existing && accounts.installations.len() >= MAX_PROFILE_ACCOUNTS {
+            let removed = self
+                .engine
+                .remove_account(&registration)
+                .map_err(map_account_engine_error)?;
+            if !removed {
+                return Err(AccountLifecycleError::Failed {
+                    reason: Arc::from(
+                        "NMP refused cleanup after the profile account limit was reached",
+                    ),
+                });
+            }
+            return Err(AccountLifecycleError::Capacity {
+                limit: MAX_PROFILE_ACCOUNTS,
+            });
+        }
         // The public facade invalidates an older same-key registration. Drop
         // the stale adapter record without trying to remove it: only the
         // exact new registration owns the replacement capability now.
@@ -215,12 +262,90 @@ impl NmpDataPlane {
         let handle = LocalAccountHandle {
             installation_id,
             account,
+            kind: LocalAccountKind::LocalSigner,
         };
         accounts.installations.insert(
             handle.installation_id,
             InstalledAccount {
                 handle: handle.clone(),
-                registration,
+                registration: Some(registration),
+            },
+        );
+        Ok(handle)
+    }
+
+    /// Register a keyless identity for read-only browsing. NMP's public-key
+    /// parser is the sole protocol parser on this path; no native or
+    /// application-owned NIP-19 implementation is used.
+    ///
+    /// The pinned NMP facade has no governed NIP-05 resolver. Inputs that
+    /// identify themselves as NIP-05 are refused truthfully instead of
+    /// triggering app-owned HTTP, DNS, or identity-resolution logic.
+    pub fn register_read_only_account(
+        &self,
+        public_identity: &str,
+    ) -> Result<LocalAccountHandle, AccountLifecycleError> {
+        self.ensure_account_service_open()?;
+        if public_identity.contains('@') {
+            return Err(AccountLifecycleError::Nip05ResolutionUnavailable);
+        }
+        let canonical_hex = public_identity.len() == 64
+            && public_identity
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+        let canonical_npub = public_identity.starts_with("npub1")
+            && public_identity
+                .bytes()
+                .all(|byte| !byte.is_ascii_uppercase());
+        if !canonical_hex && !canonical_npub {
+            return Err(AccountLifecycleError::InvalidPublicKey);
+        }
+        let public_key = nmp::PublicKey::from_str(public_identity)
+            .map_err(|_| AccountLifecycleError::InvalidPublicKey)?;
+        let account = nmp_native_runtime_core::AccountRef(Arc::from(public_key.to_string()));
+
+        let mut accounts = self.accounts.lock();
+        let existing_id = accounts
+            .installations
+            .iter()
+            .find_map(|(id, installed)| (installed.handle.account == account).then_some(*id));
+        if existing_id.is_none() && accounts.installations.len() >= MAX_PROFILE_ACCOUNTS {
+            return Err(AccountLifecycleError::Capacity {
+                limit: MAX_PROFILE_ACCOUNTS,
+            });
+        }
+        if let Some(existing_id) = existing_id {
+            let existing = accounts
+                .installations
+                .get(&existing_id)
+                .expect("the id was read from this map");
+            if let Some(registration) = &existing.registration {
+                let removed = self
+                    .engine
+                    .remove_account(registration)
+                    .map_err(map_account_engine_error)?;
+                if !removed {
+                    return Err(AccountLifecycleError::StaleInstallation);
+                }
+            }
+            accounts.installations.remove(&existing_id);
+        }
+
+        let installation_id = accounts
+            .next_installation_id
+            .checked_add(1)
+            .ok_or(AccountLifecycleError::InstanceExhausted)?;
+        accounts.next_installation_id = installation_id;
+        let handle = LocalAccountHandle {
+            installation_id,
+            account,
+            kind: LocalAccountKind::ReadOnly,
+        };
+        accounts.installations.insert(
+            installation_id,
+            InstalledAccount {
+                handle: handle.clone(),
+                registration: None,
             },
         );
         Ok(handle)
@@ -270,14 +395,15 @@ impl NmpDataPlane {
         let mut accounts = self.accounts.lock();
         let installed = installed_account(&accounts, handle)?;
         let account = installed.handle.account.clone();
-        let registration = installed.registration.clone();
-        let removed = self
-            .engine
-            .remove_account(&registration)
-            .map_err(map_account_engine_error)?;
-        if !removed {
-            accounts.installations.remove(&handle.installation_id);
-            return Err(AccountLifecycleError::StaleInstallation);
+        if let Some(registration) = &installed.registration {
+            let removed = self
+                .engine
+                .remove_account(registration)
+                .map_err(map_account_engine_error)?;
+            if !removed {
+                accounts.installations.remove(&handle.installation_id);
+                return Err(AccountLifecycleError::StaleInstallation);
+            }
         }
         accounts.installations.remove(&handle.installation_id);
         let active = self
@@ -2179,6 +2305,73 @@ mod tests {
                 .is_empty()
         );
         subscription.observation.close();
+        plane.close();
+    }
+
+    #[test]
+    fn read_only_accounts_accept_npub_and_hex_without_registering_a_signer() {
+        let plane = NmpDataPlane::open(EngineConfig::default(), 2).unwrap();
+        let npub = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6";
+        let first = plane.register_read_only_account(npub).unwrap();
+        assert_eq!(first.kind, LocalAccountKind::ReadOnly);
+        assert_eq!(first.account.0.len(), 64);
+        assert_eq!(
+            plane.activate_local_account(&first).unwrap().account,
+            Some(first.account.clone())
+        );
+
+        let replacement = plane
+            .register_read_only_account(first.account.0.as_ref())
+            .unwrap();
+        assert_eq!(replacement.kind, LocalAccountKind::ReadOnly);
+        assert_eq!(replacement.account, first.account);
+        assert_ne!(replacement.installation_id, first.installation_id);
+        assert!(matches!(
+            plane.activate_local_account(&first),
+            Err(AccountLifecycleError::StaleInstallation)
+        ));
+        assert_eq!(
+            plane.local_account_snapshot().unwrap().installations,
+            vec![replacement.clone()]
+        );
+        plane.remove_local_account(&replacement).unwrap();
+        assert_eq!(
+            plane.freeze_public_identity().unwrap().account,
+            None,
+            "removing an active keyless identity must log out"
+        );
+        plane.close();
+    }
+
+    #[test]
+    fn read_only_account_refusals_are_typed_and_profile_capacity_is_combined() {
+        let plane = NmpDataPlane::open(EngineConfig::default(), 2).unwrap();
+        assert_eq!(
+            plane.register_read_only_account("pablo@example.com"),
+            Err(AccountLifecycleError::Nip05ResolutionUnavailable)
+        );
+        assert_eq!(
+            plane.register_read_only_account("NOT-A-PUBLIC-KEY"),
+            Err(AccountLifecycleError::InvalidPublicKey)
+        );
+
+        for secret in 1_u8..=MAX_PROFILE_ACCOUNTS as u8 {
+            plane
+                .register_local_account(&format!("{:064x}", secret))
+                .unwrap();
+        }
+        assert_eq!(
+            plane.register_read_only_account(
+                "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5"
+            ),
+            Err(AccountLifecycleError::Capacity {
+                limit: MAX_PROFILE_ACCOUNTS
+            })
+        );
+        assert_eq!(
+            plane.local_account_snapshot().unwrap().installations.len(),
+            MAX_PROFILE_ACCOUNTS
+        );
         plane.close();
     }
 

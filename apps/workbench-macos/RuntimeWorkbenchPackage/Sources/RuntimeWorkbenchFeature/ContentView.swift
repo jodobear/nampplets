@@ -13,16 +13,19 @@ public struct ContentView: View {
     private let libraryManager: any WorkbenchLibraryManaging
     private let injectedPermissionManager: (any PermissionReviewManaging)?
 
-    @State private var selection = "Home"
     @State private var activity = "Opening application runtime profile"
-    @State private var installedArtifact: NativeRuntimeInstalledArtifact?
-    @State private var artifact: NappletArtifact?
-    @State private var isLaunchingArtifact = false
-    @State private var composerDraft = ""
-    @State private var detailDestination = "No selection"
+    @State private var pendingInstalledArtifact:
+        NativeRuntimeInstalledArtifact?
+    @State private var pendingInstalledIdentity:
+        WorkbenchExactBuildIdentity?
+    @State private var runningArtifacts:
+        [WorkbenchExactBuildIdentity: NappletArtifact] = [:]
+    @State private var launchingIdentity: WorkbenchExactBuildIdentity?
     @State private var layout: WorkbenchLayoutModel
     @State private var layoutPersistenceError: String?
     @State private var pendingLayoutSave: DispatchWorkItem?
+    @State private var accountSnapshot: WorkbenchAccountSnapshot
+    @State private var isInspectorPresented = false
     @State private var isAccountSheetPresented = false
     @State private var isCatalogSheetPresented = false
     @State private var isLibrarySheetPresented = false
@@ -35,7 +38,6 @@ public struct ContentView: View {
     @State private var permissionSheetError: String?
     @State private var settingsSnapshot: WorkbenchSettingsSnapshot?
     @State private var settingsRoute = WorkbenchSettingsRouteState()
-    @FocusState private var focusedRole: WorkbenchSlotRole?
 
     @MainActor
     public init(
@@ -54,11 +56,20 @@ public struct ContentView: View {
             ?? profile.map(RuntimeWorkbenchLayoutStore.init(profile:))
             ?? VolatileWorkbenchLayoutStore()
         self.layoutStore = resolvedLayoutStore
-        self.accountManager =
+        let resolvedAccountManager: any WorkbenchAccountManaging =
             accountManager
             ?? profile.map(RuntimeWorkbenchAccountManager.init(profile:))
             ?? UnavailableWorkbenchAccountManager()
-        self.catalogClient = catalogClient ?? RuntimeWorkbenchCatalogClient()
+        self.accountManager = resolvedAccountManager
+        _accountSnapshot = State(
+            initialValue: resolvedAccountManager.snapshot()
+        )
+        self.catalogClient =
+            catalogClient
+            ?? profile.map {
+                RuntimeWorkbenchCatalogClient(profileBacking: $0)
+            }
+            ?? RuntimeWorkbenchCatalogClient()
         self.libraryManager =
             libraryManager
             ?? profile.map(RuntimeWorkbenchLibraryManager.init(profile:))
@@ -87,94 +98,32 @@ public struct ContentView: View {
     }
 
     public var body: some View {
-        NavigationSplitView {
-            List(selection: $selection) {
-                Label("Home", systemImage: "house").tag("Home")
-                Label("Messages", systemImage: "bubble.left.and.bubble.right")
-                    .tag("Messages")
-                Label("Groups", systemImage: "person.3").tag("Groups")
-                Label("Streams", systemImage: "play.rectangle").tag("Streams")
-                Label("Tools", systemImage: "wrench.and.screwdriver").tag("Tools")
-            }
-            .navigationTitle("Workbench")
-            .navigationSplitViewColumnWidth(min: 160, ideal: 190, max: 260)
-        } detail: {
-            VStack(spacing: 0) {
-                workspaceControlStrip
-
+        VStack(spacing: 0) {
+            workspaceControlStrip
+            HStack(spacing: 0) {
                 WorkbenchWorkspaceView(
                     layout: $layout,
-                    focusedRole: $focusedRole,
                     onLayoutChange: scheduleLayoutSave,
-                    slotContent: slotContent
+                    onClose: closeWindow,
+                    windowContent: windowContent
                 )
-                .padding(12)
-
-                activityBar
+                if isInspectorPresented {
+                    Divider()
+                    nappletInspector
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
-            .navigationTitle(selection)
+            activityBar
         }
-        .toolbar {
-            ToolbarItemGroup {
-                Button(
-                    "Account",
-                    systemImage: "person.crop.circle"
-                ) {
-                    isAccountSheetPresented = true
-                }
-                .keyboardShortcut(",", modifiers: [.command, .shift])
-                .accessibilityHint(
-                    "Opens account registration, switching, and sign-out"
-                )
-                Button("Search", systemImage: "magnifyingglass") {
-                    isCatalogSheetPresented = true
-                }
-                .keyboardShortcut("f", modifiers: [.command, .shift])
-                .accessibilityHint(
-                    "Opens the read-only pinned compatibility catalog"
-                )
-                Button("Install", systemImage: "shippingbox") {
-                    isCatalogSheetPresented = true
-                }
-                .keyboardShortcut("i", modifiers: [.command, .shift])
-                .accessibilityHint(
-                    "Opens exact-build review; installation is not connected"
-                )
-                Button("Library", systemImage: "square.stack.3d.up") {
-                    isLibrarySheetPresented = true
-                }
-                .keyboardShortcut("l", modifiers: [.command, .shift])
-                .accessibilityHint(
-                    "Opens installed napplets and exact-build lifecycle controls"
-                )
-                Button("Activity", systemImage: "waveform.path.ecg") {
-                    openActivityDrawer()
-                }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
-                .accessibilityHint(
-                    "Shows bounded activity for the exact Good Morning build"
-                )
-                Button("Permissions", systemImage: "lock.shield") {
-                    openPermissionReview()
-                }
-                .keyboardShortcut("p", modifiers: [.command, .shift])
-                .accessibilityHint(
-                    "Reviews exact-build permissions without launching the napplet"
-                )
-                Button("Settings", systemImage: "gearshape") {
-                    openSettings()
-                }
-                .keyboardShortcut(",", modifiers: [.command])
-                .accessibilityHint(
-                    "Opens runtime ownership and management settings"
-                )
-            }
-        }
+        .background(.background)
         .sheet(isPresented: $isAccountSheetPresented) {
             WorkbenchAccountSheet(manager: accountManager)
         }
         .sheet(isPresented: $isCatalogSheetPresented) {
-            CatalogSheet(client: catalogClient)
+            CatalogSheet(
+                client: catalogClient,
+                onInstalled: handleCatalogInstallation
+            )
         }
         .sheet(isPresented: $isLibrarySheetPresented) {
             WorkbenchLibrarySheet(manager: libraryManager)
@@ -182,7 +131,7 @@ public struct ContentView: View {
         .sheet(isPresented: $isActivitySheetPresented) {
             if
                 let activitySource,
-                let scope = goodMorningActivityScope
+                let scope = selectedActivityScope
             {
                 ActivityDrawer(
                     source: activitySource,
@@ -255,48 +204,35 @@ public struct ContentView: View {
                     handleNativeAction(action)
                 }
             }
+            guard
+                ProcessInfo.processInfo.environment[
+                    "NMP_WORKBENCH_UI_TEST_SCENARIO"
+                ] == "good-morning-permission-launch"
+            else {
+                activity = "Canvas ready · add a napplet from the live catalog"
+                return
+            }
             do {
                 let fixture = try GoodMorningFixture.load()
                 let installed = try await Task.detached {
                     try fixture.install(profile: profile)
                 }.value
-                installedArtifact = installed
-                let principal = try goodMorningPermissionPrincipal()
-                let manager = try RuntimeWorkbenchPermissionManager(
-                    profile: profile,
-                    principal: principal
-                )
-                permissionManager = manager
-                let nativeReview = profile.native.permissionReview(
-                    for: installed.permissionCoordinate
-                )
-                guard nativeReview.refusal == nil,
-                      let review = nativeReview.review
-                else {
-                    throw RuntimeWorkbenchPermissionError.refused(
-                        code: nativeReview.refusal?.code ?? "missing-review",
-                        detail: nativeReview.refusal?.detail
-                            ?? "Rust returned no permission review"
+                try prepareInstalledArtifact(
+                    installed,
+                    identity: WorkbenchExactBuildIdentity(
+                        manifestAuthor: GoodMorningFixture.author,
+                        dTag: GoodMorningFixture.dTag,
+                        aggregateHash: GoodMorningFixture.aggregateHash
                     )
-                }
-                if review.launchPermitted {
-                    launchInstalledGoodMorning()
-                } else {
-                    activity = "Permission review required before launch"
-                    isPermissionSheetPresented = true
-                }
+                )
             } catch {
                 activity = "Refused: \(error.localizedDescription)"
             }
         }
-        .onChange(of: focusedRole) { _, newRole in
-            guard let newRole, layout.snapshot.focusedRole != newRole else {
-                return
+        .onChange(of: isAccountSheetPresented) { _, isPresented in
+            if !isPresented {
+                accountSnapshot = accountManager.snapshot()
             }
-            var next = layout
-            next.focus(newRole)
-            layout = next
-            scheduleLayoutSave()
         }
         .onChange(of: isSettingsSheetPresented) { _, isPresented in
             var route = settingsRoute
@@ -315,12 +251,11 @@ public struct ContentView: View {
         .onChange(of: isPermissionSheetPresented) { _, isPresented in
             guard
                 !isPresented,
-                artifact == nil,
                 permissionManager?.snapshot().submissionState == .applied
             else {
                 return
             }
-            launchInstalledGoodMorning()
+            launchPendingInstalledIfPermitted()
         }
         .onDisappear {
             pendingLayoutSave?.cancel()
@@ -331,93 +266,240 @@ public struct ContentView: View {
     }
 
     private var workspaceControlStrip: some View {
-        HStack(spacing: 12) {
-            Label("Workspace", systemImage: "rectangle.split.3x1")
-                .font(.headline)
+        HStack(spacing: 10) {
+            accountMenu
 
-            if let role = role(containing: .goodMorning) {
-                Text("Good Morning → \(role.title)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
+            Text("Workbench")
+                .font(.title3.weight(.semibold))
             Spacer()
 
-            Button("Show All Slots") {
-                mutateLayout { layout in
-                    for role in WorkbenchSlotRole.allCases {
-                        layout.setVisible(true, role: role)
+            Button {
+                isCatalogSheetPresented = true
+            } label: {
+                Label("Add Napplet", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut("n", modifiers: [.command])
+            .accessibilityIdentifier("add-napplet")
+            .accessibilityHint("Opens the network napplet catalog")
+
+            workspaceActionsMenu
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isInspectorPresented.toggle()
+                }
+            } label: {
+                Label(
+                    isInspectorPresented ? "Hide Inspector" : "Show Inspector",
+                    systemImage: "sidebar.right"
+                )
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .keyboardShortcut("i", modifiers: [.command, .option])
+            .accessibilityIdentifier("toggle-napplet-inspector")
+
+            layoutMenu
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 50)
+        .background(.bar)
+    }
+
+    private var accountMenu: some View {
+        Menu {
+            Section("Switch account") {
+                if accountSnapshot.accounts.isEmpty {
+                    Text("No stored accounts")
+                } else {
+                    ForEach(accountSnapshot.accounts) { account in
+                        Button {
+                            Task {
+                                await accountManager.activate(
+                                    handle: account.handle
+                                )
+                                accountSnapshot = accountManager.snapshot()
+                            }
+                        } label: {
+                            if accountSnapshot.activeHandle == account.handle {
+                                Label(
+                                    "\(accountDisplayName(account)) · "
+                                        + account.connectionKind.title,
+                                    systemImage: "checkmark"
+                                )
+                            } else {
+                                Label(
+                                    "\(accountDisplayName(account)) · "
+                                        + account.connectionKind.title,
+                                    systemImage: accountMenuSymbol(account)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if accountSnapshot.activeAccount != nil {
+                    Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") {
+                        Task {
+                            await accountManager.logout()
+                            accountSnapshot = accountManager.snapshot()
+                        }
                     }
                 }
             }
-            .accessibilityHint("Makes Feed, Detail, Composer, and Tool visible")
 
-            layoutMenu
-                .labelsHidden()
+            Section("Add account") {
+                Button("Signer-backed Account…", systemImage: "key") {
+                    isAccountSheetPresented = true
+                }
+                Button(
+                    "Read-only Identity…",
+                    systemImage: "person.text.rectangle"
+                ) {
+                    isAccountSheetPresented = true
+                }
+            }
+
+            Button("Manage Accounts…", systemImage: "person.2") {
+                isAccountSheetPresented = true
+            }
+        } label: {
+            Label(
+                activeAccountLabel,
+                systemImage: accountSnapshot.activeAccount == nil
+                    ? "person.crop.circle.badge.xmark"
+                    : "person.crop.circle.badge.checkmark"
+            )
         }
-        .padding(.horizontal, 14)
-        .frame(height: 42)
-        .background(.bar)
+        .menuStyle(.borderlessButton)
+        .accessibilityLabel("Account switcher")
+        .accessibilityValue(activeAccountLabel)
+        .accessibilityIdentifier("account-switcher")
+    }
+
+    private var workspaceActionsMenu: some View {
+        Menu {
+            Button("Installed Napplets", systemImage: "square.stack.3d.up") {
+                isLibrarySheetPresented = true
+            }
+            .keyboardShortcut("l", modifiers: [.command, .shift])
+
+            Button("Activity", systemImage: "waveform.path.ecg") {
+                openActivityDrawer()
+            }
+            .keyboardShortcut("a", modifiers: [.command, .shift])
+
+            Button("Permissions", systemImage: "lock.shield") {
+                openPermissionReview()
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button("Settings", systemImage: "gearshape") {
+                openSettings()
+            }
+            .keyboardShortcut(",", modifiers: [.command])
+        } label: {
+            Label("Workspace Actions", systemImage: "ellipsis.circle")
+        }
+        .labelStyle(.iconOnly)
+        .menuStyle(.borderlessButton)
+        .accessibilityHint(
+            "Opens installed napplets, activity, permissions, or settings"
+        )
     }
 
     private var layoutMenu: some View {
         Menu {
-            Section("Show or hide") {
-                ForEach(WorkbenchSlotRole.allCases, id: \.self) { role in
+            Section("Window layout") {
+                ForEach(WorkbenchLayoutMode.allCases, id: \.self) { mode in
                     Button {
-                        mutateLayout {
-                            $0.setVisible(!$0.isVisible(role), role: role)
-                        }
+                        mutateLayout { $0.setMode(mode) }
                     } label: {
-                        Label(
-                            "\(layout.isVisible(role) ? "Hide" : "Show") \(role.title)",
-                            systemImage: layout.isVisible(role) ? "eye.slash" : "eye"
-                        )
-                    }
-                    .keyboardShortcut(
-                        keyEquivalent(for: role),
-                        modifiers: [.command, .shift]
-                    )
-                }
-            }
-
-            Section("Focus") {
-                ForEach(WorkbenchSlotRole.allCases, id: \.self) { role in
-                    Button {
-                        mutateLayout { $0.focus(role) }
-                    } label: {
-                        Label("Focus \(role.title)", systemImage: role.systemImage)
-                    }
-                    .keyboardShortcut(
-                        keyEquivalent(for: role),
-                        modifiers: [.command, .option]
-                    )
-                }
-            }
-
-            Section("Good Morning role") {
-                ForEach(WorkbenchSlotRole.allCases, id: \.self) { role in
-                    Button {
-                        mutateLayout { $0.move(.goodMorning, to: role) }
-                    } label: {
-                        if layout.component(in: role) == .goodMorning {
-                            Label(role.title, systemImage: "checkmark")
+                        if layout.mode == mode {
+                            Label(mode.title, systemImage: "checkmark")
                         } else {
-                            Text("Move to \(role.title)")
+                            Label(mode.title, systemImage: mode.systemImage)
                         }
                     }
-                    .keyboardShortcut(
-                        keyEquivalent(for: role),
-                        modifiers: [.command, .control]
-                    )
                 }
             }
         } label: {
-            Label("Layout", systemImage: "rectangle.split.3x1")
+            Label(layout.mode.title, systemImage: layout.mode.systemImage)
         }
         .accessibilityHint(
-            "Shows, hides, focuses, or assigns Good Morning to workspace slots"
+            "Switches between freely arranged and automatically tiled napplet windows"
         )
+        .accessibilityIdentifier("layout-mode-menu")
+    }
+
+    private var nappletInspector: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("Napplet Inspector", systemImage: "info.circle")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isInspectorPresented = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Close napplet inspector")
+            }
+
+            Divider()
+
+            if let window = layout.selectedWindow {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(window.title)
+                        .font(.title3.weight(.semibold))
+                    LabeledContent(
+                        "Status",
+                        value: window.exactBuild.flatMap {
+                            runningArtifacts[$0]
+                        } == nil ? "Not running" : "Running"
+                    )
+                    LabeledContent("Layout", value: layout.mode.title)
+                    LabeledContent(
+                        "Window",
+                        value: "\(Int(window.frame.width)) × \(Int(window.frame.height))"
+                    )
+                    if let exactBuild = window.exactBuild {
+                        LabeledContent("Build") {
+                            Text(String(exactBuild.aggregateHash.prefix(12)))
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+
+                Divider()
+
+                Button("Review Permissions", systemImage: "lock.shield") {
+                    openPermissionReview()
+                }
+                Button("View Activity", systemImage: "waveform.path.ecg") {
+                    openActivityDrawer()
+                }
+            } else {
+                ContentUnavailableView(
+                    "No napplet selected",
+                    systemImage: "cursorarrow.click",
+                    description: Text("Select a napplet window to inspect it.")
+                )
+            }
+
+            Spacer()
+        }
+        .padding(16)
+        .frame(width: 290)
+        .background(.bar)
+        .accessibilityIdentifier("napplet-inspector")
     }
 
     private var activityBar: some View {
@@ -443,73 +525,43 @@ public struct ContentView: View {
     }
 
     @ViewBuilder
-    private func slotContent(_ role: WorkbenchSlotRole) -> some View {
-        if layout.component(in: role) == .goodMorning {
-            nappletSurface
+    private func windowContent(_ window: WorkbenchCanvasWindow) -> some View {
+        if
+            let identity = window.exactBuild,
+            let artifact = runningArtifacts[identity]
+        {
+            nappletSurface(artifact, title: window.title)
         } else {
-            switch role {
-            case .feed:
-                ContentUnavailableView(
-                    "No feed renderer",
-                    systemImage: "rectangle.stack.badge.minus",
-                    description: Text("Assign Good Morning or choose an installed renderer.")
+            ContentUnavailableView(
+                "Napplet is not running",
+                systemImage: "app.badge",
+                description: Text(
+                    "Open the installed build from the library to launch it."
                 )
-            case .detail:
-                ContentUnavailableView(
-                    detailDestination,
-                    systemImage: "doc.text.magnifyingglass",
-                    description: Text("Events and profiles open here.")
-                )
-            case .composer:
-                VStack(alignment: .leading, spacing: 8) {
-                    TextEditor(text: $composerDraft)
-                        .font(.body)
-                        .scrollContentBackground(.hidden)
-                        .padding(6)
-                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
-                        .accessibilityLabel("Native composer draft")
-                    HStack {
-                        Text("Native draft · no write is sent without approval")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Review Draft") {}
-                            .disabled(composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                    .font(.caption)
-                }
-                .padding(10)
-            case .tool:
-                ContentUnavailableView(
-                    "No tool assigned",
-                    systemImage: "wrench.and.screwdriver",
-                    description: Text("Move Good Morning here or choose an installed tool.")
-                )
-            }
+            )
         }
     }
 
     @ViewBuilder
-    private var nappletSurface: some View {
-        if let artifact {
-            TrustedNappletView(artifact: artifact) { event in
-                switch event {
-                case .loading:
-                    activity = "Loading trusted shell"
-                case .mounted:
-                    activity = "Signed Good Morning napplet mounted"
-                case .request(let type):
-                    activity = "Mapped \(type) from napplet window"
-                case .refused(let reason):
-                    activity = "Refused: \(reason)"
-                case .crashed:
-                    activity = "Napplet WebView crashed"
-                }
+    private func nappletSurface(
+        _ artifact: NappletArtifact,
+        title: String
+    ) -> some View {
+        TrustedNappletView(artifact: artifact) { event in
+            switch event {
+            case .loading:
+                activity = "Loading trusted shell"
+            case .mounted:
+                activity = "Signed \(title) napplet mounted"
+            case .request(let type):
+                activity = "Mapped \(type) from napplet window"
+            case .refused(let reason):
+                activity = "Refused: \(reason)"
+            case .crashed:
+                activity = "\(title) WebView crashed"
             }
-            .accessibilityIdentifier("bundled-napplet")
-        } else {
-            ProgressView("Loading verified artifact…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .accessibilityIdentifier("bundled-napplet")
     }
 
     private var activitySymbol: String {
@@ -524,11 +576,14 @@ public struct ContentView: View {
             : .green
     }
 
-    private var goodMorningActivityScope: ActivityExactBuildScope? {
-        ActivityExactBuildScope(
-            manifestAuthor: GoodMorningFixture.author,
-            dTag: GoodMorningFixture.dTag,
-            aggregateHash: GoodMorningFixture.aggregateHash
+    private var selectedActivityScope: ActivityExactBuildScope? {
+        guard let identity = layout.selectedWindow?.exactBuild else {
+            return nil
+        }
+        return ActivityExactBuildScope(
+            manifestAuthor: identity.manifestAuthor,
+            dTag: identity.dTag,
+            aggregateHash: identity.aggregateHash
         )
     }
 
@@ -541,43 +596,129 @@ public struct ContentView: View {
             isActivitySheetPresented = true
             return
         }
-        guard let scope = goodMorningActivityScope else {
+        guard let scope = selectedActivityScope else {
             activitySheetError =
-                "The bundled Good Morning exact-build identity is invalid."
+                "Select an exact-build napplet window to view its activity."
             isActivitySheetPresented = true
             return
         }
-        if activitySource == nil {
-            do {
-                activitySource = try RuntimeWorkbenchActivitySource(
-                    profile: profile,
-                    scope: scope
-                )
-            } catch {
-                activitySheetError = error.localizedDescription
-            }
+        activitySource = nil
+        do {
+            activitySource = try RuntimeWorkbenchActivitySource(
+                profile: profile,
+                scope: scope
+            )
+        } catch {
+            activitySheetError = error.localizedDescription
         }
         isActivitySheetPresented = true
     }
 
     @MainActor
-    private func launchInstalledGoodMorning() {
+    private func handleCatalogInstallation(
+        _ build: CatalogInstalledBuild
+    ) {
+        guard let profile else {
+            activity = "Refused: the application runtime profile is unavailable"
+            return
+        }
+        let identity = WorkbenchExactBuildIdentity(
+            manifestAuthor: build.manifestAuthor,
+            dTag: build.dTag,
+            aggregateHash: build.exactAggregateHash
+        )
         guard
-            !isLaunchingArtifact,
-            artifact == nil,
+            let installed = profile.installedCatalogArtifact(for: identity)
+        else {
+            activity =
+                "Refused: the verified artifact handle is unavailable for this profile"
+            return
+        }
+        do {
+            try prepareInstalledArtifact(installed, identity: identity)
+        } catch {
+            activity = "Refused: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    private func prepareInstalledArtifact(
+        _ installed: NativeRuntimeInstalledArtifact,
+        identity: WorkbenchExactBuildIdentity
+    ) throws {
+        guard let profile else {
+            throw RuntimeWorkbenchPermissionError.malformed(
+                "the application runtime profile is unavailable"
+            )
+        }
+        pendingInstalledArtifact = installed
+        pendingInstalledIdentity = identity
+        let principal = try permissionPrincipal(identity)
+        permissionManager = try RuntimeWorkbenchPermissionManager(
+            profile: profile,
+            principal: principal
+        )
+        let nativeReview = profile.native.permissionReview(
+            for: installed.permissionCoordinate
+        )
+        guard nativeReview.refusal == nil,
+              let review = nativeReview.review
+        else {
+            throw RuntimeWorkbenchPermissionError.refused(
+                code: nativeReview.refusal?.code ?? "missing-review",
+                detail: nativeReview.refusal?.detail
+                    ?? "Rust returned no permission review"
+            )
+        }
+        if review.launchPermitted {
+            launchPendingInstalledIfPermitted()
+        } else {
+            activity = "Permission review required before launch"
+            isPermissionSheetPresented = true
+        }
+    }
+
+    @MainActor
+    private func launchPendingInstalledIfPermitted() {
+        guard
             let profile,
-            let installedArtifact
+            let installed = pendingInstalledArtifact,
+            let identity = pendingInstalledIdentity,
+            launchingIdentity != identity,
+            runningArtifacts[identity] == nil
         else {
             return
         }
-        isLaunchingArtifact = true
+        let review = profile.native.permissionReview(
+            for: installed.permissionCoordinate
+        )
+        guard review.refusal == nil,
+              review.review?.launchPermitted == true
+        else {
+            activity = "Permission review still requires a decision"
+            return
+        }
+        launchingIdentity = identity
         activity = "Launching signed exact build"
         Task {
-            defer { isLaunchingArtifact = false }
+            defer { launchingIdentity = nil }
             do {
-                artifact = try await Task.detached {
-                    try profile.native.launchInstalled(installedArtifact)
+                let launched = try await Task.detached {
+                    try profile.native.launchInstalled(installed)
                 }.value
+                runningArtifacts[identity] = launched
+                let window = WorkbenchCanvasWindow.installed(
+                    title: installed.title,
+                    identity: identity,
+                    offset: Double(layout.windows.count % 8) * 24
+                )
+                if layout.window(id: window.id) == nil {
+                    mutateLayout {
+                        _ = $0.addWindow(window)
+                    }
+                }
+                pendingInstalledArtifact = nil
+                pendingInstalledIdentity = nil
                 activity = "Signed exact-build session ready"
             } catch {
                 activity = "Refused: \(error.localizedDescription)"
@@ -585,18 +726,20 @@ public struct ContentView: View {
         }
     }
 
-    private func goodMorningPermissionPrincipal()
+    private func permissionPrincipal(
+        _ identity: WorkbenchExactBuildIdentity
+    )
         throws -> PermissionExactBuildPrincipal
     {
         guard
             let principal = PermissionExactBuildPrincipal(
-                manifestAuthorPublicKey: GoodMorningFixture.author,
-                dTag: GoodMorningFixture.dTag,
-                aggregateHash: GoodMorningFixture.aggregateHash
+                manifestAuthorPublicKey: identity.manifestAuthor,
+                dTag: identity.dTag,
+                aggregateHash: identity.aggregateHash
             )
         else {
             throw RuntimeWorkbenchPermissionError.malformed(
-                "the bundled Good Morning exact-build identity is invalid"
+                "the selected exact-build identity is invalid"
             )
         }
         return principal
@@ -617,8 +760,17 @@ public struct ContentView: View {
             isPermissionSheetPresented = true
             return
         }
+        guard
+            let identity =
+                pendingInstalledIdentity ?? layout.selectedWindow?.exactBuild
+        else {
+            permissionSheetError =
+                "Select an exact-build napplet window to review permissions."
+            isPermissionSheetPresented = true
+            return
+        }
         do {
-            let principal = try goodMorningPermissionPrincipal()
+            let principal = try permissionPrincipal(identity)
             permissionManager = try RuntimeWorkbenchPermissionManager(
                 profile: profile,
                 principal: principal
@@ -662,20 +814,42 @@ public struct ContentView: View {
         }
     }
 
-    private func role(
-        containing component: WorkbenchComponentID
-    ) -> WorkbenchSlotRole? {
-        WorkbenchSlotRole.allCases.first {
-            layout.component(in: $0) == component
+    private var activeAccountLabel: String {
+        guard
+            let activeHandle = accountSnapshot.activeHandle,
+            let account = accountSnapshot.accounts.first(where: {
+                $0.handle == activeHandle
+            })
+        else {
+            return "Signed Out"
         }
+        return accountDisplayName(account)
     }
 
-    private func keyEquivalent(for role: WorkbenchSlotRole) -> KeyEquivalent {
-        switch role {
-        case .feed: "1"
-        case .detail: "2"
-        case .composer: "3"
-        case .tool: "4"
+    private func accountDisplayName(
+        _ account: WorkbenchStoredAccount
+    ) -> String {
+        let projectedIdentity = account.npub.isEmpty
+            ? account.publicKeyHex
+            : account.npub
+        guard projectedIdentity.count > 16 else {
+            return projectedIdentity.isEmpty
+                ? account.connectionKind.title
+                : projectedIdentity
+        }
+        return "\(projectedIdentity.prefix(8))…\(projectedIdentity.suffix(6))"
+    }
+
+    private func accountMenuSymbol(
+        _ account: WorkbenchStoredAccount
+    ) -> String {
+        switch account.connectionKind {
+        case .localSigner:
+            "key"
+        case .remoteSigner:
+            "network"
+        case .readOnly:
+            "eye"
         }
     }
 
@@ -688,8 +862,18 @@ public struct ContentView: View {
             return
         }
         layout = next
-        focusedRole = next.snapshot.focusedRole
         scheduleLayoutSave()
+    }
+
+    @MainActor
+    private func closeWindow(_ window: WorkbenchCanvasWindow) {
+        mutateLayout {
+            $0.removeWindow(id: window.id)
+        }
+        if let identity = window.exactBuild {
+            runningArtifacts.removeValue(forKey: identity)
+        }
+        activity = "Closed \(window.title) without uninstalling it"
     }
 
     private func scheduleLayoutSave() {
@@ -732,27 +916,13 @@ public struct ContentView: View {
 
     @MainActor
     private func handleNativeAction(_ action: NativeWorkbenchAction) {
-        let payload = (try? JSONSerialization.jsonObject(
-            with: Data(action.payloadJSON.utf8)
-        )) as? [String: Any]
         switch action.kind {
         case .noteOpen:
-            let target = payload?["target"] as? [String: Any]
-            let identifier =
-                target?["id"] as? String
-                ?? target?["identifier"] as? String
-                ?? "note"
-            detailDestination = "Note \(identifier.prefix(12))"
-            mutateLayout { $0.focus(.detail) }
-            activity = "Opened note action from Good Morning"
+            activity = "Good Morning requested a note action"
         case .profileOpen:
-            let publicKey = payload?["pubkey"] as? String ?? "profile"
-            detailDestination = "Profile \(publicKey.prefix(12))"
-            mutateLayout { $0.focus(.detail) }
-            activity = "Opened profile action from Good Morning"
+            activity = "Good Morning requested a profile action"
         case .composeOpen:
-            mutateLayout { $0.focus(.composer) }
-            activity = "Opened native reply composer from Good Morning"
+            activity = "Good Morning requested compose; no Workbench composer is installed"
         }
     }
 }

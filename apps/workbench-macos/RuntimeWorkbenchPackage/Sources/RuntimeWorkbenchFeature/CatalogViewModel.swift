@@ -8,21 +8,62 @@ public final class CatalogViewModel {
 
     public private(set) var entries: [CatalogEntry] = []
     public private(set) var hasMore = false
+    public private(set) var evidence: CatalogBrowseEvidence?
     public private(set) var review: CatalogInstallReview?
     public private(set) var installedBuild: CatalogInstalledBuild?
     public private(set) var issue: CatalogIssue?
-    public private(set) var isSearching = false
     public private(set) var isResolvingReview = false
     public private(set) var isInstalling = false
 
     private let client: any CatalogClient
+    private let onInstalled: @MainActor (CatalogInstalledBuild) -> Void
     private var operationGeneration: UInt = 0
+    private var feedGeneration: UInt = 0
+    private var feedObservation: CatalogFeedObservation?
+    private var started = false
 
-    public init(client: any CatalogClient) {
+    public init(
+        client: any CatalogClient,
+        onInstalled: @escaping @MainActor (CatalogInstalledBuild) -> Void = {
+            _ in
+        }
+    ) {
         self.client = client
+        self.onInstalled = onInstalled
+    }
+
+    /// Attaches to the profile-owned permanent feed and renders its latest
+    /// bounded replacement immediately.
+    public func start() async {
+        guard !started else {
+            return
+        }
+        started = true
+        feedObservation = client.observeChanges { [weak self] in
+            guard let self else {
+                return
+            }
+            Task { @MainActor in
+                await self.refreshFeed()
+            }
+        }
+        await refreshFeed()
+    }
+
+    /// Stops only this view's bounded native fanout. The profile-owned NMP
+    /// subscription remains open until the profile closes.
+    public func stop() {
+        feedGeneration &+= 1
+        feedObservation?.cancel()
+        feedObservation = nil
+        cancelTransientWork()
     }
 
     public func search() async {
+        await refreshFeed()
+    }
+
+    private func refreshFeed() async {
         guard let request = CatalogSearchRequest(query: query) else {
             issue = CatalogIssue(
                 title: "Search is too long",
@@ -31,23 +72,25 @@ public final class CatalogViewModel {
             return
         }
 
-        cancelTransientWork()
-        let generation = operationGeneration
-        isSearching = true
-        issue = nil
+        feedGeneration &+= 1
+        let generation = feedGeneration
         let response = await client.search(request)
-        guard generation == operationGeneration else {
+        guard generation == feedGeneration else {
             return
         }
-        isSearching = false
 
         switch response {
         case let .page(page):
             entries = page.entries
             hasMore = page.hasMore
+            evidence = page.evidence
+            if review == nil {
+                issue = nil
+            }
         case let .unavailable(problem):
             entries = []
             hasMore = false
+            evidence = nil
             issue = problem
         }
     }
@@ -57,6 +100,7 @@ public final class CatalogViewModel {
     }
 
     public func reviewManualCoordinate() async {
+        cancelTransientWork()
         guard let request = CatalogManualCoordinateRequest(
             coordinate: manualCoordinate
         ) else {
@@ -67,7 +111,10 @@ public final class CatalogViewModel {
             )
             return
         }
-        await resolveReview(.manualCoordinate(request))
+        await resolveReview(
+            .manualCoordinate(request),
+            cancelCurrentWork: false
+        )
     }
 
     public func cancelReview() {
@@ -76,29 +123,42 @@ public final class CatalogViewModel {
         issue = nil
     }
 
-    public func confirmInstall() async {
+    @discardableResult
+    public func confirmInstall() async -> CatalogInstalledBuild? {
         guard let review, review.canInstall, !isInstalling else {
-            return
+            return nil
         }
 
+        let generation = operationGeneration
         isInstalling = true
         issue = nil
         let response = await client.confirmExactVerifiedInstall(
             CatalogInstallConfirmation(review: review)
         )
+        guard generation == operationGeneration else {
+            return nil
+        }
         isInstalling = false
 
         switch response {
         case let .installed(build):
             installedBuild = build
             self.review = nil
+            onInstalled(build)
+            return build
         case let .refused(problem):
             issue = problem
+            return nil
         }
     }
 
-    private func resolveReview(_ target: CatalogReviewTarget) async {
-        cancelTransientWork()
+    private func resolveReview(
+        _ target: CatalogReviewTarget,
+        cancelCurrentWork: Bool = true
+    ) async {
+        if cancelCurrentWork {
+            cancelTransientWork()
+        }
         let generation = operationGeneration
         isResolvingReview = true
         issue = nil
@@ -119,8 +179,8 @@ public final class CatalogViewModel {
 
     private func cancelTransientWork() {
         operationGeneration &+= 1
-        isSearching = false
         isResolvingReview = false
+        isInstalling = false
         client.cancelPendingCatalogWork()
     }
 }

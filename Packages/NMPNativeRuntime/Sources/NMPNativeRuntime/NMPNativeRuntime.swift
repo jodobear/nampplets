@@ -559,6 +559,47 @@ public protocol RuntimeControllerProtocol: AnyObject, Sendable {
     func assignBuildToWorkspace(workspaceId: String, coordinate: RuntimeExactBuildCoordinate)
 
     /**
+     * Reads the latest replacement from the profile's permanent finite NMP
+     * manifest feed. A non-empty query filters that replacement locally; it
+     * never opens another relay subscription or claims NIP-50 completeness.
+     */
+    func catalogBrowse(query: String)  -> RuntimeCatalogPageResult
+
+    /**
+     * Cancels transient exact review/acquisition work. The profile-owned
+     * catalog feed stays subscribed until the profile closes.
+     */
+    func catalogCancelPending()  -> RuntimeCatalogCancellationResult
+
+    /**
+     * Cancels and discards one opaque exact review without side effects.
+     */
+    func catalogCancelReview(token: String)  -> RuntimeCatalogCancellationResult
+
+    /**
+     * Confirms one opaque frozen review and installs only its immutable exact
+     * bytes. This operation never grants capabilities and never launches.
+     */
+    func catalogConfirmInstall(token: String, expectedAuthor: String, expectedDTag: String, expectedAggregateHash: String)  -> RuntimeCatalogConfirmationResult
+
+    /**
+     * Returns the latest unfiltered catalog feed replacement and revision.
+     * The underlying NMP subscription remains profile-owned and permanent.
+     */
+    func catalogFeedSnapshot()  -> RuntimeCatalogFeedSnapshot
+
+    /**
+     * Freezes an exact review from one entry in the most recent bounded page.
+     */
+    func catalogReviewEntry(eventId: String)  -> RuntimeCatalogReviewResult
+
+    /**
+     * Parses and freezes an exact public manifest coordinate entirely in
+     * Rust. Native presentation never interprets Nostr coordinate identity.
+     */
+    func catalogReviewManual(coordinate: String)  -> RuntimeCatalogReviewResult
+
+    /**
      * Clears one exact build assignment without deleting the workspace,
      * installation, artifact bytes, NMP facts, or retained receipt ids.
      */
@@ -603,6 +644,16 @@ public protocol RuntimeControllerProtocol: AnyObject, Sendable {
      * exact installation handle.
      */
     func registerLocalAccount(secretKey: String)  -> RuntimeAccountUpdate
+
+    /**
+     * Registers a keyless read-only identity from canonical hexadecimal or
+     * `npub` input. Registration remains separate from activation.
+     *
+     * NIP-05-shaped input receives a typed refusal because the pinned NMP
+     * public facade has no governed resolver; this boundary never performs
+     * application-owned HTTP, DNS, or NIP-05 verification.
+     */
+    func registerReadOnlyAccount(publicIdentity: String)  -> RuntimeAccountUpdate
 
     /**
      * Removes only the exact local account installation named by the opaque
@@ -816,6 +867,90 @@ open func assignBuildToWorkspace(workspaceId: String, coordinate: RuntimeExactBu
 }
 
     /**
+     * Reads the latest replacement from the profile's permanent finite NMP
+     * manifest feed. A non-empty query filters that replacement locally; it
+     * never opens another relay subscription or claims NIP-50 completeness.
+     */
+open func catalogBrowse(query: String) -> RuntimeCatalogPageResult  {
+    return try!  FfiConverterTypeRuntimeCatalogPageResult_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_catalog_browse(self.uniffiClonePointer(),
+        FfiConverterString.lower(query),$0
+    )
+})
+}
+
+    /**
+     * Cancels transient exact review/acquisition work. The profile-owned
+     * catalog feed stays subscribed until the profile closes.
+     */
+open func catalogCancelPending() -> RuntimeCatalogCancellationResult  {
+    return try!  FfiConverterTypeRuntimeCatalogCancellationResult_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_catalog_cancel_pending(self.uniffiClonePointer(),$0
+    )
+})
+}
+
+    /**
+     * Cancels and discards one opaque exact review without side effects.
+     */
+open func catalogCancelReview(token: String) -> RuntimeCatalogCancellationResult  {
+    return try!  FfiConverterTypeRuntimeCatalogCancellationResult_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_catalog_cancel_review(self.uniffiClonePointer(),
+        FfiConverterString.lower(token),$0
+    )
+})
+}
+
+    /**
+     * Confirms one opaque frozen review and installs only its immutable exact
+     * bytes. This operation never grants capabilities and never launches.
+     */
+open func catalogConfirmInstall(token: String, expectedAuthor: String, expectedDTag: String, expectedAggregateHash: String) -> RuntimeCatalogConfirmationResult  {
+    return try!  FfiConverterTypeRuntimeCatalogConfirmationResult_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_catalog_confirm_install(self.uniffiClonePointer(),
+        FfiConverterString.lower(token),
+        FfiConverterString.lower(expectedAuthor),
+        FfiConverterString.lower(expectedDTag),
+        FfiConverterString.lower(expectedAggregateHash),$0
+    )
+})
+}
+
+    /**
+     * Returns the latest unfiltered catalog feed replacement and revision.
+     * The underlying NMP subscription remains profile-owned and permanent.
+     */
+open func catalogFeedSnapshot() -> RuntimeCatalogFeedSnapshot  {
+    return try!  FfiConverterTypeRuntimeCatalogFeedSnapshot_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_catalog_feed_snapshot(self.uniffiClonePointer(),$0
+    )
+})
+}
+
+    /**
+     * Freezes an exact review from one entry in the most recent bounded page.
+     */
+open func catalogReviewEntry(eventId: String) -> RuntimeCatalogReviewResult  {
+    return try!  FfiConverterTypeRuntimeCatalogReviewResult_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_catalog_review_entry(self.uniffiClonePointer(),
+        FfiConverterString.lower(eventId),$0
+    )
+})
+}
+
+    /**
+     * Parses and freezes an exact public manifest coordinate entirely in
+     * Rust. Native presentation never interprets Nostr coordinate identity.
+     */
+open func catalogReviewManual(coordinate: String) -> RuntimeCatalogReviewResult  {
+    return try!  FfiConverterTypeRuntimeCatalogReviewResult_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_catalog_review_manual(self.uniffiClonePointer(),
+        FfiConverterString.lower(coordinate),$0
+    )
+})
+}
+
+    /**
      * Clears one exact build assignment without deleting the workspace,
      * installation, artifact bytes, NMP facts, or retained receipt ids.
      */
@@ -927,6 +1062,22 @@ open func registerLocalAccount(secretKey: String) -> RuntimeAccountUpdate  {
     return try!  FfiConverterTypeRuntimeAccountUpdate_lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_register_local_account(self.uniffiClonePointer(),
         FfiConverterString.lower(secretKey),$0
+    )
+})
+}
+
+    /**
+     * Registers a keyless read-only identity from canonical hexadecimal or
+     * `npub` input. Registration remains separate from activation.
+     *
+     * NIP-05-shaped input receives a typed refusal because the pinned NMP
+     * public facade has no governed resolver; this boundary never performs
+     * application-owned HTTP, DNS, or NIP-05 verification.
+     */
+open func registerReadOnlyAccount(publicIdentity: String) -> RuntimeAccountUpdate  {
+    return try!  FfiConverterTypeRuntimeAccountUpdate_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_register_read_only_account(self.uniffiClonePointer(),
+        FfiConverterString.lower(publicIdentity),$0
     )
 })
 }
@@ -2153,12 +2304,14 @@ public func FfiConverterTypeObservationStart_lower(_ value: ObservationStart) ->
 public struct RuntimeAccountHandle {
     public var installationId: UInt64
     public var publicKey: String
+    public var kind: RuntimeAccountKind
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(installationId: UInt64, publicKey: String) {
+    public init(installationId: UInt64, publicKey: String, kind: RuntimeAccountKind) {
         self.installationId = installationId
         self.publicKey = publicKey
+        self.kind = kind
     }
 }
 
@@ -2175,12 +2328,16 @@ extension RuntimeAccountHandle: Equatable, Hashable {
         if lhs.publicKey != rhs.publicKey {
             return false
         }
+        if lhs.kind != rhs.kind {
+            return false
+        }
         return true
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(installationId)
         hasher.combine(publicKey)
+        hasher.combine(kind)
     }
 }
 
@@ -2194,13 +2351,15 @@ public struct FfiConverterTypeRuntimeAccountHandle: FfiConverterRustBuffer {
         return
             try RuntimeAccountHandle(
                 installationId: FfiConverterUInt64.read(from: &buf),
-                publicKey: FfiConverterString.read(from: &buf)
+                publicKey: FfiConverterString.read(from: &buf),
+                kind: FfiConverterTypeRuntimeAccountKind.read(from: &buf)
         )
     }
 
     public static func write(_ value: RuntimeAccountHandle, into buf: inout [UInt8]) {
         FfiConverterUInt64.write(value.installationId, into: &buf)
         FfiConverterString.write(value.publicKey, into: &buf)
+        FfiConverterTypeRuntimeAccountKind.write(value.kind, into: &buf)
     }
 }
 
@@ -2577,6 +2736,1202 @@ public func FfiConverterTypeRuntimeBindingSnapshot_lift(_ buf: RustBuffer) throw
 #endif
 public func FfiConverterTypeRuntimeBindingSnapshot_lower(_ value: RuntimeBindingSnapshot) -> RustBuffer {
     return FfiConverterTypeRuntimeBindingSnapshot.lower(value)
+}
+
+
+public struct RuntimeCatalogCancellationResult {
+    public var cancelled: Bool
+    public var failure: RuntimeCatalogFailure?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(cancelled: Bool, failure: RuntimeCatalogFailure?) {
+        self.cancelled = cancelled
+        self.failure = failure
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogCancellationResult: Sendable {}
+#endif
+
+
+extension RuntimeCatalogCancellationResult: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogCancellationResult, rhs: RuntimeCatalogCancellationResult) -> Bool {
+        if lhs.cancelled != rhs.cancelled {
+            return false
+        }
+        if lhs.failure != rhs.failure {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(cancelled)
+        hasher.combine(failure)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogCancellationResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogCancellationResult {
+        return
+            try RuntimeCatalogCancellationResult(
+                cancelled: FfiConverterBool.read(from: &buf),
+                failure: FfiConverterOptionTypeRuntimeCatalogFailure.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogCancellationResult, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.cancelled, into: &buf)
+        FfiConverterOptionTypeRuntimeCatalogFailure.write(value.failure, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogCancellationResult_lift(_ buf: RustBuffer) throws -> RuntimeCatalogCancellationResult {
+    return try FfiConverterTypeRuntimeCatalogCancellationResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogCancellationResult_lower(_ value: RuntimeCatalogCancellationResult) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogCancellationResult.lower(value)
+}
+
+
+public struct RuntimeCatalogCapability {
+    public var domain: String
+    public var requirement: RuntimePermissionRequirement
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(domain: String, requirement: RuntimePermissionRequirement) {
+        self.domain = domain
+        self.requirement = requirement
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogCapability: Sendable {}
+#endif
+
+
+extension RuntimeCatalogCapability: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogCapability, rhs: RuntimeCatalogCapability) -> Bool {
+        if lhs.domain != rhs.domain {
+            return false
+        }
+        if lhs.requirement != rhs.requirement {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(domain)
+        hasher.combine(requirement)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogCapability: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogCapability {
+        return
+            try RuntimeCatalogCapability(
+                domain: FfiConverterString.read(from: &buf),
+                requirement: FfiConverterTypeRuntimePermissionRequirement.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogCapability, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.domain, into: &buf)
+        FfiConverterTypeRuntimePermissionRequirement.write(value.requirement, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogCapability_lift(_ buf: RustBuffer) throws -> RuntimeCatalogCapability {
+    return try FfiConverterTypeRuntimeCatalogCapability.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogCapability_lower(_ value: RuntimeCatalogCapability) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogCapability.lower(value)
+}
+
+
+/**
+ * Screen record paired with the verified handle returned by confirmation.
+ */
+public struct RuntimeCatalogConfirmation {
+    public var eventId: String
+    public var coordinate: String
+    public var manifestAuthor: String
+    public var dTag: String?
+    public var title: String?
+    public var aggregateHash: String
+    public var capabilities: [RuntimeCatalogCapability]
+    public var provenance: [RuntimeCatalogProvenance]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(eventId: String, coordinate: String, manifestAuthor: String, dTag: String?, title: String?, aggregateHash: String, capabilities: [RuntimeCatalogCapability], provenance: [RuntimeCatalogProvenance]) {
+        self.eventId = eventId
+        self.coordinate = coordinate
+        self.manifestAuthor = manifestAuthor
+        self.dTag = dTag
+        self.title = title
+        self.aggregateHash = aggregateHash
+        self.capabilities = capabilities
+        self.provenance = provenance
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogConfirmation: Sendable {}
+#endif
+
+
+extension RuntimeCatalogConfirmation: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogConfirmation, rhs: RuntimeCatalogConfirmation) -> Bool {
+        if lhs.eventId != rhs.eventId {
+            return false
+        }
+        if lhs.coordinate != rhs.coordinate {
+            return false
+        }
+        if lhs.manifestAuthor != rhs.manifestAuthor {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.aggregateHash != rhs.aggregateHash {
+            return false
+        }
+        if lhs.capabilities != rhs.capabilities {
+            return false
+        }
+        if lhs.provenance != rhs.provenance {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(eventId)
+        hasher.combine(coordinate)
+        hasher.combine(manifestAuthor)
+        hasher.combine(dTag)
+        hasher.combine(title)
+        hasher.combine(aggregateHash)
+        hasher.combine(capabilities)
+        hasher.combine(provenance)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogConfirmation: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogConfirmation {
+        return
+            try RuntimeCatalogConfirmation(
+                eventId: FfiConverterString.read(from: &buf),
+                coordinate: FfiConverterString.read(from: &buf),
+                manifestAuthor: FfiConverterString.read(from: &buf),
+                dTag: FfiConverterOptionString.read(from: &buf),
+                title: FfiConverterOptionString.read(from: &buf),
+                aggregateHash: FfiConverterString.read(from: &buf),
+                capabilities: FfiConverterSequenceTypeRuntimeCatalogCapability.read(from: &buf),
+                provenance: FfiConverterSequenceTypeRuntimeCatalogProvenance.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogConfirmation, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.eventId, into: &buf)
+        FfiConverterString.write(value.coordinate, into: &buf)
+        FfiConverterString.write(value.manifestAuthor, into: &buf)
+        FfiConverterOptionString.write(value.dTag, into: &buf)
+        FfiConverterOptionString.write(value.title, into: &buf)
+        FfiConverterString.write(value.aggregateHash, into: &buf)
+        FfiConverterSequenceTypeRuntimeCatalogCapability.write(value.capabilities, into: &buf)
+        FfiConverterSequenceTypeRuntimeCatalogProvenance.write(value.provenance, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogConfirmation_lift(_ buf: RustBuffer) throws -> RuntimeCatalogConfirmation {
+    return try FfiConverterTypeRuntimeCatalogConfirmation.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogConfirmation_lower(_ value: RuntimeCatalogConfirmation) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogConfirmation.lower(value)
+}
+
+
+public struct RuntimeCatalogConfirmationResult {
+    public var confirmation: RuntimeCatalogConfirmation?
+    public var artifact: VerifiedArtifact?
+    public var failure: RuntimeCatalogFailure?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(confirmation: RuntimeCatalogConfirmation?, artifact: VerifiedArtifact?, failure: RuntimeCatalogFailure?) {
+        self.confirmation = confirmation
+        self.artifact = artifact
+        self.failure = failure
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogConfirmationResult: Sendable {}
+#endif
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogConfirmationResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogConfirmationResult {
+        return
+            try RuntimeCatalogConfirmationResult(
+                confirmation: FfiConverterOptionTypeRuntimeCatalogConfirmation.read(from: &buf),
+                artifact: FfiConverterOptionTypeVerifiedArtifact.read(from: &buf),
+                failure: FfiConverterOptionTypeRuntimeCatalogFailure.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogConfirmationResult, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeRuntimeCatalogConfirmation.write(value.confirmation, into: &buf)
+        FfiConverterOptionTypeVerifiedArtifact.write(value.artifact, into: &buf)
+        FfiConverterOptionTypeRuntimeCatalogFailure.write(value.failure, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogConfirmationResult_lift(_ buf: RustBuffer) throws -> RuntimeCatalogConfirmationResult {
+    return try FfiConverterTypeRuntimeCatalogConfirmationResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogConfirmationResult_lower(_ value: RuntimeCatalogConfirmationResult) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogConfirmationResult.lower(value)
+}
+
+
+/**
+ * One candidate from the current bounded NMP window.
+ */
+public struct RuntimeCatalogEntry {
+    public var eventId: String
+    public var coordinate: String?
+    public var manifestAuthor: String
+    public var kind: UInt16
+    public var createdAt: UInt64
+    public var dTag: String?
+    public var title: String?
+    public var description: String?
+    public var aggregateHash: String?
+    public var observedSources: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(eventId: String, coordinate: String?, manifestAuthor: String, kind: UInt16, createdAt: UInt64, dTag: String?, title: String?, description: String?, aggregateHash: String?, observedSources: [String]) {
+        self.eventId = eventId
+        self.coordinate = coordinate
+        self.manifestAuthor = manifestAuthor
+        self.kind = kind
+        self.createdAt = createdAt
+        self.dTag = dTag
+        self.title = title
+        self.description = description
+        self.aggregateHash = aggregateHash
+        self.observedSources = observedSources
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogEntry: Sendable {}
+#endif
+
+
+extension RuntimeCatalogEntry: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogEntry, rhs: RuntimeCatalogEntry) -> Bool {
+        if lhs.eventId != rhs.eventId {
+            return false
+        }
+        if lhs.coordinate != rhs.coordinate {
+            return false
+        }
+        if lhs.manifestAuthor != rhs.manifestAuthor {
+            return false
+        }
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.description != rhs.description {
+            return false
+        }
+        if lhs.aggregateHash != rhs.aggregateHash {
+            return false
+        }
+        if lhs.observedSources != rhs.observedSources {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(eventId)
+        hasher.combine(coordinate)
+        hasher.combine(manifestAuthor)
+        hasher.combine(kind)
+        hasher.combine(createdAt)
+        hasher.combine(dTag)
+        hasher.combine(title)
+        hasher.combine(description)
+        hasher.combine(aggregateHash)
+        hasher.combine(observedSources)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogEntry: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogEntry {
+        return
+            try RuntimeCatalogEntry(
+                eventId: FfiConverterString.read(from: &buf),
+                coordinate: FfiConverterOptionString.read(from: &buf),
+                manifestAuthor: FfiConverterString.read(from: &buf),
+                kind: FfiConverterUInt16.read(from: &buf),
+                createdAt: FfiConverterUInt64.read(from: &buf),
+                dTag: FfiConverterOptionString.read(from: &buf),
+                title: FfiConverterOptionString.read(from: &buf),
+                description: FfiConverterOptionString.read(from: &buf),
+                aggregateHash: FfiConverterOptionString.read(from: &buf),
+                observedSources: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogEntry, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.eventId, into: &buf)
+        FfiConverterOptionString.write(value.coordinate, into: &buf)
+        FfiConverterString.write(value.manifestAuthor, into: &buf)
+        FfiConverterUInt16.write(value.kind, into: &buf)
+        FfiConverterUInt64.write(value.createdAt, into: &buf)
+        FfiConverterOptionString.write(value.dTag, into: &buf)
+        FfiConverterOptionString.write(value.title, into: &buf)
+        FfiConverterOptionString.write(value.description, into: &buf)
+        FfiConverterOptionString.write(value.aggregateHash, into: &buf)
+        FfiConverterSequenceString.write(value.observedSources, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogEntry_lift(_ buf: RustBuffer) throws -> RuntimeCatalogEntry {
+    return try FfiConverterTypeRuntimeCatalogEntry.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogEntry_lower(_ value: RuntimeCatalogEntry) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogEntry.lower(value)
+}
+
+
+/**
+ * Typed, state-shaped refusal for every catalog boundary operation.
+ *
+ * The controller returns these inside records instead of throwing across the
+ * FFI boundary, keeping refusal and cancellation observable native state.
+ */
+public struct RuntimeCatalogFailure {
+    public var code: String
+    public var detail: String
+    public var provenance: [RuntimeCatalogProvenance]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(code: String, detail: String, provenance: [RuntimeCatalogProvenance]) {
+        self.code = code
+        self.detail = detail
+        self.provenance = provenance
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogFailure: Sendable {}
+#endif
+
+
+extension RuntimeCatalogFailure: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogFailure, rhs: RuntimeCatalogFailure) -> Bool {
+        if lhs.code != rhs.code {
+            return false
+        }
+        if lhs.detail != rhs.detail {
+            return false
+        }
+        if lhs.provenance != rhs.provenance {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(code)
+        hasher.combine(detail)
+        hasher.combine(provenance)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogFailure: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogFailure {
+        return
+            try RuntimeCatalogFailure(
+                code: FfiConverterString.read(from: &buf),
+                detail: FfiConverterString.read(from: &buf),
+                provenance: FfiConverterSequenceTypeRuntimeCatalogProvenance.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogFailure, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.code, into: &buf)
+        FfiConverterString.write(value.detail, into: &buf)
+        FfiConverterSequenceTypeRuntimeCatalogProvenance.write(value.provenance, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogFailure_lift(_ buf: RustBuffer) throws -> RuntimeCatalogFailure {
+    return try FfiConverterTypeRuntimeCatalogFailure.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogFailure_lower(_ value: RuntimeCatalogFailure) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogFailure.lower(value)
+}
+
+
+/**
+ * Latest replacement from the profile's single permanent NMP catalog feed.
+ */
+public struct RuntimeCatalogFeedSnapshot {
+    public var revision: UInt64
+    public var result: RuntimeCatalogPageResult
+    public var closed: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(revision: UInt64, result: RuntimeCatalogPageResult, closed: Bool) {
+        self.revision = revision
+        self.result = result
+        self.closed = closed
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogFeedSnapshot: Sendable {}
+#endif
+
+
+extension RuntimeCatalogFeedSnapshot: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogFeedSnapshot, rhs: RuntimeCatalogFeedSnapshot) -> Bool {
+        if lhs.revision != rhs.revision {
+            return false
+        }
+        if lhs.result != rhs.result {
+            return false
+        }
+        if lhs.closed != rhs.closed {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(revision)
+        hasher.combine(result)
+        hasher.combine(closed)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogFeedSnapshot: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogFeedSnapshot {
+        return
+            try RuntimeCatalogFeedSnapshot(
+                revision: FfiConverterUInt64.read(from: &buf),
+                result: FfiConverterTypeRuntimeCatalogPageResult.read(from: &buf),
+                closed: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogFeedSnapshot, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.revision, into: &buf)
+        FfiConverterTypeRuntimeCatalogPageResult.write(value.result, into: &buf)
+        FfiConverterBool.write(value.closed, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogFeedSnapshot_lift(_ buf: RustBuffer) throws -> RuntimeCatalogFeedSnapshot {
+    return try FfiConverterTypeRuntimeCatalogFeedSnapshot.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogFeedSnapshot_lower(_ value: RuntimeCatalogFeedSnapshot) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogFeedSnapshot.lower(value)
+}
+
+
+/**
+ * A finite page for one screen.
+ *
+ * `has_more` means matching rows were omitted by the 100-row screen
+ * projection. It does not claim that NMP, a relay, or the network is complete
+ * when false.
+ */
+public struct RuntimeCatalogPage {
+    public var entries: [RuntimeCatalogEntry]
+    public var queryWasLocalFilter: Bool
+    public var locallyFilteredRows: UInt64
+    public var projectionLimitedRows: UInt64
+    public var refusedRows: UInt64
+    public var hasMore: Bool
+    public var window: RuntimeCatalogWindowState
+    public var sources: [RuntimeCatalogSource]
+    public var shortfalls: [RuntimeCatalogShortfall]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(entries: [RuntimeCatalogEntry], queryWasLocalFilter: Bool, locallyFilteredRows: UInt64, projectionLimitedRows: UInt64, refusedRows: UInt64, hasMore: Bool, window: RuntimeCatalogWindowState, sources: [RuntimeCatalogSource], shortfalls: [RuntimeCatalogShortfall]) {
+        self.entries = entries
+        self.queryWasLocalFilter = queryWasLocalFilter
+        self.locallyFilteredRows = locallyFilteredRows
+        self.projectionLimitedRows = projectionLimitedRows
+        self.refusedRows = refusedRows
+        self.hasMore = hasMore
+        self.window = window
+        self.sources = sources
+        self.shortfalls = shortfalls
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogPage: Sendable {}
+#endif
+
+
+extension RuntimeCatalogPage: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogPage, rhs: RuntimeCatalogPage) -> Bool {
+        if lhs.entries != rhs.entries {
+            return false
+        }
+        if lhs.queryWasLocalFilter != rhs.queryWasLocalFilter {
+            return false
+        }
+        if lhs.locallyFilteredRows != rhs.locallyFilteredRows {
+            return false
+        }
+        if lhs.projectionLimitedRows != rhs.projectionLimitedRows {
+            return false
+        }
+        if lhs.refusedRows != rhs.refusedRows {
+            return false
+        }
+        if lhs.hasMore != rhs.hasMore {
+            return false
+        }
+        if lhs.window != rhs.window {
+            return false
+        }
+        if lhs.sources != rhs.sources {
+            return false
+        }
+        if lhs.shortfalls != rhs.shortfalls {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(entries)
+        hasher.combine(queryWasLocalFilter)
+        hasher.combine(locallyFilteredRows)
+        hasher.combine(projectionLimitedRows)
+        hasher.combine(refusedRows)
+        hasher.combine(hasMore)
+        hasher.combine(window)
+        hasher.combine(sources)
+        hasher.combine(shortfalls)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogPage: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogPage {
+        return
+            try RuntimeCatalogPage(
+                entries: FfiConverterSequenceTypeRuntimeCatalogEntry.read(from: &buf),
+                queryWasLocalFilter: FfiConverterBool.read(from: &buf),
+                locallyFilteredRows: FfiConverterUInt64.read(from: &buf),
+                projectionLimitedRows: FfiConverterUInt64.read(from: &buf),
+                refusedRows: FfiConverterUInt64.read(from: &buf),
+                hasMore: FfiConverterBool.read(from: &buf),
+                window: FfiConverterTypeRuntimeCatalogWindowState.read(from: &buf),
+                sources: FfiConverterSequenceTypeRuntimeCatalogSource.read(from: &buf),
+                shortfalls: FfiConverterSequenceTypeRuntimeCatalogShortfall.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogPage, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeRuntimeCatalogEntry.write(value.entries, into: &buf)
+        FfiConverterBool.write(value.queryWasLocalFilter, into: &buf)
+        FfiConverterUInt64.write(value.locallyFilteredRows, into: &buf)
+        FfiConverterUInt64.write(value.projectionLimitedRows, into: &buf)
+        FfiConverterUInt64.write(value.refusedRows, into: &buf)
+        FfiConverterBool.write(value.hasMore, into: &buf)
+        FfiConverterTypeRuntimeCatalogWindowState.write(value.window, into: &buf)
+        FfiConverterSequenceTypeRuntimeCatalogSource.write(value.sources, into: &buf)
+        FfiConverterSequenceTypeRuntimeCatalogShortfall.write(value.shortfalls, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogPage_lift(_ buf: RustBuffer) throws -> RuntimeCatalogPage {
+    return try FfiConverterTypeRuntimeCatalogPage.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogPage_lower(_ value: RuntimeCatalogPage) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogPage.lower(value)
+}
+
+
+public struct RuntimeCatalogPageResult {
+    public var page: RuntimeCatalogPage?
+    public var failure: RuntimeCatalogFailure?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(page: RuntimeCatalogPage?, failure: RuntimeCatalogFailure?) {
+        self.page = page
+        self.failure = failure
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogPageResult: Sendable {}
+#endif
+
+
+extension RuntimeCatalogPageResult: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogPageResult, rhs: RuntimeCatalogPageResult) -> Bool {
+        if lhs.page != rhs.page {
+            return false
+        }
+        if lhs.failure != rhs.failure {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(page)
+        hasher.combine(failure)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogPageResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogPageResult {
+        return
+            try RuntimeCatalogPageResult(
+                page: FfiConverterOptionTypeRuntimeCatalogPage.read(from: &buf),
+                failure: FfiConverterOptionTypeRuntimeCatalogFailure.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogPageResult, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeRuntimeCatalogPage.write(value.page, into: &buf)
+        FfiConverterOptionTypeRuntimeCatalogFailure.write(value.failure, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogPageResult_lift(_ buf: RustBuffer) throws -> RuntimeCatalogPageResult {
+    return try FfiConverterTypeRuntimeCatalogPageResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogPageResult_lower(_ value: RuntimeCatalogPageResult) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogPageResult.lower(value)
+}
+
+
+public struct RuntimeCatalogProvenance {
+    public var source: String
+    public var state: RuntimeCatalogLookupState
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(source: String, state: RuntimeCatalogLookupState) {
+        self.source = source
+        self.state = state
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogProvenance: Sendable {}
+#endif
+
+
+extension RuntimeCatalogProvenance: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogProvenance, rhs: RuntimeCatalogProvenance) -> Bool {
+        if lhs.source != rhs.source {
+            return false
+        }
+        if lhs.state != rhs.state {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(source)
+        hasher.combine(state)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogProvenance: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogProvenance {
+        return
+            try RuntimeCatalogProvenance(
+                source: FfiConverterString.read(from: &buf),
+                state: FfiConverterTypeRuntimeCatalogLookupState.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogProvenance, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.source, into: &buf)
+        FfiConverterTypeRuntimeCatalogLookupState.write(value.state, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogProvenance_lift(_ buf: RustBuffer) throws -> RuntimeCatalogProvenance {
+    return try FfiConverterTypeRuntimeCatalogProvenance.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogProvenance_lower(_ value: RuntimeCatalogProvenance) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogProvenance.lower(value)
+}
+
+
+/**
+ * An opaque exact review frozen from one verified signed manifest event.
+ */
+public struct RuntimeCatalogReview {
+    public var token: String
+    public var eventId: String
+    public var coordinate: String
+    public var manifestAuthor: String
+    public var dTag: String?
+    public var title: String?
+    public var description: String?
+    public var aggregateHash: String
+    public var capabilities: [RuntimeCatalogCapability]
+    public var blobSources: [String]
+    public var provenance: [RuntimeCatalogProvenance]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(token: String, eventId: String, coordinate: String, manifestAuthor: String, dTag: String?, title: String?, description: String?, aggregateHash: String, capabilities: [RuntimeCatalogCapability], blobSources: [String], provenance: [RuntimeCatalogProvenance]) {
+        self.token = token
+        self.eventId = eventId
+        self.coordinate = coordinate
+        self.manifestAuthor = manifestAuthor
+        self.dTag = dTag
+        self.title = title
+        self.description = description
+        self.aggregateHash = aggregateHash
+        self.capabilities = capabilities
+        self.blobSources = blobSources
+        self.provenance = provenance
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogReview: Sendable {}
+#endif
+
+
+extension RuntimeCatalogReview: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogReview, rhs: RuntimeCatalogReview) -> Bool {
+        if lhs.token != rhs.token {
+            return false
+        }
+        if lhs.eventId != rhs.eventId {
+            return false
+        }
+        if lhs.coordinate != rhs.coordinate {
+            return false
+        }
+        if lhs.manifestAuthor != rhs.manifestAuthor {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.description != rhs.description {
+            return false
+        }
+        if lhs.aggregateHash != rhs.aggregateHash {
+            return false
+        }
+        if lhs.capabilities != rhs.capabilities {
+            return false
+        }
+        if lhs.blobSources != rhs.blobSources {
+            return false
+        }
+        if lhs.provenance != rhs.provenance {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(token)
+        hasher.combine(eventId)
+        hasher.combine(coordinate)
+        hasher.combine(manifestAuthor)
+        hasher.combine(dTag)
+        hasher.combine(title)
+        hasher.combine(description)
+        hasher.combine(aggregateHash)
+        hasher.combine(capabilities)
+        hasher.combine(blobSources)
+        hasher.combine(provenance)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogReview: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogReview {
+        return
+            try RuntimeCatalogReview(
+                token: FfiConverterString.read(from: &buf),
+                eventId: FfiConverterString.read(from: &buf),
+                coordinate: FfiConverterString.read(from: &buf),
+                manifestAuthor: FfiConverterString.read(from: &buf),
+                dTag: FfiConverterOptionString.read(from: &buf),
+                title: FfiConverterOptionString.read(from: &buf),
+                description: FfiConverterOptionString.read(from: &buf),
+                aggregateHash: FfiConverterString.read(from: &buf),
+                capabilities: FfiConverterSequenceTypeRuntimeCatalogCapability.read(from: &buf),
+                blobSources: FfiConverterSequenceString.read(from: &buf),
+                provenance: FfiConverterSequenceTypeRuntimeCatalogProvenance.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogReview, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.token, into: &buf)
+        FfiConverterString.write(value.eventId, into: &buf)
+        FfiConverterString.write(value.coordinate, into: &buf)
+        FfiConverterString.write(value.manifestAuthor, into: &buf)
+        FfiConverterOptionString.write(value.dTag, into: &buf)
+        FfiConverterOptionString.write(value.title, into: &buf)
+        FfiConverterOptionString.write(value.description, into: &buf)
+        FfiConverterString.write(value.aggregateHash, into: &buf)
+        FfiConverterSequenceTypeRuntimeCatalogCapability.write(value.capabilities, into: &buf)
+        FfiConverterSequenceString.write(value.blobSources, into: &buf)
+        FfiConverterSequenceTypeRuntimeCatalogProvenance.write(value.provenance, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogReview_lift(_ buf: RustBuffer) throws -> RuntimeCatalogReview {
+    return try FfiConverterTypeRuntimeCatalogReview.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogReview_lower(_ value: RuntimeCatalogReview) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogReview.lower(value)
+}
+
+
+public struct RuntimeCatalogReviewResult {
+    public var review: RuntimeCatalogReview?
+    public var failure: RuntimeCatalogFailure?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(review: RuntimeCatalogReview?, failure: RuntimeCatalogFailure?) {
+        self.review = review
+        self.failure = failure
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogReviewResult: Sendable {}
+#endif
+
+
+extension RuntimeCatalogReviewResult: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogReviewResult, rhs: RuntimeCatalogReviewResult) -> Bool {
+        if lhs.review != rhs.review {
+            return false
+        }
+        if lhs.failure != rhs.failure {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(review)
+        hasher.combine(failure)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogReviewResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogReviewResult {
+        return
+            try RuntimeCatalogReviewResult(
+                review: FfiConverterOptionTypeRuntimeCatalogReview.read(from: &buf),
+                failure: FfiConverterOptionTypeRuntimeCatalogFailure.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogReviewResult, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeRuntimeCatalogReview.write(value.review, into: &buf)
+        FfiConverterOptionTypeRuntimeCatalogFailure.write(value.failure, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogReviewResult_lift(_ buf: RustBuffer) throws -> RuntimeCatalogReviewResult {
+    return try FfiConverterTypeRuntimeCatalogReviewResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogReviewResult_lower(_ value: RuntimeCatalogReviewResult) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogReviewResult.lower(value)
+}
+
+
+/**
+ * Source-scoped evidence. It never implies global completeness.
+ */
+public struct RuntimeCatalogSource {
+    public var relay: String
+    public var access: RuntimeCatalogSourceAccess
+    public var reconciledThrough: UInt64?
+    public var state: RuntimeCatalogSourceState
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(relay: String, access: RuntimeCatalogSourceAccess, reconciledThrough: UInt64?, state: RuntimeCatalogSourceState) {
+        self.relay = relay
+        self.access = access
+        self.reconciledThrough = reconciledThrough
+        self.state = state
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogSource: Sendable {}
+#endif
+
+
+extension RuntimeCatalogSource: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogSource, rhs: RuntimeCatalogSource) -> Bool {
+        if lhs.relay != rhs.relay {
+            return false
+        }
+        if lhs.access != rhs.access {
+            return false
+        }
+        if lhs.reconciledThrough != rhs.reconciledThrough {
+            return false
+        }
+        if lhs.state != rhs.state {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(relay)
+        hasher.combine(access)
+        hasher.combine(reconciledThrough)
+        hasher.combine(state)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogSource: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogSource {
+        return
+            try RuntimeCatalogSource(
+                relay: FfiConverterString.read(from: &buf),
+                access: FfiConverterTypeRuntimeCatalogSourceAccess.read(from: &buf),
+                reconciledThrough: FfiConverterOptionUInt64.read(from: &buf),
+                state: FfiConverterTypeRuntimeCatalogSourceState.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogSource, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.relay, into: &buf)
+        FfiConverterTypeRuntimeCatalogSourceAccess.write(value.access, into: &buf)
+        FfiConverterOptionUInt64.write(value.reconciledThrough, into: &buf)
+        FfiConverterTypeRuntimeCatalogSourceState.write(value.state, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogSource_lift(_ buf: RustBuffer) throws -> RuntimeCatalogSource {
+    return try FfiConverterTypeRuntimeCatalogSource.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogSource_lower(_ value: RuntimeCatalogSource) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogSource.lower(value)
 }
 
 
@@ -3260,6 +4615,7 @@ public func FfiConverterTypeRuntimeInstalledLibrarySnapshot_lower(_ value: Runti
 
 public struct RuntimeObservationFrame {
     public var snapshot: RuntimeSnapshot
+    public var catalog: RuntimeCatalogFeedSnapshot
     public var events: [RuntimeEvent]
     public var oldestAvailableEvent: UInt64
     public var newestAvailableEvent: UInt64
@@ -3267,8 +4623,9 @@ public struct RuntimeObservationFrame {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(snapshot: RuntimeSnapshot, events: [RuntimeEvent], oldestAvailableEvent: UInt64, newestAvailableEvent: UInt64, eventCursorWasStale: Bool) {
+    public init(snapshot: RuntimeSnapshot, catalog: RuntimeCatalogFeedSnapshot, events: [RuntimeEvent], oldestAvailableEvent: UInt64, newestAvailableEvent: UInt64, eventCursorWasStale: Bool) {
         self.snapshot = snapshot
+        self.catalog = catalog
         self.events = events
         self.oldestAvailableEvent = oldestAvailableEvent
         self.newestAvailableEvent = newestAvailableEvent
@@ -3284,6 +4641,9 @@ extension RuntimeObservationFrame: Sendable {}
 extension RuntimeObservationFrame: Equatable, Hashable {
     public static func ==(lhs: RuntimeObservationFrame, rhs: RuntimeObservationFrame) -> Bool {
         if lhs.snapshot != rhs.snapshot {
+            return false
+        }
+        if lhs.catalog != rhs.catalog {
             return false
         }
         if lhs.events != rhs.events {
@@ -3303,6 +4663,7 @@ extension RuntimeObservationFrame: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(snapshot)
+        hasher.combine(catalog)
         hasher.combine(events)
         hasher.combine(oldestAvailableEvent)
         hasher.combine(newestAvailableEvent)
@@ -3320,6 +4681,7 @@ public struct FfiConverterTypeRuntimeObservationFrame: FfiConverterRustBuffer {
         return
             try RuntimeObservationFrame(
                 snapshot: FfiConverterTypeRuntimeSnapshot.read(from: &buf),
+                catalog: FfiConverterTypeRuntimeCatalogFeedSnapshot.read(from: &buf),
                 events: FfiConverterSequenceTypeRuntimeEvent.read(from: &buf),
                 oldestAvailableEvent: FfiConverterUInt64.read(from: &buf),
                 newestAvailableEvent: FfiConverterUInt64.read(from: &buf),
@@ -3329,6 +4691,7 @@ public struct FfiConverterTypeRuntimeObservationFrame: FfiConverterRustBuffer {
 
     public static func write(_ value: RuntimeObservationFrame, into buf: inout [UInt8]) {
         FfiConverterTypeRuntimeSnapshot.write(value.snapshot, into: &buf)
+        FfiConverterTypeRuntimeCatalogFeedSnapshot.write(value.catalog, into: &buf)
         FfiConverterSequenceTypeRuntimeEvent.write(value.events, into: &buf)
         FfiConverterUInt64.write(value.oldestAvailableEvent, into: &buf)
         FfiConverterUInt64.write(value.newestAvailableEvent, into: &buf)
@@ -5309,6 +6672,8 @@ public enum RuntimeAccountFailure {
 
     case closed
     case invalidSecretKey
+    case invalidPublicKey
+    case nip05ResolutionUnavailable
     case capacity(limit: UInt64
     )
     case instanceExhausted
@@ -5336,14 +6701,18 @@ public struct FfiConverterTypeRuntimeAccountFailure: FfiConverterRustBuffer {
 
         case 2: return .invalidSecretKey
 
-        case 3: return .capacity(limit: try FfiConverterUInt64.read(from: &buf)
+        case 3: return .invalidPublicKey
+
+        case 4: return .nip05ResolutionUnavailable
+
+        case 5: return .capacity(limit: try FfiConverterUInt64.read(from: &buf)
         )
 
-        case 4: return .instanceExhausted
+        case 6: return .instanceExhausted
 
-        case 5: return .staleInstallation
+        case 7: return .staleInstallation
 
-        case 6: return .failed(reason: try FfiConverterString.read(from: &buf)
+        case 8: return .failed(reason: try FfiConverterString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -5362,21 +6731,29 @@ public struct FfiConverterTypeRuntimeAccountFailure: FfiConverterRustBuffer {
             writeInt(&buf, Int32(2))
 
 
-        case let .capacity(limit):
+        case .invalidPublicKey:
             writeInt(&buf, Int32(3))
+
+
+        case .nip05ResolutionUnavailable:
+            writeInt(&buf, Int32(4))
+
+
+        case let .capacity(limit):
+            writeInt(&buf, Int32(5))
             FfiConverterUInt64.write(limit, into: &buf)
 
 
         case .instanceExhausted:
-            writeInt(&buf, Int32(4))
+            writeInt(&buf, Int32(6))
 
 
         case .staleInstallation:
-            writeInt(&buf, Int32(5))
+            writeInt(&buf, Int32(7))
 
 
         case let .failed(reason):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(reason, into: &buf)
 
         }
@@ -5400,6 +6777,507 @@ public func FfiConverterTypeRuntimeAccountFailure_lower(_ value: RuntimeAccountF
 
 
 extension RuntimeAccountFailure: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeAccountKind {
+
+    case localSigner
+    case readOnly
+}
+
+
+#if compiler(>=6)
+extension RuntimeAccountKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeAccountKind: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeAccountKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeAccountKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .localSigner
+
+        case 2: return .readOnly
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeAccountKind, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .localSigner:
+            writeInt(&buf, Int32(1))
+
+
+        case .readOnly:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeAccountKind_lift(_ buf: RustBuffer) throws -> RuntimeAccountKind {
+    return try FfiConverterTypeRuntimeAccountKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeAccountKind_lower(_ value: RuntimeAccountKind) -> RustBuffer {
+    return FfiConverterTypeRuntimeAccountKind.lower(value)
+}
+
+
+extension RuntimeAccountKind: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeCatalogLookupState {
+
+    case observed(rows: UInt64
+    )
+    case shortfall(reason: String
+    )
+    case selected(eventId: String
+    )
+}
+
+
+#if compiler(>=6)
+extension RuntimeCatalogLookupState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogLookupState: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeCatalogLookupState
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogLookupState {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .observed(rows: try FfiConverterUInt64.read(from: &buf)
+        )
+
+        case 2: return .shortfall(reason: try FfiConverterString.read(from: &buf)
+        )
+
+        case 3: return .selected(eventId: try FfiConverterString.read(from: &buf)
+        )
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeCatalogLookupState, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case let .observed(rows):
+            writeInt(&buf, Int32(1))
+            FfiConverterUInt64.write(rows, into: &buf)
+
+
+        case let .shortfall(reason):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(reason, into: &buf)
+
+
+        case let .selected(eventId):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(eventId, into: &buf)
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogLookupState_lift(_ buf: RustBuffer) throws -> RuntimeCatalogLookupState {
+    return try FfiConverterTypeRuntimeCatalogLookupState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogLookupState_lower(_ value: RuntimeCatalogLookupState) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogLookupState.lower(value)
+}
+
+
+extension RuntimeCatalogLookupState: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeCatalogShortfall {
+
+    case noPlannedSource
+    case noResolvedDemand
+    case localLimit
+}
+
+
+#if compiler(>=6)
+extension RuntimeCatalogShortfall: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogShortfall: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeCatalogShortfall
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogShortfall {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .noPlannedSource
+
+        case 2: return .noResolvedDemand
+
+        case 3: return .localLimit
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeCatalogShortfall, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .noPlannedSource:
+            writeInt(&buf, Int32(1))
+
+
+        case .noResolvedDemand:
+            writeInt(&buf, Int32(2))
+
+
+        case .localLimit:
+            writeInt(&buf, Int32(3))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogShortfall_lift(_ buf: RustBuffer) throws -> RuntimeCatalogShortfall {
+    return try FfiConverterTypeRuntimeCatalogShortfall.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogShortfall_lower(_ value: RuntimeCatalogShortfall) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogShortfall.lower(value)
+}
+
+
+extension RuntimeCatalogShortfall: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeCatalogSourceAccess {
+
+    case `public`
+    case nip42(publicKey: String
+    )
+}
+
+
+#if compiler(>=6)
+extension RuntimeCatalogSourceAccess: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogSourceAccess: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeCatalogSourceAccess
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogSourceAccess {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .`public`
+
+        case 2: return .nip42(publicKey: try FfiConverterString.read(from: &buf)
+        )
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeCatalogSourceAccess, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .`public`:
+            writeInt(&buf, Int32(1))
+
+
+        case let .nip42(publicKey):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(publicKey, into: &buf)
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogSourceAccess_lift(_ buf: RustBuffer) throws -> RuntimeCatalogSourceAccess {
+    return try FfiConverterTypeRuntimeCatalogSourceAccess.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogSourceAccess_lower(_ value: RuntimeCatalogSourceAccess) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogSourceAccess.lower(value)
+}
+
+
+extension RuntimeCatalogSourceAccess: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeCatalogSourceState {
+
+    case requesting
+    case connecting
+    case disconnected
+    case awaitingAuth
+    case authDenied
+    case error
+}
+
+
+#if compiler(>=6)
+extension RuntimeCatalogSourceState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogSourceState: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeCatalogSourceState
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogSourceState {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .requesting
+
+        case 2: return .connecting
+
+        case 3: return .disconnected
+
+        case 4: return .awaitingAuth
+
+        case 5: return .authDenied
+
+        case 6: return .error
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeCatalogSourceState, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .requesting:
+            writeInt(&buf, Int32(1))
+
+
+        case .connecting:
+            writeInt(&buf, Int32(2))
+
+
+        case .disconnected:
+            writeInt(&buf, Int32(3))
+
+
+        case .awaitingAuth:
+            writeInt(&buf, Int32(4))
+
+
+        case .authDenied:
+            writeInt(&buf, Int32(5))
+
+
+        case .error:
+            writeInt(&buf, Int32(6))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogSourceState_lift(_ buf: RustBuffer) throws -> RuntimeCatalogSourceState {
+    return try FfiConverterTypeRuntimeCatalogSourceState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogSourceState_lower(_ value: RuntimeCatalogSourceState) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogSourceState.lower(value)
+}
+
+
+extension RuntimeCatalogSourceState: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeCatalogWindowState {
+
+    case idle
+    case requesting
+    case returned(added: UInt64
+    )
+    case atBound(maximum: UInt64
+    )
+    case unknown
+}
+
+
+#if compiler(>=6)
+extension RuntimeCatalogWindowState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogWindowState: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeCatalogWindowState
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogWindowState {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .idle
+
+        case 2: return .requesting
+
+        case 3: return .returned(added: try FfiConverterUInt64.read(from: &buf)
+        )
+
+        case 4: return .atBound(maximum: try FfiConverterUInt64.read(from: &buf)
+        )
+
+        case 5: return .unknown
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeCatalogWindowState, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .idle:
+            writeInt(&buf, Int32(1))
+
+
+        case .requesting:
+            writeInt(&buf, Int32(2))
+
+
+        case let .returned(added):
+            writeInt(&buf, Int32(3))
+            FfiConverterUInt64.write(added, into: &buf)
+
+
+        case let .atBound(maximum):
+            writeInt(&buf, Int32(4))
+            FfiConverterUInt64.write(maximum, into: &buf)
+
+
+        case .unknown:
+            writeInt(&buf, Int32(5))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogWindowState_lift(_ buf: RustBuffer) throws -> RuntimeCatalogWindowState {
+    return try FfiConverterTypeRuntimeCatalogWindowState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogWindowState_lower(_ value: RuntimeCatalogWindowState) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogWindowState.lower(value)
+}
+
+
+extension RuntimeCatalogWindowState: Equatable, Hashable {}
 
 
 
@@ -7264,6 +9142,102 @@ fileprivate struct FfiConverterOptionTypeRuntimeAccountSnapshot: FfiConverterRus
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeRuntimeCatalogConfirmation: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeCatalogConfirmation?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeCatalogConfirmation.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeCatalogConfirmation.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeCatalogFailure: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeCatalogFailure?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeCatalogFailure.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeCatalogFailure.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeCatalogPage: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeCatalogPage?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeCatalogPage.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeCatalogPage.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeCatalogReview: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeCatalogReview?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeCatalogReview.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeCatalogReview.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeRuntimePermissionReviewSnapshot: FfiConverterRustBuffer {
     typealias SwiftType = RuntimePermissionReviewSnapshot?
 
@@ -7501,6 +9475,106 @@ fileprivate struct FfiConverterSequenceTypeRuntimeBindingSnapshot: FfiConverterR
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeRuntimeBindingSnapshot.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeCatalogCapability: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeCatalogCapability]
+
+    public static func write(_ value: [RuntimeCatalogCapability], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeCatalogCapability.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeCatalogCapability] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeCatalogCapability]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeCatalogCapability.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeCatalogEntry: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeCatalogEntry]
+
+    public static func write(_ value: [RuntimeCatalogEntry], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeCatalogEntry.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeCatalogEntry] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeCatalogEntry]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeCatalogEntry.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeCatalogProvenance: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeCatalogProvenance]
+
+    public static func write(_ value: [RuntimeCatalogProvenance], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeCatalogProvenance.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeCatalogProvenance] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeCatalogProvenance]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeCatalogProvenance.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeCatalogSource: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeCatalogSource]
+
+    public static func write(_ value: [RuntimeCatalogSource], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeCatalogSource.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeCatalogSource] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeCatalogSource]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeCatalogSource.read(from: &buf))
         }
         return seq
     }
@@ -7781,6 +9855,31 @@ fileprivate struct FfiConverterSequenceTypeRuntimeWorkspaceSlot: FfiConverterRus
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeCatalogShortfall: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeCatalogShortfall]
+
+    public static func write(_ value: [RuntimeCatalogShortfall], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeCatalogShortfall.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeCatalogShortfall] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeCatalogShortfall]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeCatalogShortfall.read(from: &buf))
+        }
+        return seq
+    }
+}
+
 private enum InitializationResult {
     case ok
     case contractVersionMismatch
@@ -7806,6 +9905,27 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_assign_build_to_workspace() != 15625) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_catalog_browse() != 23533) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_catalog_cancel_pending() != 826) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_catalog_cancel_review() != 5050) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_catalog_confirm_install() != 48893) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_catalog_feed_snapshot() != 58762) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_catalog_review_entry() != 55651) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_catalog_review_manual() != 20937) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_clear_build_from_workspace() != 62607) {
@@ -7842,6 +9962,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_register_local_account() != 57733) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_register_read_only_account() != 3535) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_remove_local_account() != 63854) {

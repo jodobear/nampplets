@@ -1,6 +1,10 @@
+import Foundation
 import XCTest
 
 final class RuntimeWorkbenchUITests: XCTestCase {
+    private static let liveCatalogOptInMarker =
+        "/tmp/nampplets-run-live-catalog-ui-test"
+    private static let maximumLiveReviewAttempts = 6
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
@@ -49,6 +53,178 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         XCTAssertFalse(
             app.staticTexts["good-morning can't start here"].exists
         )
-        XCTAssertFalse(app.staticTexts["NAP-OUTBOX"].exists)
+        XCTAssertEqual(
+            app.staticTexts.matching(
+                NSPredicate(
+                    format: "value CONTAINS %@ OR label CONTAINS %@",
+                    "NAP-OUTBOX",
+                    "NAP-OUTBOX"
+                )
+            ).count,
+            0,
+            "No full or partial runtime warning may report NAP-OUTBOX absent"
+        )
+    }
+
+    @MainActor
+    func testLiveCatalogOpensVerifiedNetworkNappletReview() throws {
+        try XCTSkipUnless(
+            Self.liveCatalogTestIsEnabled,
+            "The live relay-backed catalog journey is opt-in. Set "
+                + "NMP_RUN_LIVE_CATALOG_UI_TEST=1 or create "
+                + Self.liveCatalogOptInMarker
+        )
+
+        let app = XCUIApplication()
+        app.launch()
+
+        let addNapplet = app.descendants(matching: .any)["add-napplet"]
+        XCTAssertTrue(addNapplet.waitForExistence(timeout: 10))
+        addNapplet.click()
+
+        let liveScope = app.descendants(matching: .any)[
+            "catalog-feed-evidence"
+        ]
+        XCTAssertTrue(
+            liveScope.waitForExistence(timeout: 30),
+            "The sheet must identify the permanent feed as a bounded live NMP window"
+        )
+        XCTAssertTrue(
+            liveScope.label.contains("Live NMP catalog window")
+                || (liveScope.value as? String)?.contains(
+                    "Live NMP catalog window"
+                ) == true
+        )
+
+        let catalogEntries = app.buttons.matching(identifier: "catalog-entry")
+        XCTAssertTrue(
+            catalogEntries.firstMatch.waitForExistence(timeout: 30),
+            "The production NMP catalog should project a bounded network result"
+        )
+
+        let attempts = min(
+            catalogEntries.count,
+            Self.maximumLiveReviewAttempts
+        )
+        XCTAssertGreaterThan(
+            attempts,
+            0,
+            "The permanent feed must expose at least one network napplet"
+        )
+
+        var installedExactBuild = false
+        for index in 0 ..< attempts {
+            let entry = catalogEntries.element(boundBy: index)
+            guard entry.waitForExistence(timeout: 2), entry.isHittable else {
+                continue
+            }
+            entry.click()
+
+            let installExactBuild = app.buttons[
+                "catalog-install-exact-build"
+            ]
+            guard installExactBuild.waitForExistence(timeout: 20) else {
+                continue
+            }
+            guard installExactBuild.isEnabled else {
+                dismissCatalogReview(in: app)
+                continue
+            }
+
+            XCTAssertTrue(
+                installExactBuild.label.contains("Install Exact Build"),
+                "The review must offer only the frozen exact-build action"
+            )
+            installExactBuild.click()
+
+            if waitForNonexistence(
+                of: installExactBuild,
+                timeout: 60
+            ) {
+                installedExactBuild = true
+                break
+            }
+
+            // A real source can disappear between review and acquisition.
+            // Try another already-bounded feed entry without retrying this
+            // consumed exact review.
+            dismissCatalogReview(in: app)
+        }
+
+        XCTAssertTrue(
+            installedExactBuild,
+            "At least one bounded network candidate should complete exact verified installation"
+        )
+
+        let renderedNapplet = app.groups["bundled-napplet"]
+        if renderedNapplet.waitForExistence(timeout: 30) {
+            XCTAssertTrue(
+                app.groups["napplet-canvas"].exists,
+                "A safely launchable network build must render inside the native canvas"
+            )
+            XCTAssertFalse(
+                app.descendants(matching: .any)
+                    .matching(
+                        NSPredicate(
+                            format: "label BEGINSWITH %@ OR value BEGINSWITH %@",
+                            "Refused:",
+                            "Refused:"
+                        )
+                    )
+                    .firstMatch
+                    .exists,
+                "The selected real build must not be reported as refused after rendering"
+            )
+            return
+        }
+
+        // Do not approve any capability for a network napplet in this test.
+        // Reaching Rust's exact permission review proves installation and is
+        // the furthest safe point when launch requires new grants.
+        XCTAssertTrue(
+            app.buttons[
+                "permission-confirm"
+            ].waitForExistence(timeout: 10),
+            "An installed build that cannot launch grant-free must enter exact permission review"
+        )
+    }
+
+    private static var liveCatalogTestIsEnabled: Bool {
+        ProcessInfo.processInfo.environment[
+            "NMP_RUN_LIVE_CATALOG_UI_TEST"
+        ] == "1"
+            || FileManager.default.fileExists(
+                atPath: liveCatalogOptInMarker
+            )
+    }
+
+    @MainActor
+    private func dismissCatalogReview(in app: XCUIApplication) {
+        let cancel = app.buttons.matching(identifier: "Cancel").firstMatch
+        guard cancel.waitForExistence(timeout: 2), cancel.isHittable else {
+            return
+        }
+        cancel.click()
+        _ = waitForNonexistence(
+            of: app.buttons[
+                "catalog-install-exact-build"
+            ],
+            timeout: 5
+        )
+    }
+
+    @MainActor
+    private func waitForNonexistence(
+        of element: XCUIElement,
+        timeout: TimeInterval
+    ) -> Bool {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: element
+        )
+        return XCTWaiter.wait(
+            for: [expectation],
+            timeout: timeout
+        ) == .completed
     }
 }

@@ -1483,8 +1483,10 @@ version = "0.1.0"
 dependencies = [
  "nmp-native-artifact",
  "parking_lot",
+ "reqwest",
  "tempfile",
  "thiserror",
+ "tokio",
  "url",
 ]
 
@@ -1505,6 +1507,8 @@ name = "nmp-native-nmp-adapter"
 version = "0.1.0"
 dependencies = [
  "nmp",
+ "nmp-native-artifact",
+ "nmp-native-catalog-resolver",
  "nmp-native-nap-bridge",
  "nmp-native-runtime-core",
  "parking_lot",
@@ -1618,6 +1622,7 @@ version = "0.1.0"
 dependencies = [
  "nmp",
  "nmp-native-artifact",
+ "nmp-native-catalog-resolver",
  "nmp-native-nap-bridge",
  "nmp-native-nmp-adapter",
  "nmp-native-provider-identity",

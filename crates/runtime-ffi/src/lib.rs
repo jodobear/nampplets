@@ -26,8 +26,8 @@ use nmp_native_artifact::{
 };
 use nmp_native_nap_bridge::{BridgeLimits, Provider};
 use nmp_native_nmp_adapter::{
-    AccountLifecycleError, LocalAccountHandle, LocalAccountSnapshot, NapNostrProviderLimits,
-    NapNostrProviderSet, NmpDataPlane,
+    AccountLifecycleError, LocalAccountHandle, LocalAccountKind, LocalAccountSnapshot,
+    NapNostrProviderLimits, NapNostrProviderSet, NmpDataPlane,
 };
 use nmp_native_provider_identity::{
     IdentityDataPlane, IdentityProvider, IdentityProviderLimits, NoopIdentityDiagnostics,
@@ -62,6 +62,18 @@ use nmp_native_surface::BindingLimits;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
+
+mod catalog;
+
+pub use catalog::{
+    RuntimeCatalogCancellationResult, RuntimeCatalogCapability, RuntimeCatalogConfirmation,
+    RuntimeCatalogConfirmationResult, RuntimeCatalogEntry, RuntimeCatalogFailure,
+    RuntimeCatalogFeedSnapshot, RuntimeCatalogLookupState, RuntimeCatalogPage,
+    RuntimeCatalogPageResult, RuntimeCatalogProvenance, RuntimeCatalogReview,
+    RuntimeCatalogReviewResult, RuntimeCatalogShortfall, RuntimeCatalogSource,
+    RuntimeCatalogSourceAccess, RuntimeCatalogSourceState, RuntimeCatalogWindowState,
+};
+use catalog::{RuntimeCatalogService, project_catalog_error};
 
 const DEFAULT_MAXIMUM_CONFIG_STRING_BYTES: u64 = 16 * 1_024;
 const DEFAULT_MAXIMUM_CONFIG_ITEMS: u64 = 64;
@@ -656,6 +668,13 @@ impl RuntimeProviderUpdate {
 pub struct RuntimeAccountHandle {
     pub installation_id: u64,
     pub public_key: String,
+    pub kind: RuntimeAccountKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RuntimeAccountKind {
+    LocalSigner,
+    ReadOnly,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
@@ -669,6 +688,8 @@ pub struct RuntimeAccountSnapshot {
 pub enum RuntimeAccountFailure {
     Closed,
     InvalidSecretKey,
+    InvalidPublicKey,
+    Nip05ResolutionUnavailable,
     Capacity { limit: u64 },
     InstanceExhausted,
     StaleInstallation,
@@ -977,6 +998,7 @@ pub struct RuntimeEvent {
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct RuntimeObservationFrame {
     pub snapshot: RuntimeSnapshot,
+    pub catalog: RuntimeCatalogFeedSnapshot,
     pub events: Vec<RuntimeEvent>,
     pub oldest_available_event: u64,
     pub newest_available_event: u64,
@@ -1020,7 +1042,8 @@ pub struct RuntimeController {
     app: Arc<RuntimeApp>,
     data_plane: Arc<NmpDataPlane>,
     runtime_store: Arc<RuntimeStore>,
-    artifact_cache: FileArtifactCache,
+    artifact_cache: Arc<FileArtifactCache>,
+    catalog: Arc<RuntimeCatalogService>,
     artifact_source: CallbackArtifactSource,
     artifact_limits: ArtifactLimits,
     maximum_manifest_bytes: usize,
@@ -1190,11 +1213,13 @@ fn open_runtime_controller(
             },
         )?,
     );
-    let artifact_cache = FileArtifactCache::open(&config.artifact_cache_path).map_err(|error| {
-        RuntimeOpenError::ArtifactCache {
-            detail: error.to_string(),
-        }
-    })?;
+    let artifact_cache = Arc::new(
+        FileArtifactCache::open(&config.artifact_cache_path).map_err(|error| {
+            RuntimeOpenError::ArtifactCache {
+                detail: error.to_string(),
+            }
+        })?,
+    );
     let data_plane = Arc::new(
         NmpDataPlane::open(
             EngineConfig {
@@ -1210,6 +1235,18 @@ fn open_runtime_controller(
         )
         .map_err(|error| RuntimeOpenError::Nmp {
             detail: error.to_string(),
+        })?,
+    );
+    let catalog = Arc::new(
+        RuntimeCatalogService::new(
+            Arc::clone(&data_plane),
+            Arc::clone(&artifact_cache),
+            config.artifact_limits,
+            config.maximum_manifest_bytes,
+            config.maximum_blob_sources,
+        )
+        .map_err(|error| RuntimeOpenError::Runtime {
+            detail: format!("catalog: {error}"),
         })?,
     );
     let shell_provider = Arc::new(
@@ -1337,6 +1374,7 @@ fn open_runtime_controller(
         data_plane,
         runtime_store,
         artifact_cache,
+        catalog,
         artifact_source: CallbackArtifactSource {
             callback: Arc::from(artifact_source),
         },
@@ -1462,6 +1500,35 @@ impl RuntimeController {
         }
     }
 
+    /// Registers a keyless read-only identity from canonical hexadecimal or
+    /// `npub` input. Registration remains separate from activation.
+    ///
+    /// NIP-05-shaped input receives a typed refusal because the pinned NMP
+    /// public facade has no governed resolver; this boundary never performs
+    /// application-owned HTTP, DNS, or NIP-05 verification.
+    pub fn register_read_only_account(&self, public_identity: String) -> RuntimeAccountUpdate {
+        if public_identity.is_empty()
+            || public_identity.len() > 1_024
+            || public_identity.chars().any(char::is_control)
+        {
+            return RuntimeAccountUpdate {
+                accepted: false,
+                handle: None,
+                snapshot: None,
+                failure: Some(RuntimeAccountFailure::InvalidPublicKey),
+            };
+        }
+        match self.data_plane.register_read_only_account(&public_identity) {
+            Ok(handle) => self.account_update(Some(handle)),
+            Err(error) => RuntimeAccountUpdate {
+                accepted: false,
+                handle: None,
+                snapshot: None,
+                failure: Some(project_account_error(error)),
+            },
+        }
+    }
+
     /// Selects one exact, currently-owned local account installation.
     pub fn activate_local_account(&self, handle: RuntimeAccountHandle) -> RuntimeAccountUpdate {
         let handle = local_account_handle(handle);
@@ -1519,6 +1586,203 @@ impl RuntimeController {
                 snapshot: None,
                 failure: Some(project_account_error(error)),
             },
+        }
+    }
+
+    /// Reads the latest replacement from the profile's permanent finite NMP
+    /// manifest feed. A non-empty query filters that replacement locally; it
+    /// never opens another relay subscription or claims NIP-50 completeness.
+    pub fn catalog_browse(&self, query: String) -> RuntimeCatalogPageResult {
+        if self.closed.load(Ordering::Acquire) {
+            return RuntimeCatalogPageResult {
+                page: None,
+                failure: Some(runtime_catalog_failure("closed", "runtime is closed")),
+            };
+        }
+        if query.len() > 256 || query.chars().any(char::is_control) {
+            return RuntimeCatalogPageResult {
+                page: None,
+                failure: Some(runtime_catalog_failure(
+                    "invalid-query",
+                    "catalog query exceeds 256 UTF-8 bytes or contains control characters",
+                )),
+            };
+        }
+        match self.catalog.browse(Some(&query)) {
+            Ok(page) => RuntimeCatalogPageResult {
+                page: Some(page),
+                failure: None,
+            },
+            Err(error) => RuntimeCatalogPageResult {
+                page: None,
+                failure: Some(project_catalog_error(error)),
+            },
+        }
+    }
+
+    /// Returns the latest unfiltered catalog feed replacement and revision.
+    /// The underlying NMP subscription remains profile-owned and permanent.
+    pub fn catalog_feed_snapshot(&self) -> RuntimeCatalogFeedSnapshot {
+        self.catalog.feed_snapshot(None)
+    }
+
+    /// Freezes an exact review from one entry in the most recent bounded page.
+    pub fn catalog_review_entry(&self, event_id: String) -> RuntimeCatalogReviewResult {
+        if self.closed.load(Ordering::Acquire) {
+            return RuntimeCatalogReviewResult {
+                review: None,
+                failure: Some(runtime_catalog_failure("closed", "runtime is closed")),
+            };
+        }
+        match self.catalog.begin_review_for_entry(&event_id) {
+            Ok(review) => RuntimeCatalogReviewResult {
+                review: Some(review),
+                failure: None,
+            },
+            Err(error) => RuntimeCatalogReviewResult {
+                review: None,
+                failure: Some(project_catalog_error(error)),
+            },
+        }
+    }
+
+    /// Parses and freezes an exact public manifest coordinate entirely in
+    /// Rust. Native presentation never interprets Nostr coordinate identity.
+    pub fn catalog_review_manual(&self, coordinate: String) -> RuntimeCatalogReviewResult {
+        if self.closed.load(Ordering::Acquire) {
+            return RuntimeCatalogReviewResult {
+                review: None,
+                failure: Some(runtime_catalog_failure("closed", "runtime is closed")),
+            };
+        }
+        let coordinate = match parse_catalog_coordinate(&coordinate) {
+            Ok(coordinate) => coordinate,
+            Err(detail) => {
+                return RuntimeCatalogReviewResult {
+                    review: None,
+                    failure: Some(runtime_catalog_failure("invalid-coordinate", detail)),
+                };
+            }
+        };
+        match self.catalog.begin_review(coordinate) {
+            Ok(review) => RuntimeCatalogReviewResult {
+                review: Some(review),
+                failure: None,
+            },
+            Err(error) => RuntimeCatalogReviewResult {
+                review: None,
+                failure: Some(project_catalog_error(error)),
+            },
+        }
+    }
+
+    /// Cancels and discards one opaque exact review without side effects.
+    pub fn catalog_cancel_review(&self, token: String) -> RuntimeCatalogCancellationResult {
+        match self.catalog.cancel_review(&token) {
+            Ok(()) => RuntimeCatalogCancellationResult {
+                cancelled: true,
+                failure: None,
+            },
+            Err(error) => RuntimeCatalogCancellationResult {
+                cancelled: false,
+                failure: Some(project_catalog_error(error)),
+            },
+        }
+    }
+
+    /// Cancels transient exact review/acquisition work. The profile-owned
+    /// catalog feed stays subscribed until the profile closes.
+    pub fn catalog_cancel_pending(&self) -> RuntimeCatalogCancellationResult {
+        self.catalog.cancel_pending();
+        RuntimeCatalogCancellationResult {
+            cancelled: true,
+            failure: None,
+        }
+    }
+
+    /// Confirms one opaque frozen review and installs only its immutable exact
+    /// bytes. This operation never grants capabilities and never launches.
+    pub fn catalog_confirm_install(
+        &self,
+        token: String,
+        expected_author: String,
+        expected_d_tag: String,
+        expected_aggregate_hash: String,
+    ) -> RuntimeCatalogConfirmationResult {
+        if self.closed.load(Ordering::Acquire) {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure("closed", "runtime is closed")),
+            };
+        }
+        let confirmed = match self.catalog.confirm_review(&token) {
+            Ok(confirmed) => confirmed,
+            Err(error) => {
+                return RuntimeCatalogConfirmationResult {
+                    confirmation: None,
+                    artifact: None,
+                    failure: Some(project_catalog_error(error)),
+                };
+            }
+        };
+        let confirmation = confirmed.confirmation.clone();
+        if confirmation.manifest_author != expected_author
+            || confirmation.d_tag.as_deref() != Some(expected_d_tag.as_str())
+            || confirmation.aggregate_hash != expected_aggregate_hash
+        {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure(
+                    "confirmation-mismatch",
+                    "native confirmation did not match the frozen exact review",
+                )),
+            };
+        }
+        let principal = match Principal::new(
+            confirmation.manifest_author.clone(),
+            expected_d_tag,
+            confirmation.aggregate_hash.clone(),
+        ) {
+            Ok(principal) => principal,
+            Err(error) => {
+                return RuntimeCatalogConfirmationResult {
+                    confirmation: None,
+                    artifact: None,
+                    failure: Some(runtime_catalog_failure(
+                        "unsupported-manifest-identity",
+                        error.to_string(),
+                    )),
+                };
+            }
+        };
+        let artifact = Arc::new(VerifiedArtifact {
+            handle: Arc::new(confirmed.into_handle()),
+            principal: Some(principal.clone()),
+        });
+        self.install(Arc::clone(&artifact));
+        let installed = self
+            .app
+            .snapshot()
+            .library
+            .builds
+            .iter()
+            .any(|candidate| candidate.build.principal == principal);
+        if !installed {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure(
+                    "install-refused",
+                    "the verified exact build was not accepted by the runtime library",
+                )),
+            };
+        }
+        RuntimeCatalogConfirmationResult {
+            confirmation: Some(confirmation),
+            artifact: Some(artifact),
+            failure: None,
         }
     }
 
@@ -2294,6 +2558,7 @@ impl RuntimeController {
         let observers = Arc::clone(&self.observers);
         let mut app_observer = self.app.observe();
         let mut signal = self.signal.subscribe();
+        let mut catalog_signal = self.catalog.subscribe();
         let spawn = thread::Builder::new()
             .name("runtime-ffi-observer".to_owned())
             .spawn(move || {
@@ -2318,6 +2583,7 @@ impl RuntimeController {
                         event_cursor = batch.newest_available;
                         observer.update(RuntimeObservationFrame {
                             snapshot: controller.project_snapshot(&app_observer.latest()),
+                            catalog: controller.catalog.feed_snapshot(None),
                             events: batch
                                 .events
                                 .into_iter()
@@ -2334,6 +2600,11 @@ impl RuntimeController {
                                 }
                             }
                             changed = signal.changed() => {
+                                if changed.is_err() {
+                                    break;
+                                }
+                            }
+                            changed = catalog_signal.changed() => {
                                 if changed.is_err() {
                                     break;
                                 }
@@ -2358,6 +2629,7 @@ impl RuntimeController {
 
     pub fn close(&self) {
         if !self.closed.swap(true, Ordering::AcqRel) {
+            self.catalog.close();
             self.app.dispatch(PlatformCommand::Close);
             self.data_plane.close();
             bump_signal(&self.signal);
@@ -2689,6 +2961,54 @@ fn map_coordinate(coordinate: ArtifactCoordinate) -> Result<ManifestCoordinate, 
     .map_err(|error| error.to_string())
 }
 
+fn parse_catalog_coordinate(value: &str) -> Result<ManifestCoordinate, String> {
+    if value.is_empty()
+        || value.len() > 2_048
+        || value.chars().any(char::is_control)
+        || value.trim() != value
+    {
+        return Err(
+            "coordinate must be 1..=2048 UTF-8 bytes without controls or surrounding whitespace"
+                .to_owned(),
+        );
+    }
+    let mut fields = value.splitn(3, ':');
+    let kind = fields.next().unwrap_or_default();
+    let first = fields
+        .next()
+        .ok_or_else(|| "coordinate is missing its author or event identifier".to_owned())?;
+    let second = fields.next();
+    let coordinate = match (kind, second) {
+        ("5129", Some(author)) => ManifestCoordinate::snapshot(first, author),
+        ("15129", None) => ManifestCoordinate::root(first),
+        ("35129", Some(d_tag)) => ManifestCoordinate::named(first, d_tag),
+        ("5129", None) => {
+            return Err("snapshot coordinate must be 5129:event-id:author".to_owned());
+        }
+        ("35129", None) => {
+            return Err("named coordinate must be 35129:author:d-tag".to_owned());
+        }
+        _ => {
+            return Err(
+                "supported coordinates are 5129:event-id:author, 15129:author, and 35129:author:d-tag"
+                    .to_owned(),
+            );
+        }
+    };
+    coordinate.map_err(|error| error.to_string())
+}
+
+fn runtime_catalog_failure(
+    code: impl Into<String>,
+    detail: impl Into<String>,
+) -> RuntimeCatalogFailure {
+    RuntimeCatalogFailure {
+        code: code.into(),
+        detail: detail.into(),
+        provenance: Vec::new(),
+    }
+}
+
 fn map_profile(profile: RuntimeExecutionProfile) -> ExecutionProfile {
     match profile {
         RuntimeExecutionProfile::Legacy => ExecutionProfile::Legacy,
@@ -2873,6 +3193,10 @@ fn local_account_handle(handle: RuntimeAccountHandle) -> LocalAccountHandle {
     LocalAccountHandle {
         installation_id: handle.installation_id,
         account: nmp_native_runtime_core::AccountRef(Arc::from(handle.public_key)),
+        kind: match handle.kind {
+            RuntimeAccountKind::LocalSigner => LocalAccountKind::LocalSigner,
+            RuntimeAccountKind::ReadOnly => LocalAccountKind::ReadOnly,
+        },
     }
 }
 
@@ -2880,6 +3204,10 @@ fn project_account_handle(handle: LocalAccountHandle) -> RuntimeAccountHandle {
     RuntimeAccountHandle {
         installation_id: handle.installation_id,
         public_key: handle.account.0.to_string(),
+        kind: match handle.kind {
+            LocalAccountKind::LocalSigner => RuntimeAccountKind::LocalSigner,
+            LocalAccountKind::ReadOnly => RuntimeAccountKind::ReadOnly,
+        },
     }
 }
 
@@ -2902,6 +3230,10 @@ fn project_account_error(error: AccountLifecycleError) -> RuntimeAccountFailure 
     match error {
         AccountLifecycleError::Closed => RuntimeAccountFailure::Closed,
         AccountLifecycleError::InvalidSecretKey => RuntimeAccountFailure::InvalidSecretKey,
+        AccountLifecycleError::InvalidPublicKey => RuntimeAccountFailure::InvalidPublicKey,
+        AccountLifecycleError::Nip05ResolutionUnavailable => {
+            RuntimeAccountFailure::Nip05ResolutionUnavailable
+        }
         AccountLifecycleError::Capacity { limit } => RuntimeAccountFailure::Capacity {
             limit: limit as u64,
         },
@@ -3843,6 +4175,91 @@ mod tests {
     }
 
     #[test]
+    fn good_morning_outbox_grant_survives_default_profile_restart() {
+        let temp = TempDir::new().unwrap();
+        let runtime = controller(&temp);
+        let artifact = runtime
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("published fixture verifies");
+        runtime.install(Arc::clone(&artifact));
+        let coordinate = exact_coordinate(&artifact);
+        let review = runtime
+            .permission_review(coordinate.clone())
+            .review
+            .expect("installed Good Morning has a permission review");
+        let update = runtime.apply_permission_decisions(RuntimePermissionDecisionBatch {
+            coordinate: coordinate.clone(),
+            decisions: review
+                .capabilities
+                .iter()
+                .map(|capability| RuntimePermissionDecisionSelection {
+                    domain: capability.domain.clone(),
+                    decision: match capability.requirement {
+                        RuntimePermissionRequirement::Required => {
+                            RuntimeGrantDecision::AllowExactBuild
+                        }
+                        RuntimePermissionRequirement::Optional => RuntimeGrantDecision::Denied,
+                    },
+                })
+                .collect(),
+        });
+        assert!(update.applied);
+        assert!(update.review.unwrap().launch_permitted);
+        runtime.close();
+        drop(runtime);
+
+        let reopened = controller(&temp);
+        let artifact = reopened
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("published fixture verifies after restart");
+        reopened.install(Arc::clone(&artifact));
+        let review = reopened
+            .permission_review(coordinate)
+            .review
+            .expect("Good Morning review restores after restart");
+        for domain in ["identity", "inc", "outbox"] {
+            let capability = review
+                .capabilities
+                .iter()
+                .find(|capability| capability.domain == domain)
+                .unwrap_or_else(|| panic!("missing required {domain} capability"));
+            assert_eq!(
+                capability.existing_decision,
+                RuntimePermissionExistingDecision::AllowExactBuild
+            );
+        }
+        assert!(review.launch_permitted);
+
+        reopened.launch(artifact, RuntimeExecutionProfile::Legacy);
+        let session = reopened.snapshot().sessions[0].clone();
+        assert_eq!(
+            session.domains,
+            ["identity", "inc", "outbox", "shell"],
+            "the restored exact-build grant must negotiate NAP-OUTBOX"
+        );
+        reopened.mapped_envelope(session.id, br#"{"type":"shell.ready"}"#.to_vec());
+        assert_eq!(
+            response_of_type(&reopened, "shell.init")["capabilities"]["domains"],
+            serde_json::json!(["identity", "inc", "outbox", "shell"]),
+            "the trusted shell must receive the same Rust-negotiated domain set"
+        );
+    }
+
+    #[test]
     fn installed_library_projects_filter_lifecycle_workspace_and_uninstall() {
         let temp = TempDir::new().unwrap();
         let controller = controller(&temp);
@@ -4265,6 +4682,7 @@ mod tests {
         let registered = controller.register_local_account(format!("{:064x}", 7_u8));
         assert!(registered.accepted);
         let first = registered.handle.unwrap();
+        assert_eq!(first.kind, RuntimeAccountKind::LocalSigner);
         assert_eq!(
             registered.snapshot.unwrap().active_public_key,
             None,
@@ -4308,6 +4726,59 @@ mod tests {
         assert_eq!(
             controller.account_snapshot().failure,
             Some(RuntimeAccountFailure::Closed)
+        );
+    }
+
+    #[test]
+    fn read_only_account_lifecycle_is_keyless_typed_and_explicit() {
+        let temp = TempDir::new().unwrap();
+        let controller = controller(&temp);
+        let npub = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6";
+
+        let registered = controller.register_read_only_account(npub.to_owned());
+        assert!(registered.accepted);
+        let handle = registered.handle.unwrap();
+        assert_eq!(handle.kind, RuntimeAccountKind::ReadOnly);
+        assert_eq!(handle.public_key.len(), 64);
+        assert_eq!(
+            registered.snapshot.unwrap().active_public_key,
+            None,
+            "read-only registration must not silently switch identity"
+        );
+
+        let activated = controller.activate_local_account(handle.clone());
+        assert!(activated.accepted);
+        assert_eq!(
+            activated.snapshot.unwrap().active_public_key.as_deref(),
+            Some(handle.public_key.as_str())
+        );
+        assert_eq!(
+            controller
+                .logout_local_account()
+                .snapshot
+                .unwrap()
+                .active_public_key,
+            None
+        );
+        assert!(controller.remove_local_account(handle).accepted);
+        assert!(
+            controller
+                .account_snapshot()
+                .snapshot
+                .unwrap()
+                .local_accounts
+                .is_empty()
+        );
+
+        let nip05 = controller.register_read_only_account("pablo@example.com".to_owned());
+        assert_eq!(
+            nip05.failure,
+            Some(RuntimeAccountFailure::Nip05ResolutionUnavailable)
+        );
+        let invalid = controller.register_read_only_account("not-a-key".to_owned());
+        assert_eq!(
+            invalid.failure,
+            Some(RuntimeAccountFailure::InvalidPublicKey)
         );
     }
 
@@ -4380,5 +4851,35 @@ mod tests {
             "unexpected refusal detail: {}",
             error.detail
         );
+    }
+
+    #[test]
+    fn catalog_coordinates_are_parsed_only_at_the_rust_boundary() {
+        let author = "a".repeat(64);
+        let event_id = "b".repeat(64);
+        assert!(matches!(
+            parse_catalog_coordinate(&format!("35129:{author}:good-morning")).unwrap(),
+            ManifestCoordinate::Named { .. }
+        ));
+        assert!(matches!(
+            parse_catalog_coordinate(&format!("15129:{author}")).unwrap(),
+            ManifestCoordinate::Root { .. }
+        ));
+        assert!(matches!(
+            parse_catalog_coordinate(&format!("5129:{event_id}:{author}")).unwrap(),
+            ManifestCoordinate::Snapshot { .. }
+        ));
+        for invalid in [
+            "",
+            "35129:author",
+            "15129:author:extra",
+            "unknown:author:d-tag",
+            " 35129:author:d-tag",
+        ] {
+            assert!(
+                parse_catalog_coordinate(invalid).is_err(),
+                "unexpectedly accepted {invalid:?}"
+            );
+        }
     }
 }

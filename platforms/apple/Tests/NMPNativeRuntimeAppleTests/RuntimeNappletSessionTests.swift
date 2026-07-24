@@ -504,6 +504,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
         profile.update(
             frame: RuntimeObservationFrame(
                 snapshot: intermediate,
+                catalog: profile.catalogSnapshotForTesting,
                 events: [],
                 oldestAvailableEvent: 0,
                 newestAvailableEvent: 0,
@@ -516,6 +517,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
         profile.update(
             frame: RuntimeObservationFrame(
                 snapshot: latest,
+                catalog: profile.catalogSnapshotForTesting,
                 events: [],
                 oldestAvailableEvent: 0,
                 newestAvailableEvent: 0,

@@ -8,7 +8,9 @@ rust-version.workspace = true
 [dependencies]
 nmp-native-artifact = { path = "../artifact" }
 parking_lot.workspace = true
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-webpki-roots"] }
 thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "rt-multi-thread"] }
 url.workspace = true
 
 [dev-dependencies]

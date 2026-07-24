@@ -1,11 +1,52 @@
 import Foundation
 
-/// Read-only projection of the compatibility corpus bundled with this build.
+/// Profile-owned catalog operations projected by the native runtime.
 ///
-/// This client intentionally does not resolve remote coordinates, mutate the
-/// install store, grant capabilities, or launch a napplet. Those operations
-/// remain unavailable until the Rust catalog-resolver and install boundaries
-/// are connected to the Workbench.
+/// The implementation uses the profile's single NMP engine and Rust resolver.
+/// Swift never selects relays, interprets replacement events, verifies
+/// artifacts, or infers whether an install worked. Async operations must keep
+/// blocking NMP receivers and artifact acquisition off the main actor.
+@MainActor
+public protocol RuntimeWorkbenchCatalogProfileBacking: AnyObject {
+    func observeCatalogChanges(
+        _ receive: @escaping @MainActor @Sendable () -> Void
+    ) -> CatalogFeedObservation
+
+    func browseCatalog(
+        _ request: CatalogSearchRequest
+    ) async -> CatalogSearchResponse
+
+    func resolveCatalogReview(
+        _ target: CatalogReviewTarget
+    ) async -> CatalogReviewResponse
+
+    /// Cancels the blocking observation/lookup and wakes its receiver.
+    func cancelCatalogWork()
+
+    /// Discards one frozen opaque review that will not be installed.
+    func cancelCatalogReview(_ reviewID: String)
+
+    /// Installs only the frozen exact review. It must not launch or grant.
+    func installCatalogReview(
+        _ confirmation: CatalogInstallConfirmation
+    ) async -> CatalogInstallResponse
+}
+
+public extension RuntimeWorkbenchCatalogProfileBacking {
+    func observeCatalogChanges(
+        _: @escaping @MainActor @Sendable () -> Void
+    ) -> CatalogFeedObservation {
+        CatalogFeedObservation()
+    }
+
+    func cancelCatalogReview(_: String) {}
+}
+
+/// Workbench adapter over one bounded live profile catalog.
+///
+/// `init()` is a truthful unavailable fallback for previews without a runtime
+/// profile. The deterministic corpus is available only through
+/// `offlineFixture()` and is always labeled as an offline UI-test source.
 @MainActor
 public final class RuntimeWorkbenchCatalogClient: CatalogClient {
     private static let publishedDigest =
@@ -17,30 +58,81 @@ public final class RuntimeWorkbenchCatalogClient: CatalogClient {
     private static let kehtoCommit =
         "bb3929b3523b75356fd65f658f9bd14c7ff697e4"
 
+    private let profileBacking:
+        (any RuntimeWorkbenchCatalogProfileBacking)?
     private let records: [CatalogRecord]
+    private let isOfflineFixture: Bool
     private let loadIssue: CatalogIssue?
+    private var activeLiveReviewID: String?
 
     public convenience init() {
-        self.init(bundle: .module)
+        self.init(
+            profileBacking: nil,
+            records: [],
+            isOfflineFixture: false,
+            loadIssue: CatalogIssue(
+                title: "Live catalog unavailable",
+                message: "Open a runtime profile before browsing napplets."
+            )
+        )
     }
 
-    init(bundle: Bundle) {
+    public convenience init(
+        profileBacking: any RuntimeWorkbenchCatalogProfileBacking
+    ) {
+        self.init(
+            profileBacking: profileBacking,
+            records: [],
+            isOfflineFixture: false,
+            loadIssue: nil
+        )
+    }
+
+    public static func offlineFixture() -> RuntimeWorkbenchCatalogClient {
+        RuntimeWorkbenchCatalogClient(offlineFixtureBundle: .module)
+    }
+
+    convenience init(offlineFixtureBundle bundle: Bundle) {
         do {
-            records = try Self.loadRecords(bundle: bundle)
-            loadIssue = nil
+            self.init(
+                profileBacking: nil,
+                records: try Self.loadRecords(bundle: bundle),
+                isOfflineFixture: true,
+                loadIssue: nil
+            )
         } catch {
-            records = []
-            loadIssue = CatalogIssue(
-                title: "Pinned catalog unavailable",
-                message: "The exact compatibility corpus bundled with this "
-                    + "Workbench could not be loaded: \(error.localizedDescription)"
+            self.init(
+                profileBacking: nil,
+                records: [],
+                isOfflineFixture: true,
+                loadIssue: CatalogIssue(
+                    title: "Offline fixture unavailable",
+                    message: "The exact compatibility corpus bundled with this "
+                        + "Workbench could not be loaded: "
+                        + error.localizedDescription
+                )
             )
         }
+    }
+
+    private init(
+        profileBacking: (any RuntimeWorkbenchCatalogProfileBacking)?,
+        records: [CatalogRecord],
+        isOfflineFixture: Bool,
+        loadIssue: CatalogIssue?
+    ) {
+        self.profileBacking = profileBacking
+        self.records = records
+        self.isOfflineFixture = isOfflineFixture
+        self.loadIssue = loadIssue
     }
 
     public func search(
         _ request: CatalogSearchRequest
     ) async -> CatalogSearchResponse {
+        if let profileBacking {
+            return await profileBacking.browseCatalog(request)
+        }
         if let loadIssue {
             return .unavailable(loadIssue)
         }
@@ -51,14 +143,29 @@ public final class RuntimeWorkbenchCatalogClient: CatalogClient {
         let matches = query.isEmpty
             ? records
             : records.filter { $0.searchText.contains(query) }
-        guard let page = CatalogSearchPage(
-            entries: matches.map(\.entry),
-            hasMore: false
-        ) else {
+        let entries = matches.map(\.entry)
+        guard
+            let evidence = CatalogBrowseEvidence(
+                scope: .offlineFixture,
+                queryWasLocalFilter: !query.isEmpty,
+                locallyFilteredRows: UInt(records.count - matches.count),
+                projectedRows: UInt(entries.count),
+                projectionLimitedRows: 0,
+                refusedRows: 0,
+                window: .idle,
+                sourceEvidence: [],
+                shortfalls: []
+            ),
+            let page = CatalogSearchPage(
+                entries: entries,
+                hasMore: false,
+                evidence: evidence
+            )
+        else {
             return .unavailable(
                 CatalogIssue(
-                    title: "Pinned catalog is outside UI limits",
-                    message: "The bundled catalog projection exceeded its "
+                    title: "Offline fixture is outside UI limits",
+                    message: "The bundled offline projection exceeded its "
                         + "finite page limit and was not displayed."
                 )
             )
@@ -66,9 +173,27 @@ public final class RuntimeWorkbenchCatalogClient: CatalogClient {
         return .page(page)
     }
 
+    public func observeChanges(
+        _ receive: @escaping @MainActor @Sendable () -> Void
+    ) -> CatalogFeedObservation {
+        profileBacking?.observeCatalogChanges(receive)
+            ?? CatalogFeedObservation()
+    }
+
     public func resolveReview(
         _ target: CatalogReviewTarget
     ) async -> CatalogReviewResponse {
+        if let profileBacking {
+            if let activeLiveReviewID {
+                profileBacking.cancelCatalogReview(activeLiveReviewID)
+                self.activeLiveReviewID = nil
+            }
+            let response = await profileBacking.resolveCatalogReview(target)
+            if case let .ready(review) = response {
+                activeLiveReviewID = review.id
+            }
+            return response
+        }
         if let loadIssue {
             return .unavailable(loadIssue)
         }
@@ -101,18 +226,26 @@ public final class RuntimeWorkbenchCatalogClient: CatalogClient {
     }
 
     public func cancelPendingCatalogWork() {
-        // All bundled lookups are immediate and read-only. There is no worker,
-        // subscription, or network request to cancel.
+        profileBacking?.cancelCatalogWork()
+        if let activeLiveReviewID {
+            profileBacking?.cancelCatalogReview(activeLiveReviewID)
+            self.activeLiveReviewID = nil
+        }
     }
 
     public func confirmExactVerifiedInstall(
         _ confirmation: CatalogInstallConfirmation
     ) async -> CatalogInstallResponse {
-        .refused(
+        if let profileBacking {
+            activeLiveReviewID = nil
+            return await profileBacking.installCatalogReview(confirmation)
+        }
+        return .refused(
             CatalogIssue(
                 title: "Installation unavailable",
-                message: "The review remains read-only. The Rust install-only "
-                    + "boundary is not connected, so build "
+                message: (isOfflineFixture
+                    ? "The offline UI-test corpus is read-only, so build "
+                    : "No runtime profile is connected, so build ")
                     + "\(confirmation.exactAggregateHash) was not installed, "
                     + "launched, or granted capabilities."
             )
@@ -141,9 +274,9 @@ public final class RuntimeWorkbenchCatalogClient: CatalogClient {
 
     private static var remoteResolutionUnavailable: CatalogIssue {
         CatalogIssue(
-            title: "Remote resolution unavailable",
+            title: "Offline coordinate resolution unavailable",
             message: "Manual manifest coordinates are not resolved by this "
-                + "read-only bundled catalog. Connect the Rust resolver and "
+                + "offline UI-test corpus. Connect the Rust resolver and "
                 + "install-only boundary before reviewing remote coordinates."
         )
     }

@@ -168,15 +168,15 @@ public enum NativeRuntimeAccountPersistenceIssue:
     public var errorDescription: String? {
         switch self {
         case .restoreFailed:
-            "Saved local accounts could not be restored securely."
+            "Saved accounts could not be restored securely."
         case .registerFailed:
-            "The local account is available for this session but was not saved securely."
+            "The account is available for this session but was not saved securely."
         case .activationFailed:
             "The active account changed for this session but was not saved securely."
         case .logoutFailed:
             "The account is logged out for this session but secure persistence was not updated."
         case .removalFailed:
-            "The local account was removed for this session but secure persistence was not fully updated."
+            "The account was removed for this session but secure persistence was not fully updated."
         }
     }
 }
@@ -228,6 +228,60 @@ public final class NativeRuntimeInstalledArtifact: @unchecked Sendable {
         self.ownerID = ownerID
         self.artifact = artifact
         self.permissionCoordinate = permissionCoordinate
+    }
+}
+
+/// One catalog-confirmed exact build installed into this profile.
+///
+/// The opaque artifact remains profile-bound and is retained only so the app
+/// may perform the separate permission and launch steps later.
+public struct NativeRuntimeCatalogInstallation: @unchecked Sendable {
+    public let title: String
+    public let manifestAuthor: String
+    public let dTag: String
+    public let aggregateHash: String
+    public let installedArtifact: NativeRuntimeInstalledArtifact
+}
+
+public enum NativeRuntimeCatalogInstallResult: @unchecked Sendable {
+    case installed(NativeRuntimeCatalogInstallation)
+    case refused(NativeRuntimeCatalogFailure)
+}
+
+/// Replacement semantics for the profile-owned permanent NMP catalog feed.
+public enum NativeRuntimeCatalogUpdate: Sendable {
+    case authoritative(NativeRuntimeCatalogFeedSnapshot)
+    case next(
+        NativeRuntimeCatalogFeedSnapshot,
+        predecessorRevision: UInt64
+    )
+}
+
+public enum NativeRuntimeCatalogObservationError: Error, Equatable, Sendable {
+    case profileClosed
+    case observerCapacity(maximum: Int)
+}
+
+/// Idempotent application-observer cancellation. Cancelling this fanout does
+/// not stop the profile-owned NMP subscription.
+public final class NativeRuntimeCatalogObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancellation: (@Sendable () -> Void)?
+
+    fileprivate init(cancellation: @escaping @Sendable () -> Void) {
+        self.cancellation = cancellation
+    }
+
+    public func cancel() {
+        lock.lock()
+        let cancellation = cancellation
+        self.cancellation = nil
+        lock.unlock()
+        cancellation?()
+    }
+
+    deinit {
+        cancel()
     }
 }
 
@@ -405,6 +459,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         @Sendable (NativeRuntimeActivityUpdate) -> Void
     private typealias LibraryReceiver =
         @Sendable (NativeRuntimeLibraryUpdate) -> Void
+    private typealias CatalogReceiver =
+        @Sendable (NativeRuntimeCatalogUpdate) -> Void
 
     private struct ActivityObserverEntry {
         let scope: NativeRuntimeActivityScope
@@ -418,6 +474,13 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         var pendingUpdate: NativeRuntimeLibraryUpdate?
     }
 
+    private struct CatalogObserverEntry {
+        let receive: CatalogReceiver
+        var lastDeliveredRevision: UInt64
+        var isReadyForNext = false
+        var pendingUpdate: NativeRuntimeCatalogUpdate?
+    }
+
     private final class WeakSession {
         weak var value: RustRuntimeNappletSession?
 
@@ -429,7 +492,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private static let maximumReadBytes: UInt64 = 8 * 1_024 * 1_024
     private static let maximumApplicationActivityObservers = 8
     private static let maximumApplicationLibraryObservers = 8
-    private static let maximumLocalAccounts = 32
+    private static let maximumApplicationCatalogObservers = 8
+    private static let maximumAccounts = 32
 
     private let profileID = UUID()
     private let controller: RuntimeController
@@ -444,8 +508,10 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private var sessions: [UInt64: WeakSession] = [:]
     private var activityObservers: [UUID: ActivityObserverEntry] = [:]
     private var libraryObservers: [UUID: LibraryObserverEntry] = [:]
+    private var catalogObservers: [UUID: CatalogObserverEntry] = [:]
     private var lastActivityRevision: UInt64
     private var lastLibraryRevision: UInt64
+    private var lastCatalogSnapshot: NativeRuntimeCatalogFeedSnapshot
     private var accountPersistenceProblem:
         NativeRuntimeAccountPersistenceIssue?
     private var isClosed = false
@@ -560,6 +626,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         let revision = controller.snapshot().revision
         lastActivityRevision = revision
         lastLibraryRevision = revision
+        lastCatalogSnapshot = controller.catalogFeedSnapshot()
         accountPersistenceProblem = nil
     }
 
@@ -580,6 +647,104 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         lock.lock()
         self.observation = observation
         lock.unlock()
+    }
+
+    /// Opens one finite, source-scoped NMP catalog projection. This call is
+    /// blocking and must be invoked away from the main actor.
+    public func browseCatalog(
+        query: String
+    ) -> NativeRuntimeCatalogPageResult {
+        controller.catalogBrowse(query: query)
+    }
+
+    /// Freezes one exact signed review from the current bounded catalog page.
+    /// This call is blocking and must be invoked away from the main actor.
+    public func reviewCatalogEntry(
+        eventID: String
+    ) -> NativeRuntimeCatalogReviewResult {
+        controller.catalogReviewEntry(eventId: eventID)
+    }
+
+    /// Resolves a manually entered manifest coordinate exclusively in Rust.
+    /// This call is blocking and must be invoked away from the main actor.
+    public func reviewCatalogCoordinate(
+        _ coordinate: String
+    ) -> NativeRuntimeCatalogReviewResult {
+        controller.catalogReviewManual(coordinate: coordinate)
+    }
+
+    /// Wakes every blocking catalog observation or acquisition.
+    @discardableResult
+    public func cancelPendingCatalogWork()
+        -> NativeRuntimeCatalogCancellationResult
+    {
+        controller.catalogCancelPending()
+    }
+
+    /// Cancels and discards one frozen review without installing it.
+    @discardableResult
+    public func cancelCatalogReview(
+        token: String
+    ) -> NativeRuntimeCatalogCancellationResult {
+        controller.catalogCancelReview(token: token)
+    }
+
+    /// Confirms and installs one frozen exact review. Permission grants and
+    /// launch remain separate operations.
+    ///
+    /// This call is blocking and must be invoked away from the main actor.
+    public func confirmCatalogInstall(
+        token: String,
+        expectedAuthor: String,
+        expectedDTag: String,
+        expectedAggregateHash: String
+    ) -> NativeRuntimeCatalogInstallResult {
+        let result = controller.catalogConfirmInstall(
+            token: token,
+            expectedAuthor: expectedAuthor,
+            expectedDTag: expectedDTag,
+            expectedAggregateHash: expectedAggregateHash
+        )
+        if let failure = result.failure {
+            return .refused(failure)
+        }
+        guard
+            let confirmation = result.confirmation,
+            let artifact = result.artifact,
+            let dTag = confirmation.dTag,
+            confirmation.manifestAuthor == expectedAuthor,
+            dTag == expectedDTag,
+            confirmation.aggregateHash == expectedAggregateHash
+        else {
+            return .refused(
+                NativeRuntimeCatalogFailure(
+                    code: "incomplete-confirmation",
+                    detail: "Rust returned no complete exact catalog installation",
+                    provenance: []
+                )
+            )
+        }
+        let title = confirmation.title ?? "Untitled napplet"
+        let coordinate = NativeRuntimePermissionCoordinate(
+            manifestAuthor: confirmation.manifestAuthor,
+            dTag: dTag,
+            aggregateHash: confirmation.aggregateHash
+        )
+        let installedArtifact = NativeRuntimeInstalledArtifact(
+            title: title,
+            ownerID: profileID,
+            artifact: artifact,
+            permissionCoordinate: coordinate
+        )
+        return .installed(
+            NativeRuntimeCatalogInstallation(
+                title: title,
+                manifestAuthor: confirmation.manifestAuthor,
+                dTag: dTag,
+                aggregateHash: confirmation.aggregateHash,
+                installedArtifact: installedArtifact
+            )
+        )
     }
 
     /// Verifies and installs one exact named build without granting or
@@ -748,6 +913,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         sessions.removeAll()
         activityObservers.removeAll()
         libraryObservers.removeAll()
+        catalogObservers.removeAll()
         lock.unlock()
 
         observation?.stop()
@@ -788,10 +954,36 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
             let accountVault
         {
             do {
-                try accountVault.upsert(
+                try accountVault.upsertLocalSigner(
                     publicKey: handle.publicKey,
                     secret: secretKey,
-                    maximumAccounts: Self.maximumLocalAccounts
+                    maximumAccounts: Self.maximumAccounts
+                )
+            } catch {
+                accountPersistenceProblem =
+                    accountPersistenceProblem ?? .registerFailed
+            }
+        }
+        accountLock.unlock()
+        return update
+    }
+
+    public func registerReadOnlyAccount(
+        publicIdentity: String
+    ) -> NativeRuntimeAccountUpdate {
+        accountLock.lock()
+        let update = controller.registerReadOnlyAccount(
+            publicIdentity: publicIdentity
+        )
+        if
+            update.accepted,
+            let handle = update.handle,
+            let accountVault
+        {
+            do {
+                try accountVault.upsertReadOnly(
+                    publicKey: handle.publicKey,
+                    maximumAccounts: Self.maximumAccounts
                 )
             } catch {
                 accountPersistenceProblem =
@@ -811,7 +1003,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
             do {
                 try accountVault.setActive(
                     publicKey: update.snapshot?.activePublicKey,
-                    maximumAccounts: Self.maximumLocalAccounts
+                    maximumAccounts: Self.maximumAccounts
                 )
             } catch {
                 accountPersistenceProblem =
@@ -829,7 +1021,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
             do {
                 try accountVault.setActive(
                     publicKey: nil,
-                    maximumAccounts: Self.maximumLocalAccounts
+                    maximumAccounts: Self.maximumAccounts
                 )
             } catch {
                 accountPersistenceProblem =
@@ -849,7 +1041,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
             do {
                 try accountVault.remove(
                     publicKey: handle.publicKey,
-                    maximumAccounts: Self.maximumLocalAccounts
+                    maximumAccounts: Self.maximumAccounts
                 )
             } catch {
                 accountPersistenceProblem =
@@ -879,7 +1071,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         let stored: NativeAccountVaultSnapshot
         do {
             stored = try accountVault.load(
-                maximumAccounts: Self.maximumLocalAccounts
+                maximumAccounts: Self.maximumAccounts
             )
         } catch {
             accountPersistenceProblem = .restoreFailed
@@ -889,16 +1081,24 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         var restoredHandles: [
             String: NativeRuntimeAccountHandle
         ] = [:]
-        restoredHandles.reserveCapacity(stored.credentials.count)
+        restoredHandles.reserveCapacity(stored.accounts.count)
         var restoreFailed = false
-        for credential in stored.credentials {
-            let update = controller.registerLocalAccount(
-                secretKey: credential.secret
-            )
+        for account in stored.accounts {
+            let update: NativeRuntimeAccountUpdate
+            switch account.material {
+            case let .localSigner(secret):
+                update = controller.registerLocalAccount(
+                    secretKey: secret
+                )
+            case .readOnly:
+                update = controller.registerReadOnlyAccount(
+                    publicIdentity: account.publicKey
+                )
+            }
             guard
                 update.accepted,
                 let handle = update.handle,
-                handle.publicKey == credential.publicKey
+                handle.publicKey == account.publicKey
             else {
                 if let unexpectedHandle = update.handle {
                     _ = controller.removeLocalAccount(
@@ -908,7 +1108,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
                 restoreFailed = true
                 continue
             }
-            restoredHandles[credential.publicKey] = handle
+            restoredHandles[account.publicKey] = handle
         }
 
         if let activePublicKey = stored.activePublicKey {
@@ -1015,6 +1215,42 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         NativeRuntimeActivityProjection(controller.snapshot(), scope: scope)
     }
 
+    /// Adds one bounded application observer to the profile's permanent NMP
+    /// catalog feed. Registration synchronously delivers the latest complete
+    /// replacement; subsequent updates are conflated to one pending latest
+    /// value while that authoritative callback is in flight.
+    public func observeCatalog(
+        _ receive: @escaping @Sendable (NativeRuntimeCatalogUpdate) -> Void
+    ) throws -> NativeRuntimeCatalogObservation {
+        lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            throw NativeRuntimeCatalogObservationError.profileClosed
+        }
+        guard catalogObservers.count
+            < Self.maximumApplicationCatalogObservers
+        else {
+            lock.unlock()
+            throw NativeRuntimeCatalogObservationError.observerCapacity(
+                maximum: Self.maximumApplicationCatalogObservers
+            )
+        }
+        let identifier = UUID()
+        let authoritative = lastCatalogSnapshot
+        catalogObservers[identifier] = CatalogObserverEntry(
+            receive: receive,
+            lastDeliveredRevision: authoritative.revision
+        )
+        lock.unlock()
+
+        let observation = NativeRuntimeCatalogObservation { [weak self] in
+            self?.removeCatalogObserver(identifier)
+        }
+        receive(.authoritative(authoritative))
+        drainPendingCatalogUpdates(for: identifier)
+        return observation
+    }
+
     /// Adds one bounded application observer to the profile's single Rust
     /// observation stream. Admission refusal is explicit, and the receiver is
     /// called synchronously with an authoritative replacement before return.
@@ -1103,11 +1339,18 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         let activeSessions = sessions.values.compactMap(\.value)
         let previousActivityRevision = lastActivityRevision
         let previousLibraryRevision = lastLibraryRevision
+        let previousCatalogRevision = lastCatalogSnapshot.revision
         lastActivityRevision = frame.snapshot.revision
         lastLibraryRevision = frame.snapshot.revision
+        if frame.catalog.revision >= previousCatalogRevision {
+            lastCatalogSnapshot = frame.catalog
+        }
         let activityObservers = Array(activityObservers.values)
         var libraryDeliveries: [
             (receive: LibraryReceiver, update: NativeRuntimeLibraryUpdate)
+        ] = []
+        var catalogDeliveries: [
+            (receive: CatalogReceiver, update: NativeRuntimeCatalogUpdate)
         ] = []
         if frame.snapshot.revision > previousLibraryRevision
             || frame.eventCursorWasStale
@@ -1145,6 +1388,33 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
                 libraryObservers[identifier] = observer
             }
         }
+        if frame.catalog.revision > previousCatalogRevision {
+            let update = NativeRuntimeCatalogUpdate.next(
+                frame.catalog,
+                predecessorRevision: previousCatalogRevision
+            )
+            for identifier in Array(catalogObservers.keys) {
+                guard var observer = catalogObservers[identifier],
+                      frame.catalog.revision
+                          > observer.lastDeliveredRevision
+                else {
+                    continue
+                }
+                if observer.isReadyForNext {
+                    observer.lastDeliveredRevision = frame.catalog.revision
+                    catalogObservers[identifier] = observer
+                    catalogDeliveries.append((observer.receive, update))
+                    continue
+                }
+                if let pending = observer.pendingUpdate,
+                   catalogRevision(of: pending) > frame.catalog.revision
+                {
+                    continue
+                }
+                observer.pendingUpdate = update
+                catalogObservers[identifier] = observer
+            }
+        }
         lock.unlock()
         settingsExecutor.retainRunningSessions(
             Set(frame.snapshot.sessions.filter { $0.state == "running" }.map(\.id))
@@ -1171,6 +1441,9 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         for delivery in libraryDeliveries {
             delivery.receive(delivery.update)
         }
+        for delivery in catalogDeliveries {
+            delivery.receive(delivery.update)
+        }
     }
 
     private func removeActivityObserver(_ identifier: UUID) {
@@ -1182,6 +1455,12 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private func removeLibraryObserver(_ identifier: UUID) {
         lock.lock()
         libraryObservers.removeValue(forKey: identifier)
+        lock.unlock()
+    }
+
+    private func removeCatalogObserver(_ identifier: UUID) {
+        lock.lock()
+        catalogObservers.removeValue(forKey: identifier)
         lock.unlock()
     }
 
@@ -1210,6 +1489,31 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         }
     }
 
+    private func drainPendingCatalogUpdates(for identifier: UUID) {
+        while true {
+            lock.lock()
+            guard !isClosed, var observer = catalogObservers[identifier] else {
+                lock.unlock()
+                return
+            }
+            guard let pendingUpdate = observer.pendingUpdate else {
+                observer.isReadyForNext = true
+                catalogObservers[identifier] = observer
+                lock.unlock()
+                return
+            }
+            observer.pendingUpdate = nil
+            observer.lastDeliveredRevision = max(
+                observer.lastDeliveredRevision,
+                catalogRevision(of: pendingUpdate)
+            )
+            catalogObservers[identifier] = observer
+            let receive = observer.receive
+            lock.unlock()
+            receive(pendingUpdate)
+        }
+    }
+
     private func libraryRevision(
         of update: NativeRuntimeLibraryUpdate
     ) -> UInt64 {
@@ -1217,6 +1521,16 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         case let .authoritative(projection),
              let .next(projection, _, _):
             projection.revision
+        }
+    }
+
+    private func catalogRevision(
+        of update: NativeRuntimeCatalogUpdate
+    ) -> UInt64 {
+        switch update {
+        case let .authoritative(snapshot),
+             let .next(snapshot, _):
+            snapshot.revision
         }
     }
 
@@ -1266,6 +1580,10 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
 
     var snapshotForTesting: RuntimeSnapshot {
         controller.snapshot()
+    }
+
+    var catalogSnapshotForTesting: RuntimeCatalogFeedSnapshot {
+        controller.catalogFeedSnapshot()
     }
 
     deinit {
