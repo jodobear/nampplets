@@ -455,23 +455,34 @@ public struct CatalogInstallReview: Identifiable, Equatable, Sendable {
         updateRelationship: CatalogUpdateRelationship,
         canInstall: Bool
     ) {
-        let textFields = [
+        let identityFields: [String] = [
             id,
             title,
             publisher.displayName ?? "",
             publisher.publicKey,
             coordinate,
             exactAggregateHash,
-        ] + sources.flatMap {
+        ]
+        let sourceFields: [String] = sources.flatMap {
             [$0.id, $0.source, $0.evidence]
-        } + requiredDomains + optionalDomains + platformCompatibility.flatMap {
+        }
+        let platformFields: [String] = platformCompatibility.flatMap {
             [$0.id, $0.platform, $0.detail]
-        } + warnings.flatMap {
+        }
+        let warningFields: [String] = warnings.flatMap {
             [$0.id, $0.message]
-        } + [
+        }
+        let updateRelationshipFields: [String] = [
             updateRelationship.installedHash ?? "",
             updateRelationship.detail ?? "",
         ]
+        let textFields: [String] = identityFields
+            + sourceFields
+            + requiredDomains
+            + optionalDomains
+            + platformFields
+            + warningFields
+            + updateRelationshipFields
 
         guard coordinate.utf8.count <= CatalogLimits.maximumCoordinateUTF8Bytes,
               textFields.allSatisfy({
