@@ -650,6 +650,12 @@ public protocol RuntimeControllerProtocol: AnyObject, Sendable {
     func observe(observer: RuntimeObserver)  -> ObservationStart
 
     /**
+     * Open the NMP diagnostics observation for as long as the returned handle
+     * lives. The current read-out is delivered synchronously on registration.
+     */
+    func observeRelayDiagnostics(observer: RuntimeRelayDiagnosticsObserver)  -> RuntimeRelayDiagnosticsObservationStart
+
+    /**
      * Returns one bounded Rust-owned review for an installed exact build.
      * This never grants or launches the napplet.
      */
@@ -689,6 +695,12 @@ public protocol RuntimeControllerProtocol: AnyObject, Sendable {
      * application-owned HTTP, DNS, or NIP-05 verification.
      */
     func registerReadOnlyAccount(publicIdentity: String)  -> RuntimeAccountUpdate
+
+    /**
+     * The latest NMP-owned relay and wire-subscription read-out. It is only
+     * refreshed while an observation is open; check `observing`.
+     */
+    func relayDiagnostics()  -> RuntimeRelayDiagnosticsSnapshot
 
     /**
      * Removes only the exact local account installation named by the opaque
@@ -1103,6 +1115,18 @@ open func observe(observer: RuntimeObserver) -> ObservationStart  {
 }
 
     /**
+     * Open the NMP diagnostics observation for as long as the returned handle
+     * lives. The current read-out is delivered synchronously on registration.
+     */
+open func observeRelayDiagnostics(observer: RuntimeRelayDiagnosticsObserver) -> RuntimeRelayDiagnosticsObservationStart  {
+    return try!  FfiConverterTypeRuntimeRelayDiagnosticsObservationStart_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_observe_relay_diagnostics(self.uniffiClonePointer(),
+        FfiConverterCallbackInterfaceRuntimeRelayDiagnosticsObserver_lower(observer),$0
+    )
+})
+}
+
+    /**
      * Returns one bounded Rust-owned review for an installed exact build.
      * This never grants or launches the napplet.
      */
@@ -1171,6 +1195,17 @@ open func registerReadOnlyAccount(publicIdentity: String) -> RuntimeAccountUpdat
     return try!  FfiConverterTypeRuntimeAccountUpdate_lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_register_read_only_account(self.uniffiClonePointer(),
         FfiConverterString.lower(publicIdentity),$0
+    )
+})
+}
+
+    /**
+     * The latest NMP-owned relay and wire-subscription read-out. It is only
+     * refreshed while an observation is open; check `observing`.
+     */
+open func relayDiagnostics() -> RuntimeRelayDiagnosticsSnapshot  {
+    return try!  FfiConverterTypeRuntimeRelayDiagnosticsSnapshot_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_relay_diagnostics(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -1485,6 +1520,135 @@ public func FfiConverterTypeRuntimeObservation_lift(_ pointer: UnsafeMutableRawP
 #endif
 public func FfiConverterTypeRuntimeObservation_lower(_ value: RuntimeObservation) -> UnsafeMutableRawPointer {
     return FfiConverterTypeRuntimeObservation.lower(value)
+}
+
+
+
+
+
+
+/**
+ * Cancellation handle for one registered observer. The NMP observation is
+ * withdrawn once the last handle stops or drops.
+ */
+public protocol RuntimeRelayDiagnosticsObservationProtocol: AnyObject, Sendable {
+
+    func stop()
+
+}
+/**
+ * Cancellation handle for one registered observer. The NMP observation is
+ * withdrawn once the last handle stops or drops.
+ */
+open class RuntimeRelayDiagnosticsObservation: RuntimeRelayDiagnosticsObservationProtocol, @unchecked Sendable {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_nmp_native_runtime_ffi_fn_clone_runtimerelaydiagnosticsobservation(self.pointer, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_nmp_native_runtime_ffi_fn_free_runtimerelaydiagnosticsobservation(pointer, $0) }
+    }
+
+
+
+
+open func stop()  {try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimerelaydiagnosticsobservation_stop(self.uniffiClonePointer(),$0
+    )
+}
+}
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeRelayDiagnosticsObservation: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = RuntimeRelayDiagnosticsObservation
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> RuntimeRelayDiagnosticsObservation {
+        return RuntimeRelayDiagnosticsObservation(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: RuntimeRelayDiagnosticsObservation) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRelayDiagnosticsObservation {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: RuntimeRelayDiagnosticsObservation, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayDiagnosticsObservation_lift(_ pointer: UnsafeMutableRawPointer) throws -> RuntimeRelayDiagnosticsObservation {
+    return try FfiConverterTypeRuntimeRelayDiagnosticsObservation.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayDiagnosticsObservation_lower(_ value: RuntimeRelayDiagnosticsObservation) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeRuntimeRelayDiagnosticsObservation.lower(value)
 }
 
 
@@ -5754,6 +5918,701 @@ public func FfiConverterTypeRuntimeRefusal_lower(_ value: RuntimeRefusal) -> Rus
 }
 
 
+public struct RuntimeRelayCoverage {
+    public var fromSeconds: UInt64
+    public var throughSeconds: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(fromSeconds: UInt64, throughSeconds: UInt64) {
+        self.fromSeconds = fromSeconds
+        self.throughSeconds = throughSeconds
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeRelayCoverage: Sendable {}
+#endif
+
+
+extension RuntimeRelayCoverage: Equatable, Hashable {
+    public static func ==(lhs: RuntimeRelayCoverage, rhs: RuntimeRelayCoverage) -> Bool {
+        if lhs.fromSeconds != rhs.fromSeconds {
+            return false
+        }
+        if lhs.throughSeconds != rhs.throughSeconds {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(fromSeconds)
+        hasher.combine(throughSeconds)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeRelayCoverage: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRelayCoverage {
+        return
+            try RuntimeRelayCoverage(
+                fromSeconds: FfiConverterUInt64.read(from: &buf),
+                throughSeconds: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeRelayCoverage, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.fromSeconds, into: &buf)
+        FfiConverterUInt64.write(value.throughSeconds, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayCoverage_lift(_ buf: RustBuffer) throws -> RuntimeRelayCoverage {
+    return try FfiConverterTypeRuntimeRelayCoverage.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayCoverage_lower(_ value: RuntimeRelayCoverage) -> RustBuffer {
+    return FfiConverterTypeRuntimeRelayCoverage.lower(value)
+}
+
+
+/**
+ * One physical relay session. A relay planned under several access contexts
+ * yields several rows.
+ */
+public struct RuntimeRelayDiagnostics {
+    public var relay: String
+    public var access: RuntimeRelayAccess
+    public var wireSubscriptionCount: UInt64
+    public var authorsServed: UInt64
+    public var lanes: [RuntimeRelayLaneCount]
+    public var omittedLanes: UInt64
+    public var subscriptions: [RuntimeRelaySubscription]
+    public var omittedSubscriptions: UInt64
+    public var eventsByKind: [RuntimeRelayKindCount]
+    public var omittedKinds: UInt64
+    public var supportedNips: [UInt16]?
+    public var omittedSupportedNips: UInt64
+    public var nip11DocumentRevision: String?
+    public var nip11Freshness: String?
+    public var nip11LastError: String?
+    public var nip77Advertisement: String
+    public var nip77Behavior: String
+    public var nip77Handoff: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(relay: String, access: RuntimeRelayAccess, wireSubscriptionCount: UInt64, authorsServed: UInt64, lanes: [RuntimeRelayLaneCount], omittedLanes: UInt64, subscriptions: [RuntimeRelaySubscription], omittedSubscriptions: UInt64, eventsByKind: [RuntimeRelayKindCount], omittedKinds: UInt64, supportedNips: [UInt16]?, omittedSupportedNips: UInt64, nip11DocumentRevision: String?, nip11Freshness: String?, nip11LastError: String?, nip77Advertisement: String, nip77Behavior: String, nip77Handoff: String) {
+        self.relay = relay
+        self.access = access
+        self.wireSubscriptionCount = wireSubscriptionCount
+        self.authorsServed = authorsServed
+        self.lanes = lanes
+        self.omittedLanes = omittedLanes
+        self.subscriptions = subscriptions
+        self.omittedSubscriptions = omittedSubscriptions
+        self.eventsByKind = eventsByKind
+        self.omittedKinds = omittedKinds
+        self.supportedNips = supportedNips
+        self.omittedSupportedNips = omittedSupportedNips
+        self.nip11DocumentRevision = nip11DocumentRevision
+        self.nip11Freshness = nip11Freshness
+        self.nip11LastError = nip11LastError
+        self.nip77Advertisement = nip77Advertisement
+        self.nip77Behavior = nip77Behavior
+        self.nip77Handoff = nip77Handoff
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeRelayDiagnostics: Sendable {}
+#endif
+
+
+extension RuntimeRelayDiagnostics: Equatable, Hashable {
+    public static func ==(lhs: RuntimeRelayDiagnostics, rhs: RuntimeRelayDiagnostics) -> Bool {
+        if lhs.relay != rhs.relay {
+            return false
+        }
+        if lhs.access != rhs.access {
+            return false
+        }
+        if lhs.wireSubscriptionCount != rhs.wireSubscriptionCount {
+            return false
+        }
+        if lhs.authorsServed != rhs.authorsServed {
+            return false
+        }
+        if lhs.lanes != rhs.lanes {
+            return false
+        }
+        if lhs.omittedLanes != rhs.omittedLanes {
+            return false
+        }
+        if lhs.subscriptions != rhs.subscriptions {
+            return false
+        }
+        if lhs.omittedSubscriptions != rhs.omittedSubscriptions {
+            return false
+        }
+        if lhs.eventsByKind != rhs.eventsByKind {
+            return false
+        }
+        if lhs.omittedKinds != rhs.omittedKinds {
+            return false
+        }
+        if lhs.supportedNips != rhs.supportedNips {
+            return false
+        }
+        if lhs.omittedSupportedNips != rhs.omittedSupportedNips {
+            return false
+        }
+        if lhs.nip11DocumentRevision != rhs.nip11DocumentRevision {
+            return false
+        }
+        if lhs.nip11Freshness != rhs.nip11Freshness {
+            return false
+        }
+        if lhs.nip11LastError != rhs.nip11LastError {
+            return false
+        }
+        if lhs.nip77Advertisement != rhs.nip77Advertisement {
+            return false
+        }
+        if lhs.nip77Behavior != rhs.nip77Behavior {
+            return false
+        }
+        if lhs.nip77Handoff != rhs.nip77Handoff {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(relay)
+        hasher.combine(access)
+        hasher.combine(wireSubscriptionCount)
+        hasher.combine(authorsServed)
+        hasher.combine(lanes)
+        hasher.combine(omittedLanes)
+        hasher.combine(subscriptions)
+        hasher.combine(omittedSubscriptions)
+        hasher.combine(eventsByKind)
+        hasher.combine(omittedKinds)
+        hasher.combine(supportedNips)
+        hasher.combine(omittedSupportedNips)
+        hasher.combine(nip11DocumentRevision)
+        hasher.combine(nip11Freshness)
+        hasher.combine(nip11LastError)
+        hasher.combine(nip77Advertisement)
+        hasher.combine(nip77Behavior)
+        hasher.combine(nip77Handoff)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeRelayDiagnostics: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRelayDiagnostics {
+        return
+            try RuntimeRelayDiagnostics(
+                relay: FfiConverterString.read(from: &buf),
+                access: FfiConverterTypeRuntimeRelayAccess.read(from: &buf),
+                wireSubscriptionCount: FfiConverterUInt64.read(from: &buf),
+                authorsServed: FfiConverterUInt64.read(from: &buf),
+                lanes: FfiConverterSequenceTypeRuntimeRelayLaneCount.read(from: &buf),
+                omittedLanes: FfiConverterUInt64.read(from: &buf),
+                subscriptions: FfiConverterSequenceTypeRuntimeRelaySubscription.read(from: &buf),
+                omittedSubscriptions: FfiConverterUInt64.read(from: &buf),
+                eventsByKind: FfiConverterSequenceTypeRuntimeRelayKindCount.read(from: &buf),
+                omittedKinds: FfiConverterUInt64.read(from: &buf),
+                supportedNips: FfiConverterOptionSequenceUInt16.read(from: &buf),
+                omittedSupportedNips: FfiConverterUInt64.read(from: &buf),
+                nip11DocumentRevision: FfiConverterOptionString.read(from: &buf),
+                nip11Freshness: FfiConverterOptionString.read(from: &buf),
+                nip11LastError: FfiConverterOptionString.read(from: &buf),
+                nip77Advertisement: FfiConverterString.read(from: &buf),
+                nip77Behavior: FfiConverterString.read(from: &buf),
+                nip77Handoff: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeRelayDiagnostics, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.relay, into: &buf)
+        FfiConverterTypeRuntimeRelayAccess.write(value.access, into: &buf)
+        FfiConverterUInt64.write(value.wireSubscriptionCount, into: &buf)
+        FfiConverterUInt64.write(value.authorsServed, into: &buf)
+        FfiConverterSequenceTypeRuntimeRelayLaneCount.write(value.lanes, into: &buf)
+        FfiConverterUInt64.write(value.omittedLanes, into: &buf)
+        FfiConverterSequenceTypeRuntimeRelaySubscription.write(value.subscriptions, into: &buf)
+        FfiConverterUInt64.write(value.omittedSubscriptions, into: &buf)
+        FfiConverterSequenceTypeRuntimeRelayKindCount.write(value.eventsByKind, into: &buf)
+        FfiConverterUInt64.write(value.omittedKinds, into: &buf)
+        FfiConverterOptionSequenceUInt16.write(value.supportedNips, into: &buf)
+        FfiConverterUInt64.write(value.omittedSupportedNips, into: &buf)
+        FfiConverterOptionString.write(value.nip11DocumentRevision, into: &buf)
+        FfiConverterOptionString.write(value.nip11Freshness, into: &buf)
+        FfiConverterOptionString.write(value.nip11LastError, into: &buf)
+        FfiConverterString.write(value.nip77Advertisement, into: &buf)
+        FfiConverterString.write(value.nip77Behavior, into: &buf)
+        FfiConverterString.write(value.nip77Handoff, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayDiagnostics_lift(_ buf: RustBuffer) throws -> RuntimeRelayDiagnostics {
+    return try FfiConverterTypeRuntimeRelayDiagnostics.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayDiagnostics_lower(_ value: RuntimeRelayDiagnostics) -> RustBuffer {
+    return FfiConverterTypeRuntimeRelayDiagnostics.lower(value)
+}
+
+
+public struct RuntimeRelayDiagnosticsObservationStart {
+    public var observation: RuntimeRelayDiagnosticsObservation?
+    public var refusal: RuntimeRefusal?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(observation: RuntimeRelayDiagnosticsObservation?, refusal: RuntimeRefusal?) {
+        self.observation = observation
+        self.refusal = refusal
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeRelayDiagnosticsObservationStart: Sendable {}
+#endif
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeRelayDiagnosticsObservationStart: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRelayDiagnosticsObservationStart {
+        return
+            try RuntimeRelayDiagnosticsObservationStart(
+                observation: FfiConverterOptionTypeRuntimeRelayDiagnosticsObservation.read(from: &buf),
+                refusal: FfiConverterOptionTypeRuntimeRefusal.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeRelayDiagnosticsObservationStart, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeRuntimeRelayDiagnosticsObservation.write(value.observation, into: &buf)
+        FfiConverterOptionTypeRuntimeRefusal.write(value.refusal, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayDiagnosticsObservationStart_lift(_ buf: RustBuffer) throws -> RuntimeRelayDiagnosticsObservationStart {
+    return try FfiConverterTypeRuntimeRelayDiagnosticsObservationStart.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayDiagnosticsObservationStart_lower(_ value: RuntimeRelayDiagnosticsObservationStart) -> RustBuffer {
+    return FfiConverterTypeRuntimeRelayDiagnosticsObservationStart.lower(value)
+}
+
+
+/**
+ * Latest replacement from the on-demand NMP diagnostics observation.
+ *
+ * `observing` is false when no observer is registered. Empty `relays` with
+ * `observing` false means "not currently accounted", never a claim that the
+ * engine has planned no relay session.
+ */
+public struct RuntimeRelayDiagnosticsSnapshot {
+    public var revision: UInt64
+    public var observing: Bool
+    public var relays: [RuntimeRelayDiagnostics]
+    public var omittedRelays: UInt64
+    public var uncoveredAuthorCount: UInt64
+    public var droppedMergeRules: [String]
+    public var omittedDroppedMergeRules: UInt64
+    public var discoveredPrivateRelaysRejected: UInt64
+    public var sessionsRejectedOverCap: UInt64
+    public var storeDegraded: String?
+    public var transportDegraded: String?
+    public var failure: RuntimeRefusal?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(revision: UInt64, observing: Bool, relays: [RuntimeRelayDiagnostics], omittedRelays: UInt64, uncoveredAuthorCount: UInt64, droppedMergeRules: [String], omittedDroppedMergeRules: UInt64, discoveredPrivateRelaysRejected: UInt64, sessionsRejectedOverCap: UInt64, storeDegraded: String?, transportDegraded: String?, failure: RuntimeRefusal?) {
+        self.revision = revision
+        self.observing = observing
+        self.relays = relays
+        self.omittedRelays = omittedRelays
+        self.uncoveredAuthorCount = uncoveredAuthorCount
+        self.droppedMergeRules = droppedMergeRules
+        self.omittedDroppedMergeRules = omittedDroppedMergeRules
+        self.discoveredPrivateRelaysRejected = discoveredPrivateRelaysRejected
+        self.sessionsRejectedOverCap = sessionsRejectedOverCap
+        self.storeDegraded = storeDegraded
+        self.transportDegraded = transportDegraded
+        self.failure = failure
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeRelayDiagnosticsSnapshot: Sendable {}
+#endif
+
+
+extension RuntimeRelayDiagnosticsSnapshot: Equatable, Hashable {
+    public static func ==(lhs: RuntimeRelayDiagnosticsSnapshot, rhs: RuntimeRelayDiagnosticsSnapshot) -> Bool {
+        if lhs.revision != rhs.revision {
+            return false
+        }
+        if lhs.observing != rhs.observing {
+            return false
+        }
+        if lhs.relays != rhs.relays {
+            return false
+        }
+        if lhs.omittedRelays != rhs.omittedRelays {
+            return false
+        }
+        if lhs.uncoveredAuthorCount != rhs.uncoveredAuthorCount {
+            return false
+        }
+        if lhs.droppedMergeRules != rhs.droppedMergeRules {
+            return false
+        }
+        if lhs.omittedDroppedMergeRules != rhs.omittedDroppedMergeRules {
+            return false
+        }
+        if lhs.discoveredPrivateRelaysRejected != rhs.discoveredPrivateRelaysRejected {
+            return false
+        }
+        if lhs.sessionsRejectedOverCap != rhs.sessionsRejectedOverCap {
+            return false
+        }
+        if lhs.storeDegraded != rhs.storeDegraded {
+            return false
+        }
+        if lhs.transportDegraded != rhs.transportDegraded {
+            return false
+        }
+        if lhs.failure != rhs.failure {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(revision)
+        hasher.combine(observing)
+        hasher.combine(relays)
+        hasher.combine(omittedRelays)
+        hasher.combine(uncoveredAuthorCount)
+        hasher.combine(droppedMergeRules)
+        hasher.combine(omittedDroppedMergeRules)
+        hasher.combine(discoveredPrivateRelaysRejected)
+        hasher.combine(sessionsRejectedOverCap)
+        hasher.combine(storeDegraded)
+        hasher.combine(transportDegraded)
+        hasher.combine(failure)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeRelayDiagnosticsSnapshot: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRelayDiagnosticsSnapshot {
+        return
+            try RuntimeRelayDiagnosticsSnapshot(
+                revision: FfiConverterUInt64.read(from: &buf),
+                observing: FfiConverterBool.read(from: &buf),
+                relays: FfiConverterSequenceTypeRuntimeRelayDiagnostics.read(from: &buf),
+                omittedRelays: FfiConverterUInt64.read(from: &buf),
+                uncoveredAuthorCount: FfiConverterUInt64.read(from: &buf),
+                droppedMergeRules: FfiConverterSequenceString.read(from: &buf),
+                omittedDroppedMergeRules: FfiConverterUInt64.read(from: &buf),
+                discoveredPrivateRelaysRejected: FfiConverterUInt64.read(from: &buf),
+                sessionsRejectedOverCap: FfiConverterUInt64.read(from: &buf),
+                storeDegraded: FfiConverterOptionString.read(from: &buf),
+                transportDegraded: FfiConverterOptionString.read(from: &buf),
+                failure: FfiConverterOptionTypeRuntimeRefusal.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeRelayDiagnosticsSnapshot, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.revision, into: &buf)
+        FfiConverterBool.write(value.observing, into: &buf)
+        FfiConverterSequenceTypeRuntimeRelayDiagnostics.write(value.relays, into: &buf)
+        FfiConverterUInt64.write(value.omittedRelays, into: &buf)
+        FfiConverterUInt64.write(value.uncoveredAuthorCount, into: &buf)
+        FfiConverterSequenceString.write(value.droppedMergeRules, into: &buf)
+        FfiConverterUInt64.write(value.omittedDroppedMergeRules, into: &buf)
+        FfiConverterUInt64.write(value.discoveredPrivateRelaysRejected, into: &buf)
+        FfiConverterUInt64.write(value.sessionsRejectedOverCap, into: &buf)
+        FfiConverterOptionString.write(value.storeDegraded, into: &buf)
+        FfiConverterOptionString.write(value.transportDegraded, into: &buf)
+        FfiConverterOptionTypeRuntimeRefusal.write(value.failure, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayDiagnosticsSnapshot_lift(_ buf: RustBuffer) throws -> RuntimeRelayDiagnosticsSnapshot {
+    return try FfiConverterTypeRuntimeRelayDiagnosticsSnapshot.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayDiagnosticsSnapshot_lower(_ value: RuntimeRelayDiagnosticsSnapshot) -> RustBuffer {
+    return FfiConverterTypeRuntimeRelayDiagnosticsSnapshot.lower(value)
+}
+
+
+public struct RuntimeRelayKindCount {
+    public var kind: UInt16
+    public var events: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(kind: UInt16, events: UInt64) {
+        self.kind = kind
+        self.events = events
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeRelayKindCount: Sendable {}
+#endif
+
+
+extension RuntimeRelayKindCount: Equatable, Hashable {
+    public static func ==(lhs: RuntimeRelayKindCount, rhs: RuntimeRelayKindCount) -> Bool {
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.events != rhs.events {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(kind)
+        hasher.combine(events)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeRelayKindCount: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRelayKindCount {
+        return
+            try RuntimeRelayKindCount(
+                kind: FfiConverterUInt16.read(from: &buf),
+                events: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeRelayKindCount, into buf: inout [UInt8]) {
+        FfiConverterUInt16.write(value.kind, into: &buf)
+        FfiConverterUInt64.write(value.events, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayKindCount_lift(_ buf: RustBuffer) throws -> RuntimeRelayKindCount {
+    return try FfiConverterTypeRuntimeRelayKindCount.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayKindCount_lower(_ value: RuntimeRelayKindCount) -> RustBuffer {
+    return FfiConverterTypeRuntimeRelayKindCount.lower(value)
+}
+
+
+public struct RuntimeRelayLaneCount {
+    public var lane: RuntimeRelayLane
+    public var wireSubscriptions: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(lane: RuntimeRelayLane, wireSubscriptions: UInt64) {
+        self.lane = lane
+        self.wireSubscriptions = wireSubscriptions
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeRelayLaneCount: Sendable {}
+#endif
+
+
+extension RuntimeRelayLaneCount: Equatable, Hashable {
+    public static func ==(lhs: RuntimeRelayLaneCount, rhs: RuntimeRelayLaneCount) -> Bool {
+        if lhs.lane != rhs.lane {
+            return false
+        }
+        if lhs.wireSubscriptions != rhs.wireSubscriptions {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(lane)
+        hasher.combine(wireSubscriptions)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeRelayLaneCount: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRelayLaneCount {
+        return
+            try RuntimeRelayLaneCount(
+                lane: FfiConverterTypeRuntimeRelayLane.read(from: &buf),
+                wireSubscriptions: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeRelayLaneCount, into buf: inout [UInt8]) {
+        FfiConverterTypeRuntimeRelayLane.write(value.lane, into: &buf)
+        FfiConverterUInt64.write(value.wireSubscriptions, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayLaneCount_lift(_ buf: RustBuffer) throws -> RuntimeRelayLaneCount {
+    return try FfiConverterTypeRuntimeRelayLaneCount.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayLaneCount_lower(_ value: RuntimeRelayLaneCount) -> RustBuffer {
+    return FfiConverterTypeRuntimeRelayLaneCount.lower(value)
+}
+
+
+/**
+ * One currently active wire subscription. `coverage` is absent when the relay
+ * has no proven row for this filter's shape; absent is unproven, never zero.
+ */
+public struct RuntimeRelaySubscription {
+    public var filter: String
+    public var coverage: RuntimeRelayCoverage?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(filter: String, coverage: RuntimeRelayCoverage?) {
+        self.filter = filter
+        self.coverage = coverage
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeRelaySubscription: Sendable {}
+#endif
+
+
+extension RuntimeRelaySubscription: Equatable, Hashable {
+    public static func ==(lhs: RuntimeRelaySubscription, rhs: RuntimeRelaySubscription) -> Bool {
+        if lhs.filter != rhs.filter {
+            return false
+        }
+        if lhs.coverage != rhs.coverage {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(filter)
+        hasher.combine(coverage)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeRelaySubscription: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRelaySubscription {
+        return
+            try RuntimeRelaySubscription(
+                filter: FfiConverterString.read(from: &buf),
+                coverage: FfiConverterOptionTypeRuntimeRelayCoverage.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeRelaySubscription, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.filter, into: &buf)
+        FfiConverterOptionTypeRuntimeRelayCoverage.write(value.coverage, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelaySubscription_lift(_ buf: RustBuffer) throws -> RuntimeRelaySubscription {
+    return try FfiConverterTypeRuntimeRelaySubscription.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelaySubscription_lower(_ value: RuntimeRelaySubscription) -> RustBuffer {
+    return FfiConverterTypeRuntimeRelaySubscription.lower(value)
+}
+
+
 public struct RuntimeSessionSnapshot {
     public var id: UInt64
     public var author: String
@@ -8260,6 +9119,212 @@ extension RuntimePermissionSensitivity: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
+public enum RuntimeRelayAccess {
+
+    case `public`
+    case nip42(publicKey: String
+    )
+}
+
+
+#if compiler(>=6)
+extension RuntimeRelayAccess: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeRelayAccess: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeRelayAccess
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRelayAccess {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .`public`
+
+        case 2: return .nip42(publicKey: try FfiConverterString.read(from: &buf)
+        )
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeRelayAccess, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .`public`:
+            writeInt(&buf, Int32(1))
+
+
+        case let .nip42(publicKey):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(publicKey, into: &buf)
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayAccess_lift(_ buf: RustBuffer) throws -> RuntimeRelayAccess {
+    return try FfiConverterTypeRuntimeRelayAccess.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayAccess_lower(_ value: RuntimeRelayAccess) -> RustBuffer {
+    return FfiConverterTypeRuntimeRelayAccess.lower(value)
+}
+
+
+extension RuntimeRelayAccess: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeRelayLane {
+
+    case nip65Write
+    case nip65Read
+    case hint
+    case provenance
+    case userConfigured
+    case indexerDiscovery
+    case groupHost
+    case dmInbox
+    case appRelay
+    case fallback
+    case explicitPinned
+}
+
+
+#if compiler(>=6)
+extension RuntimeRelayLane: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeRelayLane: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeRelayLane
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRelayLane {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .nip65Write
+
+        case 2: return .nip65Read
+
+        case 3: return .hint
+
+        case 4: return .provenance
+
+        case 5: return .userConfigured
+
+        case 6: return .indexerDiscovery
+
+        case 7: return .groupHost
+
+        case 8: return .dmInbox
+
+        case 9: return .appRelay
+
+        case 10: return .fallback
+
+        case 11: return .explicitPinned
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeRelayLane, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .nip65Write:
+            writeInt(&buf, Int32(1))
+
+
+        case .nip65Read:
+            writeInt(&buf, Int32(2))
+
+
+        case .hint:
+            writeInt(&buf, Int32(3))
+
+
+        case .provenance:
+            writeInt(&buf, Int32(4))
+
+
+        case .userConfigured:
+            writeInt(&buf, Int32(5))
+
+
+        case .indexerDiscovery:
+            writeInt(&buf, Int32(6))
+
+
+        case .groupHost:
+            writeInt(&buf, Int32(7))
+
+
+        case .dmInbox:
+            writeInt(&buf, Int32(8))
+
+
+        case .appRelay:
+            writeInt(&buf, Int32(9))
+
+
+        case .fallback:
+            writeInt(&buf, Int32(10))
+
+
+        case .explicitPinned:
+            writeInt(&buf, Int32(11))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayLane_lift(_ buf: RustBuffer) throws -> RuntimeRelayLane {
+    return try FfiConverterTypeRuntimeRelayLane.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeRelayLane_lower(_ value: RuntimeRelayLane) -> RustBuffer {
+    return FfiConverterTypeRuntimeRelayLane.lower(value)
+}
+
+
+extension RuntimeRelayLane: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 public enum RuntimeSensitivity {
 
     case ordinary
@@ -9268,6 +10333,122 @@ public func FfiConverterCallbackInterfaceRuntimeObserver_lower(_ v: RuntimeObser
     return FfiConverterCallbackInterfaceRuntimeObserver.lower(v)
 }
 
+
+
+
+public protocol RuntimeRelayDiagnosticsObserver: AnyObject, Sendable {
+
+    func update(snapshot: RuntimeRelayDiagnosticsSnapshot)
+
+}
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceRuntimeRelayDiagnosticsObserver {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // This creates 1-element array, since this seems to be the only way to construct a const
+    // pointer that we can pass to the Rust code.
+    static let vtable: [UniffiVTableCallbackInterfaceRuntimeRelayDiagnosticsObserver] = [UniffiVTableCallbackInterfaceRuntimeRelayDiagnosticsObserver(
+        update: { (
+            uniffiHandle: UInt64,
+            snapshot: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceRuntimeRelayDiagnosticsObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.update(
+                     snapshot: try FfiConverterTypeRuntimeRelayDiagnosticsSnapshot_lift(snapshot)
+                )
+            }
+
+
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            let result = try? FfiConverterCallbackInterfaceRuntimeRelayDiagnosticsObserver.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface RuntimeRelayDiagnosticsObserver: handle missing in uniffiFree")
+            }
+        }
+    )]
+}
+
+private func uniffiCallbackInitRuntimeRelayDiagnosticsObserver() {
+    uniffi_nmp_native_runtime_ffi_fn_init_callback_vtable_runtimerelaydiagnosticsobserver(UniffiCallbackInterfaceRuntimeRelayDiagnosticsObserver.vtable)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfaceRuntimeRelayDiagnosticsObserver {
+    fileprivate static let handleMap = UniffiHandleMap<RuntimeRelayDiagnosticsObserver>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfaceRuntimeRelayDiagnosticsObserver : FfiConverter {
+    typealias SwiftType = RuntimeRelayDiagnosticsObserver
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceRuntimeRelayDiagnosticsObserver_lift(_ handle: UInt64) throws -> RuntimeRelayDiagnosticsObserver {
+    return try FfiConverterCallbackInterfaceRuntimeRelayDiagnosticsObserver.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceRuntimeRelayDiagnosticsObserver_lower(_ v: RuntimeRelayDiagnosticsObserver) -> UInt64 {
+    return FfiConverterCallbackInterfaceRuntimeRelayDiagnosticsObserver.lower(v)
+}
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -9335,6 +10516,30 @@ fileprivate struct FfiConverterOptionTypeRuntimeObservation: FfiConverterRustBuf
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeRuntimeObservation.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeRelayDiagnosticsObservation: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeRelayDiagnosticsObservation?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeRelayDiagnosticsObservation.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeRelayDiagnosticsObservation.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -9583,6 +10788,30 @@ fileprivate struct FfiConverterOptionTypeRuntimeRefusal: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeRuntimeRelayCoverage: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeRelayCoverage?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeRelayCoverage.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeRelayCoverage.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeRuntimeWorkspaceDefinition: FfiConverterRustBuffer {
     typealias SwiftType = RuntimeWorkspaceDefinition?
 
@@ -9649,6 +10878,55 @@ fileprivate struct FfiConverterOptionTypeRuntimeGrantDecision: FfiConverterRustB
         case 1: return try FfiConverterTypeRuntimeGrantDecision.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionSequenceUInt16: FfiConverterRustBuffer {
+    typealias SwiftType = [UInt16]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterSequenceUInt16.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterSequenceUInt16.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceUInt16: FfiConverterRustBuffer {
+    typealias SwiftType = [UInt16]
+
+    public static func write(_ value: [UInt16], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterUInt16.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UInt16] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [UInt16]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterUInt16.read(from: &buf))
+        }
+        return seq
     }
 }
 
@@ -10105,6 +11383,106 @@ fileprivate struct FfiConverterSequenceTypeRuntimeRefusal: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeRuntimeRelayDiagnostics: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeRelayDiagnostics]
+
+    public static func write(_ value: [RuntimeRelayDiagnostics], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeRelayDiagnostics.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeRelayDiagnostics] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeRelayDiagnostics]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeRelayDiagnostics.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeRelayKindCount: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeRelayKindCount]
+
+    public static func write(_ value: [RuntimeRelayKindCount], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeRelayKindCount.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeRelayKindCount] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeRelayKindCount]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeRelayKindCount.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeRelayLaneCount: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeRelayLaneCount]
+
+    public static func write(_ value: [RuntimeRelayLaneCount], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeRelayLaneCount.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeRelayLaneCount] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeRelayLaneCount]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeRelayLaneCount.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeRelaySubscription: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeRelaySubscription]
+
+    public static func write(_ value: [RuntimeRelaySubscription], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeRelaySubscription.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeRelaySubscription] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeRelaySubscription]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeRelaySubscription.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeRuntimeSessionSnapshot: FfiConverterRustBuffer {
     typealias SwiftType = [RuntimeSessionSnapshot]
 
@@ -10286,6 +11664,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_observe() != 59858) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_observe_relay_diagnostics() != 46414) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_permission_review() != 34440) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -10299,6 +11680,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_register_read_only_account() != 3535) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_relay_diagnostics() != 37219) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_remove_local_account() != 63854) {
@@ -10341,6 +11725,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimeobservation_stop() != 63671) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimerelaydiagnosticsobservation_stop() != 42094) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_verifiedartifact_aggregate_hash() != 37195) {
@@ -10397,12 +11784,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimeobserver_update() != 4341) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimerelaydiagnosticsobserver_update() != 20791) {
+        return InitializationResult.apiChecksumMismatch
+    }
 
     uniffiCallbackInitArtifactSource()
     uniffiCallbackInitNativeAppearanceSource()
     uniffiCallbackInitNativeIncActionExecutor()
     uniffiCallbackInitNativeSettingsExecutor()
     uniffiCallbackInitRuntimeObserver()
+    uniffiCallbackInitRuntimeRelayDiagnosticsObserver()
     return InitializationResult.ok
 }()
 

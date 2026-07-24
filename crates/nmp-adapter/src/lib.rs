@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod catalog;
+pub mod diagnostics;
 mod nap;
 
 pub use nap::{NapNostrProvider, NapNostrProviderLimits, NapNostrProviderSet};
@@ -50,6 +51,7 @@ const MAX_PROFILE_ACCOUNTS: usize = 32;
 pub struct NmpDataPlane {
     engine: Arc<Engine>,
     manifest_catalog: catalog::NmpManifestCatalog,
+    relay_diagnostics: diagnostics::NmpRelayDiagnostics,
     workers: Arc<WorkerAdmission>,
     accounts: Mutex<AccountState>,
     identity: Arc<Mutex<IdentityState>>,
@@ -178,9 +180,15 @@ impl NmpDataPlane {
             catalog::ManifestCatalogLimits::default(),
         )
         .expect("the built-in manifest catalog limits are valid");
+        let relay_diagnostics = diagnostics::NmpRelayDiagnostics::new(
+            Arc::clone(&engine),
+            diagnostics::RelayDiagnosticsLimits::default(),
+        )
+        .expect("the built-in relay diagnostics limits are valid");
         Self {
             engine,
             manifest_catalog,
+            relay_diagnostics,
             workers: Arc::new(WorkerAdmission {
                 active: AtomicUsize::new(0),
                 maximum: maximum_bridge_workers,
@@ -204,6 +212,13 @@ impl NmpDataPlane {
     /// bounded browse and exact-lookup admission domains.
     pub fn manifest_catalog(&self) -> catalog::NmpManifestCatalog {
         self.manifest_catalog.clone()
+    }
+
+    /// Returns the one profile-owned diagnostics facade. NMP already tracks
+    /// every relay and wire-subscription fact it delivers; clones share the
+    /// same bounded observation admission domain.
+    pub fn relay_diagnostics(&self) -> diagnostics::NmpRelayDiagnostics {
+        self.relay_diagnostics.clone()
     }
 
     /// Register one local signer through the supported NMP facade. The secret
