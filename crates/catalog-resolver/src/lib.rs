@@ -14,6 +14,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
+    thread,
     time::Duration,
 };
 
@@ -634,7 +635,7 @@ impl RustHttpsAcquisitionConfig {
 /// original URL hostname so TLS certificate validation and SNI are preserved.
 pub struct RustHttpsAcquisitionPort {
     config: RustHttpsAcquisitionConfig,
-    runtime: tokio::runtime::Runtime,
+    runtime: Option<tokio::runtime::Runtime>,
     admission: Arc<HttpsAdmission>,
 }
 
@@ -660,9 +661,24 @@ impl RustHttpsAcquisitionPort {
             .map_err(|error| HttpsPortError::new(error.to_string()))?;
         Ok(Self {
             config,
-            runtime,
+            runtime: Some(runtime),
             admission: Arc::new(HttpsAdmission::new(config.maximum_in_flight)),
         })
+    }
+}
+
+impl Drop for RustHttpsAcquisitionPort {
+    /// Tokio refuses to synchronously shut down a runtime from a thread that
+    /// is itself executing inside another runtime's async context (observed
+    /// when the last handle to this port is released from the FFI
+    /// observation thread). Shutting the runtime down on a fresh, bare
+    /// thread avoids that panic regardless of which thread drops this port.
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            let _ = thread::Builder::new()
+                .name("nampplets-artifact-https-shutdown".to_owned())
+                .spawn(move || drop(runtime));
+        }
     }
 }
 
@@ -691,7 +707,11 @@ impl HttpsAcquisitionPort for RustHttpsAcquisitionPort {
     ) -> Result<Arc<dyn HttpsAcquisitionOperation>, HttpsPortError> {
         let permit = self.admission.reserve()?;
         let config = self.config;
-        let task = self.runtime.spawn(async move {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .expect("runtime is only taken by Drop, after which the port is unreachable");
+        let task = runtime.spawn(async move {
             let result = rust_https_fetch(request, config).await;
             completion.resolve(result);
             drop(permit);
