@@ -303,7 +303,9 @@ public struct WorkbenchLibrarySheet: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(minWidth: 760, idealWidth: 900, minHeight: 540, idealHeight: 700)
+        #endif
         .onAppear {
             model.start()
             filterFocused = true

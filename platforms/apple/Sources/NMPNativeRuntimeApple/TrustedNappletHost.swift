@@ -68,7 +68,7 @@ public enum TrustedNappletActivity: Sendable, Equatable {
     case crashed
 }
 
-public struct TrustedNappletView: NSViewRepresentable {
+public struct TrustedNappletView {
     private let artifact: NappletArtifact
     private let onActivity: @MainActor @Sendable (TrustedNappletActivity) -> Void
 
@@ -80,18 +80,9 @@ public struct TrustedNappletView: NSViewRepresentable {
         self.onActivity = onActivity
     }
 
+    @MainActor
     public func makeCoordinator() -> Coordinator {
         Coordinator(artifact: artifact, onActivity: onActivity)
-    }
-
-    public func makeNSView(context: Context) -> WKWebView {
-        context.coordinator.makeWebView()
-    }
-
-    public func updateNSView(_ webView: WKWebView, context: Context) {}
-
-    public static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
-        coordinator.stop(webView)
     }
 
     @MainActor
@@ -384,6 +375,32 @@ public struct TrustedNappletView: NSViewRepresentable {
         )
     }
 }
+
+#if os(macOS)
+extension TrustedNappletView: NSViewRepresentable {
+    public func makeNSView(context: Context) -> WKWebView {
+        context.coordinator.makeWebView()
+    }
+
+    public func updateNSView(_ webView: WKWebView, context: Context) {}
+
+    public static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.stop(webView)
+    }
+}
+#elseif os(iOS)
+extension TrustedNappletView: UIViewRepresentable {
+    public func makeUIView(context: Context) -> WKWebView {
+        context.coordinator.makeWebView()
+    }
+
+    public func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    public static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.stop(webView)
+    }
+}
+#endif
 
 enum TrustedShellResources {
     static var shellURL: URL? {

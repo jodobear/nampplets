@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build generated Swift bindings and the macOS NMPNativeRuntime XCFramework.
+# Build generated Swift bindings and the multi-platform NMPNativeRuntime XCFramework.
 
 set -euo pipefail
 
@@ -7,18 +7,22 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/build-runtime-swift-xcframework.sh [OPTION]
 
-Build the generated NMPNativeRuntime Swift bindings and macOS XCFramework.
+Build the generated NMPNativeRuntime Swift bindings and the multi-platform
+NMPNativeRuntime XCFramework (macOS, iOS device, iOS Simulator).
 
 Options:
   --arm64-only  build only the native Apple Silicon macOS slice
-  --universal   build arm64 + x86_64 and combine them (default)
+  --universal   build arm64 + x86_64 macOS and combine them (default)
+  --no-ios      skip the iOS device and iOS Simulator slices
   --check-bindings
                  refuse to replace a stale checked-in Swift binding
   -h, --help    show this help without building
 
-CARGO_TARGET_DIR is honored. The deployment target defaults to macOS 13.0 and
-may be overridden with MACOSX_DEPLOYMENT_TARGET. CI uses --check-bindings so
-the generated Swift API must byte-match the checked-in package source.
+CARGO_TARGET_DIR is honored. The macOS deployment target defaults to 13.0 and
+may be overridden with MACOSX_DEPLOYMENT_TARGET; the iOS deployment target
+defaults to 17.0 and may be overridden with IPHONEOS_DEPLOYMENT_TARGET. CI
+uses --check-bindings so the generated Swift API must byte-match the
+checked-in package source.
 USAGE
 }
 
@@ -30,6 +34,7 @@ fail_usage() {
 
 mode=universal
 check_bindings=false
+ios_enabled=true
 for argument in "$@"; do
   case "$argument" in
     --arm64-only)
@@ -39,6 +44,9 @@ for argument in "$@"; do
       ;;
     --universal)
       [[ "$mode" == universal ]] || fail_usage "conflicting architecture options"
+      ;;
+    --no-ios)
+      ios_enabled=false
       ;;
     --check-bindings)
       check_bindings=true
@@ -61,7 +69,10 @@ crate=nmp-native-runtime-ffi
 library=libnmp_native_runtime_ffi.a
 arm_target=aarch64-apple-darwin
 x86_target=x86_64-apple-darwin
+ios_device_target=aarch64-apple-ios
+ios_sim_target=aarch64-apple-ios-sim
 deployment_target=${MACOSX_DEPLOYMENT_TARGET:-13.0}
+ios_deployment_target=${IPHONEOS_DEPLOYMENT_TARGET:-17.0}
 target_value=${CARGO_TARGET_DIR:-target}
 if [[ "$target_value" = /* ]]; then
   target_dir=$target_value
@@ -102,6 +113,20 @@ if [[ "$mode" == universal ]]; then
   architectures="arm64 x86_64"
 fi
 
+ios_device_library=
+ios_sim_library=
+if [[ "$ios_enabled" == true ]]; then
+  echo "== build iOS device Rust library =="
+  IPHONEOS_DEPLOYMENT_TARGET=$ios_deployment_target \
+    cargo build -p "$crate" --locked --release --target "$ios_device_target"
+  ios_device_library=$target_dir/$ios_device_target/release/$library
+
+  echo "== build iOS Simulator Rust library =="
+  IPHONEOS_DEPLOYMENT_TARGET=$ios_deployment_target \
+    cargo build -p "$crate" --locked --release --target "$ios_sim_target"
+  ios_sim_library=$target_dir/$ios_sim_target/release/$library
+fi
+
 echo "== generate UniFFI Swift source and C module =="
 rm -rf "$generated" "$headers"
 mkdir -p "$generated" "$headers" "$swift_sources"
@@ -129,11 +154,18 @@ cp "$generated/nmp_native_runtime_ffiFFI.modulemap" "$headers/module.modulemap"
 cp "$generated/nmp_native_runtime_ffi.swift" \
   "$packaged_swift"
 
-echo "== create macOS XCFramework ($architectures) =="
+xcframework_libraries=(-library "$packaged_library" -headers "$headers")
+xcframework_platforms="macOS ($architectures)"
+if [[ "$ios_enabled" == true ]]; then
+  xcframework_libraries+=(-library "$ios_device_library" -headers "$headers")
+  xcframework_libraries+=(-library "$ios_sim_library" -headers "$headers")
+  xcframework_platforms+=", iOS ($ios_device_target), iOS Simulator ($ios_sim_target)"
+fi
+
+echo "== create XCFramework ($xcframework_platforms) =="
 rm -rf "$xcframework"
 xcodebuild -create-xcframework \
-  -library "$packaged_library" \
-  -headers "$headers" \
+  "${xcframework_libraries[@]}" \
   -output "$xcframework"
 
 echo "== validate packaged architectures and generated binding =="
@@ -153,6 +185,10 @@ if [[ "${#packaged_architectures[@]}" -ne "${#expected_architectures[@]}" ]]; th
   exit 1
 fi
 printf '%s\n' "${packaged_architectures[*]}"
+if [[ "$ios_enabled" == true ]]; then
+  test -s "$ios_device_library"
+  test -s "$ios_sim_library"
+fi
 test -s "$packaged_swift"
 test -s "$xcframework/Info.plist"
 

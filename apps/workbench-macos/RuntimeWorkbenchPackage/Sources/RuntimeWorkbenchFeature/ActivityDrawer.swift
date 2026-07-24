@@ -72,7 +72,9 @@ public struct ActivityDrawer: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(minWidth: 700, idealWidth: 820, minHeight: 500, idealHeight: 680)
+        #endif
         .onAppear {
             model.start()
         }

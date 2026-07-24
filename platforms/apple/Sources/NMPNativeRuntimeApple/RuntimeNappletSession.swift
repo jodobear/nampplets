@@ -1,6 +1,14 @@
 import Foundation
 import NMPNativeRuntime
 
+#if os(macOS)
+typealias PlatformAppearanceSource = MacOSAppearanceSource
+typealias PlatformSettingsExecutor = MacOSSettingsExecutor
+#elseif os(iOS)
+typealias PlatformAppearanceSource = IOSAppearanceSource
+typealias PlatformSettingsExecutor = IOSSettingsExecutor
+#endif
+
 public enum RuntimeNappletOpenError: Error, LocalizedError, Equatable {
     case invalidStorageRoot
     case artifactSourceRefused(detail: String)
@@ -675,8 +683,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private let profileID = UUID()
     private let controller: RuntimeController
     private let source: RegisteredArtifactSource
-    private let appearanceSource: MacOSAppearanceSource
-    private let settingsExecutor: MacOSSettingsExecutor
+    private let appearanceSource: PlatformAppearanceSource
+    private let settingsExecutor: PlatformSettingsExecutor
     private let incActionExecutor: MacOSIncActionExecutor
     private let accountVault: (any NativeAccountVault)?
     private let lock = NSLock()
@@ -717,8 +725,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         }
 
         let source = RegisteredArtifactSource()
-        let appearanceSource = MacOSAppearanceSource()
-        let settingsExecutor = MacOSSettingsExecutor()
+        let appearanceSource = PlatformAppearanceSource()
+        let settingsExecutor = PlatformSettingsExecutor()
         let incActionExecutor = MacOSIncActionExecutor()
         let accountVault: (any NativeAccountVault)?
         if let injectedAccountVault {
@@ -794,8 +802,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private init(
         controller: RuntimeController,
         source: RegisteredArtifactSource,
-        appearanceSource: MacOSAppearanceSource,
-        settingsExecutor: MacOSSettingsExecutor,
+        appearanceSource: PlatformAppearanceSource,
+        settingsExecutor: PlatformSettingsExecutor,
         incActionExecutor: MacOSIncActionExecutor,
         accountVault: (any NativeAccountVault)?
     ) {
