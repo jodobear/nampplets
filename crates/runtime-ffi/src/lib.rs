@@ -26,7 +26,8 @@ use nmp_native_artifact::{
 };
 use nmp_native_nap_bridge::{BridgeLimits, Provider};
 use nmp_native_nmp_adapter::{
-    AccountLifecycleError, LocalAccountHandle, LocalAccountSnapshot, NmpDataPlane,
+    AccountLifecycleError, LocalAccountHandle, LocalAccountSnapshot, NapNostrProviderLimits,
+    NapNostrProviderSet, NmpDataPlane,
 };
 use nmp_native_provider_identity::{
     IdentityDataPlane, IdentityProvider, IdentityProviderLimits, NoopIdentityDiagnostics,
@@ -1198,6 +1199,14 @@ fn open_runtime_controller(
             })?,
         ),
     };
+    let nostr_providers =
+        NapNostrProviderSet::new(data_plane.clone(), NapNostrProviderLimits::default()).map_err(
+            |error| RuntimeOpenError::Runtime {
+                detail: error.to_string(),
+            },
+        )?;
+    let outbox_provider: Arc<dyn Provider> = nostr_providers.outbox;
+    let relay_provider: Arc<dyn Provider> = nostr_providers.relay;
     let (theme_source, theme_provider) = match appearance_source.and_then(|source| source.current())
     {
         Some(appearance) => {
@@ -1230,7 +1239,13 @@ fn open_runtime_controller(
             })
         })
         .transpose()?;
-    let mut providers = vec![storage_provider, identity_provider, inc_provider];
+    let mut providers = vec![
+        storage_provider,
+        identity_provider,
+        inc_provider,
+        outbox_provider,
+        relay_provider,
+    ];
     if let Some(provider) = &theme_provider {
         let provider: Arc<dyn Provider> = provider.clone();
         providers.push(provider);

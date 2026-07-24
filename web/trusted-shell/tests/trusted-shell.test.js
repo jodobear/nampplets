@@ -398,7 +398,7 @@ test("storage projection matches the exact pinned async shim surface", async () 
 
 test("prelude refuses domains it cannot faithfully project", () => {
   assert.throws(
-    () => shell.compatibilityPreludeSource(["shell", "outbox"]),
+    () => shell.compatibilityPreludeSource(["shell", "surface"]),
     /cannot project every negotiated domain/
   );
 });
@@ -764,6 +764,139 @@ test("theme projection matches the pinned get and automatic-change surface", asy
     error: "no active theme"
   });
   await assert.rejects(rejected, /no active theme/);
+});
+
+test("outbox projection supports bounded query, publish, and subscription lifecycles", async () => {
+  const absent = createPreludeHarness([]);
+  assert.equal(absent.context.napplet.outbox, undefined);
+
+  const harness = createPreludeHarness(["outbox"]);
+  const outbox = harness.context.napplet.outbox;
+  assert.deepEqual(
+    Object.keys(outbox).sort(),
+    ["getEvent", "publish", "query", "resolveRelays", "subscribe"]
+  );
+
+  const query = outbox.query(
+    [{ kinds: [1], authors: ["a".repeat(64)], limit: 20 }],
+    { authors: ["a".repeat(64)], timeoutMs: 1000 }
+  );
+  const queryEnvelope = harness.sent.at(-1).envelope;
+  assert.equal(queryEnvelope.type, "outbox.query");
+  harness.receive({
+    type: "outbox.query.result",
+    id: queryEnvelope.id,
+    events: [],
+    incomplete: true,
+    error: "one relay is unavailable"
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(await query)),
+    { events: [], incomplete: true, error: "one relay is unavailable" }
+  );
+
+  const received = [];
+  const closed = [];
+  const subscription = outbox.subscribe({ kinds: [1] });
+  const subscribeEnvelope = harness.sent.at(-1).envelope;
+  subscription.on("event", (result) => received.push(result.event.id));
+  subscription.on("closed", (reason) => closed.push(reason));
+  harness.receive({
+    type: "outbox.event",
+    subId: subscribeEnvelope.subId,
+    result: { event: { id: "event-1" } }
+  });
+  harness.receive({
+    type: "outbox.closed",
+    subId: subscribeEnvelope.subId,
+    reason: "upstream closed"
+  });
+  assert.deepEqual(received, ["event-1"]);
+  assert.deepEqual(closed, ["upstream closed"]);
+
+  const publish = outbox.publish({
+    kind: 1,
+    content: "GM",
+    tags: [],
+    created_at: 1
+  });
+  const publishEnvelope = harness.sent.at(-1).envelope;
+  harness.receive({
+    type: "outbox.publish.result",
+    id: publishEnvelope.id,
+    ok: true,
+    eventId: "signed-event",
+    relays: { "wss://relay.example": true }
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(await publish)),
+    {
+      ok: true,
+      eventId: "signed-event",
+      relays: { "wss://relay.example": true }
+    }
+  );
+});
+
+test("relay projection preserves event, EOSE, query, and governed publish results", async () => {
+  const harness = createPreludeHarness(["relay"]);
+  const relay = harness.context.napplet.relay;
+  const events = [];
+  let eose = 0;
+  const subscription = relay.subscribe(
+    { kinds: [1] },
+    (result) => events.push(result.event.id),
+    () => { eose += 1; }
+  );
+  const subscribeEnvelope = harness.sent.at(-1).envelope;
+  harness.receive({
+    type: "relay.event",
+    subId: subscribeEnvelope.subId,
+    result: { event: { id: "relay-event" } }
+  });
+  harness.receive({ type: "relay.eose", subId: subscribeEnvelope.subId });
+  harness.receive({ type: "relay.eose", subId: subscribeEnvelope.subId });
+  assert.deepEqual(events, ["relay-event"]);
+  assert.equal(eose, 1);
+  subscription.close();
+  assert.equal(harness.sent.at(-1).envelope.type, "relay.close");
+
+  const query = relay.query({ kinds: [0] });
+  const queryEnvelope = harness.sent.at(-1).envelope;
+  harness.receive({
+    type: "relay.query.result",
+    id: queryEnvelope.id,
+    events: [{ event: { id: "profile" } }]
+  });
+  assert.equal((await query)[0].event.id, "profile");
+
+  const publish = relay.publish({
+    kind: 1,
+    content: "hello",
+    tags: [],
+    created_at: 1
+  });
+  const publishEnvelope = harness.sent.at(-1).envelope;
+  harness.receive({
+    type: "relay.publish.result",
+    id: publishEnvelope.id,
+    ok: true,
+    event: { id: "signed" }
+  });
+  assert.equal((await publish).id, "signed");
+
+  const encrypted = relay.publishEncrypted(
+    { kind: 4, content: "secret", tags: [], created_at: 1 },
+    "b".repeat(64)
+  );
+  const encryptedEnvelope = harness.sent.at(-1).envelope;
+  harness.receive({
+    type: "relay.publishEncrypted.result",
+    id: encryptedEnvelope.id,
+    ok: false,
+    error: "governed content encryption unavailable"
+  });
+  await assert.rejects(encrypted, /governed content encryption unavailable/);
 });
 
 test("resource projection stays unavailable until matching shell.init", async () => {

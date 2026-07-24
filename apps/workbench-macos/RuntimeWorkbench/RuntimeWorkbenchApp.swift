@@ -30,9 +30,17 @@ struct RuntimeWorkbenchApp: App {
         }
         isOpeningRuntime = true
         defer { isOpeningRuntime = false }
+        let uiTestScenario = ProcessInfo.processInfo.environment[
+            "NMP_WORKBENCH_UI_TEST_SCENARIO"
+        ]
         do {
             runtimeProfile = try await Task.detached {
-                try WorkbenchRuntimeProfile.openDefault()
+                if let uiTestScenario {
+                    return try WorkbenchRuntimeProfile.openForUITesting(
+                        scenario: uiTestScenario
+                    )
+                }
+                return try WorkbenchRuntimeProfile.openDefault()
             }.value
         } catch {
             runtimeError = error.localizedDescription
