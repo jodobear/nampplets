@@ -1701,15 +1701,17 @@ fn query_result(
         if domain == NapDomain::Outbox {
             value["incomplete"] = Value::Bool(projection.incomplete);
         } else if projection.incomplete {
-            // The pinned relay facade projects a plain event array and has no
-            // supported partial-evidence field. Refuse an unresolved window
-            // even when it contains rows rather than presenting a partial
-            // public-relay result as complete.
-            value["error"] = Value::String(projection.error.unwrap_or_else(|| {
-                "NMP reported unresolved relay acquisition evidence".to_owned()
-            }));
-        } else if let Some(error) = projection.error {
+            // relay.query's pinned shell API remains an Array, so its
+            // projection carries this bounded evidence as an array property.
+            // Preserve rows while making a partial public window observable.
+            value["incomplete"] = Value::Bool(true);
+        }
+        if let Some(error) = projection.error {
             value["error"] = Value::String(error);
+        } else if domain == NapDomain::Relay && projection.incomplete && projection.rows.is_empty()
+        {
+            value["error"] =
+                Value::String("NMP reported unresolved relay acquisition evidence".to_owned());
         }
         value
     }
@@ -2458,7 +2460,7 @@ mod tests {
     }
 
     #[test]
-    fn relay_query_refuses_partial_public_evidence_even_with_rows() {
+    fn relay_query_projects_partial_public_evidence_even_with_rows() {
         let value = query_result(
             NapDomain::Relay,
             "relay-partial-1",
@@ -2477,10 +2479,8 @@ mod tests {
             value["events"][0]["event"]["content"],
             "deterministic public note"
         );
-        assert_eq!(
-            value["error"],
-            "NMP reported unresolved relay acquisition evidence"
-        );
+        assert_eq!(value["incomplete"], true);
+        assert!(value.get("error").is_none());
     }
 
     #[test]
@@ -2734,6 +2734,34 @@ mod tests {
             .as_str()
             .expect("an acknowledged publish must expose its canonical event id");
         println!("NMP_LIVE_OUTBOX_EVENT_ID={event_id}");
+
+        let relay_query = dispatch(
+            &rig,
+            json!({
+                "type": "relay.query",
+                "id": format!("{correlation}-relay-query"),
+                "filters": [{"ids": [event_id]}]
+            }),
+        );
+        let DispatchOutcome::Handled(relay_query) = relay_query else {
+            panic!("the live NAP-RELAY query must be handled");
+        };
+        assert!(relay_query.response.is_none());
+        let query_batch = tokio::time::timeout(Duration::from_secs(45), rig.observer.changed(8))
+            .await
+            .expect("the live NMP relay query must terminate within 45 seconds")
+            .expect("the provider push lane must remain open");
+        let query_result = query_batch
+            .pushes
+            .iter()
+            .map(|push| push.envelope.decode().expect("valid provider envelope"))
+            .find(|value| value["type"] == "relay.query.result")
+            .expect("the live NAP-RELAY query result must be pushed");
+        assert!(
+            query_result.get("error").is_none(),
+            "live relay query failed: {query_result}"
+        );
+        assert_eq!(query_result["events"][0]["event"]["id"], event_id);
 
         rig.registry.close_session(rig.context.id);
         rig.plane.close();

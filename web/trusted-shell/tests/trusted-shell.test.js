@@ -866,9 +866,13 @@ test("relay projection preserves event, EOSE, query, and governed publish result
   harness.receive({
     type: "relay.query.result",
     id: queryEnvelope.id,
-    events: [{ event: { id: "profile" } }]
+    events: [{ event: { id: "profile" } }],
+    incomplete: true
   });
-  assert.equal((await query)[0].event.id, "profile");
+  const queryResult = await query;
+  assert.equal(queryResult[0].event.id, "profile");
+  assert.equal(queryResult.incomplete, true);
+  assert.equal(queryResult.error, undefined);
 
   const publish = relay.publish({
     kind: 1,

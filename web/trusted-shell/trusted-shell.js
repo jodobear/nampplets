@@ -1221,9 +1221,12 @@
           "relay.query",
           { filters: Array.isArray(filters) ? filters : [filters] },
           function (message) {
-            return Object.freeze(
-              Array.isArray(message.events) ? message.events.slice() : []
-            );
+            var result = Array.isArray(message.events)
+              ? message.events.slice()
+              : [];
+            if (message.incomplete === true) result.incomplete = true;
+            if (typeof message.error === "string") result.error = message.error;
+            return Object.freeze(result);
           }
         );
       }
