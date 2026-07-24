@@ -2077,7 +2077,9 @@ impl ReceiptEventSink for NapPublishReceiptSink {
 fn cached_event_by_id(engine: &Engine, event_id: &str) -> Option<nmp::Event> {
     let mut demand = Demand::from_filter(Filter {
         ids: Some(Binding::Literal(BTreeSet::from([event_id.to_owned()]))),
-        limit: Some(1),
+        // The finite window below is the sole row bound. The pinned NMP
+        // facade rejects a selection that also declares Filter.limit.
+        limit: None,
         ..Filter::default()
     });
     demand.cache = CacheMode::Agnostic;
@@ -2283,6 +2285,19 @@ mod tests {
             }
         }
         panic!("signed fixture never reached canonical NMP state");
+    }
+
+    #[test]
+    fn receipt_event_lookup_reads_the_canonical_nmp_row() {
+        let plane = NmpDataPlane::open(EngineConfig::default(), 2).unwrap();
+        let event = public_note();
+        seed_canonical_event(&plane, &event);
+
+        let resolved = cached_event_by_id(&plane.engine, &event.id.to_string())
+            .expect("a signed receipt event must remain readable from canonical NMP state");
+        assert_eq!(resolved.id, event.id);
+
+        plane.close();
     }
 
     fn request(action: &str, payload: Value) -> ProviderRequest {
