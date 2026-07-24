@@ -111,6 +111,16 @@ final class RuntimeWorkbenchUITests: XCTestCase {
                 ) == true
         )
 
+        // Keep this a real network journey while selecting a known current
+        // public candidate whose signed blob is reachable. The search is a
+        // local filter over the permanent bounded window, never a new relay
+        // query or a fixture substitution.
+        let search = app.textFields["Search napplet catalog"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.click()
+        search.typeText("Chesslet")
+        app.buttons["Search"].click()
+
         let catalogEntries = app.buttons.matching(identifier: "catalog-entry")
         XCTAssertTrue(
             catalogEntries.firstMatch.waitForExistence(timeout: 60),
