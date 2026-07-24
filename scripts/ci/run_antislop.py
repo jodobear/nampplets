@@ -14,8 +14,11 @@ SOURCE_EXTENSIONS = frozenset(
     {
         ".bash",
         ".c",
+        ".cc",
+        ".cjs",
         ".cpp",
         ".cs",
+        ".cxx",
         ".dart",
         ".fish",
         ".go",
@@ -25,6 +28,8 @@ SOURCE_EXTENSIONS = frozenset(
         ".js",
         ".jsx",
         ".kt",
+        ".kts",
+        ".mjs",
         ".php",
         ".py",
         ".rb",
@@ -87,14 +92,26 @@ def tracked_sources(repository: Path) -> list[str]:
         capture_output=True,
     )
     paths = result.stdout.decode("utf-8").split("\0")
-    return [
-        path
-        for path in paths
-        if path
-        and Path(path).suffix in SOURCE_EXTENSIONS
-        and path not in EXCLUDED_FILES
-        and not path.startswith(EXCLUDED_PREFIXES)
-    ]
+    selected = []
+    for path in paths:
+        if (
+            not path
+            or path in EXCLUDED_FILES
+            or path.startswith(EXCLUDED_PREFIXES)
+        ):
+            continue
+        suffix = Path(path).suffix
+        if suffix not in SOURCE_EXTENSIONS:
+            if suffix.lower() in SOURCE_EXTENSIONS:
+                raise RuntimeError(
+                    f"tracked source extension must be lowercase: {path}"
+                )
+            continue
+        source = repository / path
+        if source.is_symlink() or not source.is_file():
+            raise RuntimeError(f"tracked source is not a regular file: {path}")
+        selected.append(path)
+    return selected
 
 
 def verify_version(binary: str, repository: Path) -> None:
@@ -123,7 +140,14 @@ def scan(
 
     print(f"AntiSlop: scanning {len(paths)} {label} files", flush=True)
     result = subprocess.run(
-        [binary, *options, *paths],
+        [
+            binary,
+            "--extensions",
+            ",".join(sorted(SOURCE_EXTENSIONS)),
+            *options,
+            "--",
+            *paths,
+        ],
         cwd=repository,
         check=False,
     )
