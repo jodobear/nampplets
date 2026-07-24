@@ -30,6 +30,15 @@ These rules apply to the whole repository.
   has a finite limit and observable refusal. Polling and sleep-check loops are
   prohibited.
 
+## Code size discipline
+
+- Keep source files at or under 300 lines; 600 lines is a hard ceiling.
+  Split a file once it passes the soft limit instead of continuing to grow
+  it in place.
+- A file already past 600 lines is not license to keep piling onto it: put
+  new code in a new module/file, and any nontrivial change touching such a
+  file should shrink it (extract, split) rather than add net lines.
+
 ## Workstream boundaries
 
 - `conformance/`, `docs/`, and `compatibility.lock` own the pinned compatibility
