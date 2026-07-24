@@ -26,6 +26,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         app.launchEnvironment["NMP_WORKBENCH_UI_TEST_SCENARIO"] =
             "good-morning-permission-launch"
         app.launch()
+        app.activate()
 
         let initialPermissionConfirm = app.buttons["permission-confirm"]
         XCTAssertTrue(
@@ -94,6 +95,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
         app.launch()
+        app.activate()
 
         let addNapplet = app.descendants(matching: .any)["add-napplet"]
         XCTAssertTrue(addNapplet.waitForExistence(timeout: 10))
