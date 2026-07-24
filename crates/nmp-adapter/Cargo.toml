@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 nmp.workspace = true
+nmp-native-nap-bridge = { path = "../nap-bridge" }
 nmp-native-runtime-core = { path = "../runtime-core" }
 parking_lot.workspace = true
 serde.workspace = true

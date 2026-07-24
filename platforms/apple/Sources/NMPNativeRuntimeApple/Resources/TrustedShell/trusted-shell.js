@@ -361,7 +361,9 @@
           domain !== "theme" &&
           domain !== "config" &&
           domain !== "resource" &&
-          domain !== "link"
+          domain !== "link" &&
+          domain !== "outbox" &&
+          domain !== "relay"
         )) {
       throw new Error("The trusted shell cannot project every negotiated domain");
     }
@@ -374,6 +376,8 @@
   var MAX_PENDING_REQUESTS = 128;
   var MAX_EVENT_HANDLERS = 128;
   var MAX_CHANNELS = 32;
+  var MAX_NOSTR_SUBSCRIPTIONS = 32;
+  var MAX_OUTBOX_REQUEST_TIMEOUT_MILLIS = 11000;
   var MAX_RESOURCE_OBJECT_URLS = 128;
   var MAX_RESOURCE_INFO_SCHEMES = 16;
   var MAX_RESOURCE_INFO_LIMIT = 50 * 1024 * 1024;
@@ -396,6 +400,8 @@
   var configCurrentSchema = ${scriptJSON(configSchema)};
   var topicStates = new Map();
   var channelStates = new Map();
+  var outboxSubscriptions = new Map();
+  var relaySubscriptions = new Map();
   var openingChannels = 0;
   var resourceObjectUrls = new Set();
   var resolveReady;
@@ -439,6 +445,13 @@
     channelStates.forEach(function (state) {
       count += state.handlers.size;
     });
+    outboxSubscriptions.forEach(function (state) {
+      count += state.event.size + state.closed.size;
+    });
+    relaySubscriptions.forEach(function (state) {
+      count += (typeof state.onEvent === "function" ? 1 : 0) +
+        (typeof state.onEose === "function" ? 1 : 0);
+    });
     return count;
   }
   function requireHandlerCapacity() {
@@ -461,7 +474,8 @@
     expectedType,
     acceptErrorEnvelope,
     expectedErrorType,
-    cancelType
+    cancelType,
+    timeoutMillis
   ) {
     if (disposed) {
       return Promise.reject(new Error("Napplet session is closed"));
@@ -482,7 +496,7 @@
       });
     }
     return new Promise(function (resolve, reject) {
-      pending.set(id, {
+      var operation = {
         resolve: resolve,
         reject: reject,
         resultType: expectedType || type + ".result",
@@ -493,12 +507,24 @@
           return Object.prototype.hasOwnProperty.call(message, "result")
             ? message.result
             : message;
-        }
-      });
+        },
+        timer: null
+      };
+      pending.set(id, operation);
+      if (typeof timeoutMillis === "number" &&
+          Number.isFinite(timeoutMillis) &&
+          timeoutMillis > 0) {
+        operation.timer = setTimeout(function () {
+          if (!pending.delete(id)) return;
+          cancelPendingOperation(id, operation);
+          reject(new Error(type + " timed out"));
+        }, timeoutMillis);
+      }
       try {
         parent.postMessage(envelope, "*");
       } catch (error) {
         pending.delete(id);
+        if (operation.timer !== null) clearTimeout(operation.timer);
         reject(error);
       }
     });
@@ -512,6 +538,18 @@
       });
     }
     parent.postMessage(envelope, "*");
+  }
+  function sendCorrelated(type, fields) {
+    if (disposed) throw new Error("Napplet session is closed");
+    var id = nextCorrelationId();
+    var envelope = { type: type, id: id };
+    if (isObject(fields)) {
+      Object.keys(fields).forEach(function (key) {
+        if (key !== "type" && key !== "id") envelope[key] = fields[key];
+      });
+    }
+    parent.postMessage(envelope, "*");
+    return id;
   }
   function cancelPendingOperation(id, operation) {
     if (!operation || typeof operation.cancelType !== "string") return;
@@ -610,6 +648,7 @@
         (message.type !== operation.resultType &&
          message.type !== operation.errorType)) return false;
     pending.delete(message.id);
+    if (operation.timer !== null) clearTimeout(operation.timer);
     if (message.type === operation.errorType ||
         (message.error && !operation.acceptErrorEnvelope)) {
       operation.reject(new Error(terminalErrorMessage(message)));
@@ -675,6 +714,54 @@
     state.handlers.clear();
     channelStates.delete(message.channelId);
   }
+  function dispatchOutboxEvent(message) {
+    if (typeof message.subId !== "string" || !isObject(message.result)) return;
+    var state = outboxSubscriptions.get(message.subId);
+    if (!state) return;
+    Array.from(state.event).forEach(function (handler) {
+      try {
+        handler(message.result);
+      } catch (_) {}
+    });
+  }
+  function dispatchOutboxClosed(message) {
+    if (typeof message.subId !== "string") return;
+    var state = outboxSubscriptions.get(message.subId);
+    if (!state) return;
+    outboxSubscriptions.delete(message.subId);
+    state.active = false;
+    Array.from(state.closed).forEach(function (handler) {
+      try {
+        handler(typeof message.reason === "string" ? message.reason : undefined);
+      } catch (_) {}
+    });
+    state.event.clear();
+    state.closed.clear();
+  }
+  function dispatchRelayEvent(message) {
+    if (typeof message.subId !== "string" || !isObject(message.result)) return;
+    var state = relaySubscriptions.get(message.subId);
+    if (!state || typeof state.onEvent !== "function") return;
+    try {
+      state.onEvent(message.result);
+    } catch (_) {}
+  }
+  function dispatchRelayEose(message) {
+    if (typeof message.subId !== "string") return;
+    var state = relaySubscriptions.get(message.subId);
+    if (!state || state.eose || typeof state.onEose !== "function") return;
+    state.eose = true;
+    try {
+      state.onEose();
+    } catch (_) {}
+  }
+  function dispatchRelayClosed(message) {
+    if (typeof message.subId !== "string") return;
+    var state = relaySubscriptions.get(message.subId);
+    if (!state) return;
+    relaySubscriptions.delete(message.subId);
+    state.active = false;
+  }
   function dispose() {
     if (disposed) return;
     topicStates.forEach(function (_, topic) {
@@ -687,6 +774,16 @@
         fireAndForget("inc.channel.close", { channelId: channelId });
       } catch (_) {}
     });
+    outboxSubscriptions.forEach(function (_, subId) {
+      try {
+        sendCorrelated("outbox.close", { subId: subId });
+      } catch (_) {}
+    });
+    relaySubscriptions.forEach(function (_, subId) {
+      try {
+        sendCorrelated("relay.close", { subId: subId });
+      } catch (_) {}
+    });
     if (configSubscribers.size > 0) {
       try {
         fireAndForget("config.unsubscribe");
@@ -695,6 +792,8 @@
     disposed = true;
     topicStates.clear();
     channelStates.clear();
+    outboxSubscriptions.clear();
+    relaySubscriptions.clear();
     identityChangedHandlers.clear();
     themeChangedHandlers.clear();
     configSubscribers.clear();
@@ -709,6 +808,7 @@
     });
     resourceObjectUrls.clear();
     pending.forEach(function (operation, id) {
+      if (operation.timer !== null) clearTimeout(operation.timer);
       cancelPendingOperation(id, operation);
       operation.reject(new Error("Napplet session is closed"));
     });
@@ -750,6 +850,26 @@
     }
     if (event.data.type === "inc.channel.closed") {
       dispatchChannelClosed(event.data);
+      return;
+    }
+    if (event.data.type === "outbox.event") {
+      dispatchOutboxEvent(event.data);
+      return;
+    }
+    if (event.data.type === "outbox.closed") {
+      dispatchOutboxClosed(event.data);
+      return;
+    }
+    if (event.data.type === "relay.event") {
+      dispatchRelayEvent(event.data);
+      return;
+    }
+    if (event.data.type === "relay.eose") {
+      dispatchRelayEose(event.data);
+      return;
+    }
+    if (event.data.type === "relay.closed") {
+      dispatchRelayClosed(event.data);
       return;
     }
     settlePending(event.data);
@@ -886,6 +1006,226 @@
       },
       getBadges: function () {
         return identityRequest("getBadges", null, "badges");
+      }
+    });
+  }
+  if (projectedDomains.indexOf("outbox") !== -1) {
+    function outboxTimeout(options) {
+      var requested = isObject(options) && typeof options.timeoutMs === "number"
+        ? options.timeoutMs + 1000
+        : MAX_OUTBOX_REQUEST_TIMEOUT_MILLIS;
+      return Number.isFinite(requested) && requested > 0
+        ? Math.min(requested, MAX_OUTBOX_REQUEST_TIMEOUT_MILLIS)
+        : MAX_OUTBOX_REQUEST_TIMEOUT_MILLIS;
+    }
+    function outboxGetEvent(eventId, options) {
+      var fields = { eventId: eventId };
+      if (options !== undefined) fields.options = options;
+      return request(
+        "outbox.getEvent",
+        fields,
+        function (message) {
+          var result = {};
+          if (Object.prototype.hasOwnProperty.call(message, "result")) {
+            result.result = message.result;
+          }
+          if (message.incomplete === true) result.incomplete = true;
+          if (typeof message.error === "string") result.error = message.error;
+          return Object.freeze(result);
+        },
+        "outbox.getEvent.result",
+        true,
+        null,
+        null,
+        outboxTimeout(options)
+      );
+    }
+    function outboxQuery(filters, options) {
+      var fields = { filters: filters };
+      if (options !== undefined) fields.options = options;
+      return request(
+        "outbox.query",
+        fields,
+        function (message) {
+          var result = {
+            events: Object.freeze(
+              Array.isArray(message.events) ? message.events.slice() : []
+            )
+          };
+          if (message.incomplete === true) result.incomplete = true;
+          if (typeof message.error === "string") result.error = message.error;
+          return Object.freeze(result);
+        },
+        "outbox.query.result",
+        true,
+        null,
+        null,
+        outboxTimeout(options)
+      );
+    }
+    function outboxSubscribe(filters, options) {
+      if (outboxSubscriptions.size >= MAX_NOSTR_SUBSCRIPTIONS) {
+        throw new RangeError("NAP-OUTBOX subscription capacity is full");
+      }
+      var subId = nextCorrelationId();
+      var state = { event: new Set(), closed: new Set(), active: true };
+      outboxSubscriptions.set(subId, state);
+      var fields = { subId: subId, filters: filters };
+      if (options !== undefined) fields.options = options;
+      try {
+        sendCorrelated("outbox.subscribe", fields);
+      } catch (error) {
+        outboxSubscriptions.delete(subId);
+        throw error;
+      }
+      return Object.freeze({
+        on: function (event, handler) {
+          if ((event !== "event" && event !== "closed") ||
+              typeof handler !== "function") {
+            throw new TypeError(
+              "outbox subscription on requires event or closed and a function"
+            );
+          }
+          if (!state.active || outboxSubscriptions.get(subId) !== state) {
+            throw new Error("NAP-OUTBOX subscription is closed");
+          }
+          requireHandlerCapacity();
+          state[event].add(handler);
+        },
+        close: function () {
+          if (!state.active) return;
+          state.active = false;
+          outboxSubscriptions.delete(subId);
+          state.event.clear();
+          state.closed.clear();
+          sendCorrelated("outbox.close", { subId: subId });
+        }
+      });
+    }
+    function outboxPublish(event, options) {
+      var fields = { event: event };
+      if (options !== undefined) fields.options = options;
+      return request(
+        "outbox.publish",
+        fields,
+        function (message) {
+          var result = { ok: message.ok === true };
+          if (isObject(message.event)) result.event = message.event;
+          if (typeof message.eventId === "string") result.eventId = message.eventId;
+          if (isObject(message.relays)) result.relays = message.relays;
+          if (typeof message.error === "string") result.error = message.error;
+          return Object.freeze(result);
+        },
+        "outbox.publish.result",
+        true,
+        null,
+        null,
+        MAX_OUTBOX_REQUEST_TIMEOUT_MILLIS
+      );
+    }
+    function outboxResolveRelays(target) {
+      return request(
+        "outbox.resolveRelays",
+        { target: target },
+        function (message) {
+          if (!isObject(message.plan)) {
+            throw new Error("outbox.resolveRelays.result missing plan");
+          }
+          return message.plan;
+        },
+        null,
+        false,
+        null,
+        null,
+        MAX_OUTBOX_REQUEST_TIMEOUT_MILLIS
+      );
+    }
+    napplet.outbox = Object.freeze({
+      getEvent: outboxGetEvent,
+      query: outboxQuery,
+      subscribe: outboxSubscribe,
+      publish: outboxPublish,
+      resolveRelays: outboxResolveRelays
+    });
+  }
+  if (projectedDomains.indexOf("relay") !== -1) {
+    function relaySubscribe(filters, onEvent, onEose, options) {
+      if (typeof onEvent !== "function" || typeof onEose !== "function") {
+        throw new TypeError("relay.subscribe requires event and EOSE functions");
+      }
+      if (relaySubscriptions.size >= MAX_NOSTR_SUBSCRIPTIONS) {
+        throw new RangeError("NAP-RELAY subscription capacity is full");
+      }
+      requireHandlerCapacity();
+      if (handlerCount() + 1 >= MAX_EVENT_HANDLERS) {
+        throw new RangeError("Napplet event handler capacity is full");
+      }
+      var subId = nextCorrelationId();
+      var state = {
+        onEvent: onEvent,
+        onEose: onEose,
+        eose: false,
+        active: true
+      };
+      relaySubscriptions.set(subId, state);
+      var fields = {
+        subId: subId,
+        filters: Array.isArray(filters) ? filters : [filters]
+      };
+      if (isObject(options) && typeof options.relay === "string") {
+        fields.relay = options.relay;
+      }
+      try {
+        sendCorrelated("relay.subscribe", fields);
+      } catch (error) {
+        relaySubscriptions.delete(subId);
+        throw error;
+      }
+      return closeHandle(function () {
+        if (!state.active) return;
+        state.active = false;
+        relaySubscriptions.delete(subId);
+        sendCorrelated("relay.close", { subId: subId });
+      });
+    }
+    function requireRelayEvent(message, operation) {
+      if (!isObject(message.event)) {
+        throw new Error(operation + ".result missing event");
+      }
+      return message.event;
+    }
+    napplet.relay = Object.freeze({
+      subscribe: relaySubscribe,
+      publish: function (event) {
+        return request(
+          "relay.publish",
+          { event: event },
+          function (message) {
+            return requireRelayEvent(message, "relay.publish");
+          }
+        );
+      },
+      publishEncrypted: function (event, recipient, encryption) {
+        var fields = { event: event, recipient: recipient };
+        if (encryption !== undefined) fields.encryption = encryption;
+        return request(
+          "relay.publishEncrypted",
+          fields,
+          function (message) {
+            return requireRelayEvent(message, "relay.publishEncrypted");
+          }
+        );
+      },
+      query: function (filters) {
+        return request(
+          "relay.query",
+          { filters: Array.isArray(filters) ? filters : [filters] },
+          function (message) {
+            return Object.freeze(
+              Array.isArray(message.events) ? message.events.slice() : []
+            );
+          }
+        );
       }
     });
   }
@@ -1047,7 +1387,7 @@
       return typeof value === "string" &&
         value.length > 0 &&
         value.length <= MAX_RESOURCE_MIME_BYTES &&
-        !/[\u0000-\u001f\u007f]/.test(value);
+        !/[\\u0000-\\u001f\\u007f]/.test(value);
     }
     function projectResourceInfo(message) {
       var info = message.info;

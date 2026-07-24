@@ -1505,6 +1505,7 @@ name = "nmp-native-nmp-adapter"
 version = "0.1.0"
 dependencies = [
  "nmp",
+ "nmp-native-nap-bridge",
  "nmp-native-runtime-core",
  "parking_lot",
  "serde",
