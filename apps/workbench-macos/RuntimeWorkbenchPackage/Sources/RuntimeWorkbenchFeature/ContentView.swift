@@ -43,6 +43,7 @@ public struct ContentView: View {
     @State private var permissionSheetError: String?
     @State private var settingsSnapshot: WorkbenchSettingsSnapshot?
     @State private var settingsRoute = WorkbenchSettingsRouteState()
+    @State private var nativeActionNotice: NativeActionNotice?
     @StateObject private var pendingWrites: RuntimeWorkbenchPendingWriteModel
     @StateObject private var receipts: RuntimeWorkbenchReceiptModel
 
@@ -536,6 +537,30 @@ public struct ContentView: View {
                                 .textSelection(.enabled)
                         }
                     }
+                }
+
+                if let nativeActionNotice {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(
+                            nativeActionNotice.title,
+                            systemImage: nativeActionNotice.kind == .composeOpen
+                                ? "square.and.pencil"
+                                : "arrow.up.right"
+                        )
+                        .font(.subheadline.weight(.semibold))
+                        Text(nativeActionNotice.target)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                        Text(nativeActionNotice.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Dismiss action") {
+                            self.nativeActionNotice = nil
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .accessibilityIdentifier("native-action-notice")
                 }
 
                 Divider()
@@ -1100,13 +1125,24 @@ public struct ContentView: View {
 
     @MainActor
     private func handleNativeAction(_ action: NativeWorkbenchAction) {
-        switch action.kind {
-        case .noteOpen:
-            activity = "Good Morning requested a note action"
-        case .profileOpen:
-            activity = "Good Morning requested a profile action"
-        case .composeOpen:
-            activity = "Good Morning requested compose; no Workbench composer is installed"
+        let identity = WorkbenchExactBuildIdentity(
+            manifestAuthor: action.manifestAuthor,
+            dTag: action.dTag,
+            aggregateHash: action.aggregateHash
+        )
+        guard let window = layout.windows.first(where: {
+            $0.exactBuild == identity
+        }) else {
+            activity = "Refused: INC action came from an unopened exact build"
+            return
         }
+        guard let notice = NativeActionNotice.decode(action) else {
+            activity = "Refused: INC action payload was not recognized"
+            return
+        }
+        nativeActionNotice = notice
+        mutateLayout { $0.bringToFront(window.id) }
+        isInspectorPresented = true
+        activity = "(notice.title) from (window.title)"
     }
 }

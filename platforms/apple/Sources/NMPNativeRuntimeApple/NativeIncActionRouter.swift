@@ -1,7 +1,7 @@
 import Foundation
 import NMPNativeRuntime
 
-public enum NativeWorkbenchActionKind: String, Sendable {
+public enum NativeWorkbenchActionKind: String, Sendable, Equatable {
     case noteOpen = "note-open"
     case profileOpen = "profile-open"
     case composeOpen = "compose-open"
