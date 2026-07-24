@@ -491,6 +491,11 @@ public protocol WorkbenchLayoutPersisting {
         _ snapshot: WorkbenchLayoutSnapshot,
         workspaceID: String
     ) throws
+    func saveLayout(
+        _ snapshot: WorkbenchLayoutSnapshot,
+        workspaceID: String,
+        retainedReceiptIDs: [String]
+    ) throws
 }
 
 public extension WorkbenchLayoutPersisting {

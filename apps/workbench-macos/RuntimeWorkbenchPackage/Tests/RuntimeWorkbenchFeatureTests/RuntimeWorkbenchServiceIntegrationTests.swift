@@ -97,7 +97,8 @@ import Testing
     let workspaceID = "receipt-restart-proof"
     let profile = try WorkbenchRuntimeProfile.open(storageRoot: root)
     defer { profile.close() }
-    let store = RuntimeWorkbenchLayoutStore(profile: profile)
+    let store: any WorkbenchLayoutPersisting =
+        RuntimeWorkbenchLayoutStore(profile: profile)
 
     try store.saveLayout(
         WorkbenchLayoutSnapshot(
