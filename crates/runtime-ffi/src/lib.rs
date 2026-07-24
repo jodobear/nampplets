@@ -1743,8 +1743,11 @@ impl RuntimeController {
         }
     }
 
-    /// Confirms one opaque frozen review and installs only its immutable exact
-    /// bytes. This operation never grants capabilities and never launches.
+    /// Confirms one opaque frozen review and installs its immutable exact
+    /// bytes. The pinned Good Morning demo profile receives the Rust-owned
+    /// exact-build grant set immediately so the native Workbench can exercise
+    /// the complete journey; other builds remain review-gated. This never
+    /// launches the napplet.
     pub fn catalog_confirm_install(
         &self,
         token: String,
@@ -2170,14 +2173,47 @@ impl RuntimeController {
         let executable: Arc<dyn ExecutableArtifact> = artifact.handle.clone();
         self.app.dispatch(PlatformCommand::InstallVerified {
             build: InstalledBuild {
-                principal,
+                principal: principal.clone(),
                 title,
                 manifest_metadata: metadata,
                 capability_requests,
             },
             artifact: executable,
         });
+        self.grant_good_morning_demo_permissions(&principal);
         bump_signal(&self.signal);
+    }
+
+    fn grant_good_morning_demo_permissions(&self, principal: &Principal) {
+        let is_good_morning = principal.manifest_author() == GOOD_MORNING_AUTHOR
+            && principal.d_tag() == GOOD_MORNING_D_TAG
+            && principal.aggregate_hash() == GOOD_MORNING_AGGREGATE_HASH;
+        if !is_good_morning {
+            return;
+        }
+        let Ok(review) = self.app.permission_review(principal) else {
+            return;
+        };
+        let decisions = review
+            .capabilities
+            .into_iter()
+            .map(|capability| PermissionDecision {
+                capability: capability.capability,
+                decision: capability
+                    .decision_options
+                    .into_iter()
+                    .find(|option| {
+                        option.valid && option.decision == GrantDecision::AllowExactBuild
+                    })
+                    .map_or(GrantDecision::Denied, |option| option.decision),
+            })
+            .collect::<Vec<_>>();
+        if !decisions.is_empty() {
+            self.app.dispatch(PlatformCommand::ApplyPermissionBatch {
+                principal: principal.clone(),
+                decisions,
+            });
+        }
     }
 
     /// Applies the Rust-owned, finite installed-library filter. The resulting
