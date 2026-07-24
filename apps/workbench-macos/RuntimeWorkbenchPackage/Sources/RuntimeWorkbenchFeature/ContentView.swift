@@ -44,6 +44,7 @@ public struct ContentView: View {
     @State private var settingsSnapshot: WorkbenchSettingsSnapshot?
     @State private var settingsRoute = WorkbenchSettingsRouteState()
     @StateObject private var pendingWrites: RuntimeWorkbenchPendingWriteModel
+    @StateObject private var receipts: RuntimeWorkbenchReceiptModel
 
     @MainActor
     public init(
@@ -87,6 +88,9 @@ public struct ContentView: View {
         _pendingWrites = StateObject(
             wrappedValue: RuntimeWorkbenchPendingWriteModel(profile: profile)
         )
+        _receipts = StateObject(
+            wrappedValue: RuntimeWorkbenchReceiptModel(profile: profile)
+        )
 
         do {
             let restored = try resolvedLayoutStore.loadLayout(
@@ -117,6 +121,9 @@ public struct ContentView: View {
                         profile: profile
                     )
                 }
+            }
+            if let receipt = receipts.receipts.last {
+                ReceiptStatusBar(receipt: receipt)
             }
             HStack(spacing: 0) {
                 WorkbenchWorkspaceView(

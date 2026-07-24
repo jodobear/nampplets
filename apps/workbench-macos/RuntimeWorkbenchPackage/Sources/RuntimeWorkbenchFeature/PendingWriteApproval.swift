@@ -49,6 +49,41 @@ final class RuntimeWorkbenchPendingWriteModel: ObservableObject {
     }
 }
 
+/// Keeps the latest bounded canonical receipt projection visible after the
+/// originating napplet/session changes state or closes.
+@MainActor
+final class RuntimeWorkbenchReceiptModel: ObservableObject {
+    @Published private(set) var receipts: [NativeRuntimeReceipt] = []
+
+    private var observation: NativeRuntimeReceiptObservation?
+
+    init(profile: WorkbenchRuntimeProfile?) {
+        guard let profile else { return }
+        do {
+            observation = try profile.native.observeReceipts {
+                [weak self] update in
+                Task { @MainActor [weak self] in
+                    self?.receive(update)
+                }
+            }
+        } catch {
+            receipts = []
+        }
+    }
+
+    private func receive(_ update: NativeRuntimeReceiptUpdate) {
+        switch update {
+        case let .authoritative(projection),
+             let .next(projection, _, _):
+            receipts = projection.receipts
+        }
+    }
+
+    deinit {
+        observation?.cancel()
+    }
+}
+
 struct PendingWriteApprovalBar: View {
     let write: NativeRuntimePendingWrite
     let onDecision: (Bool) -> Void
@@ -87,5 +122,43 @@ struct PendingWriteApprovalBar: View {
                 .frame(height: 1)
         }
         .accessibilityIdentifier("nap-outbox-pending-approval")
+    }
+}
+
+struct ReceiptStatusBar: View {
+    let receipt: NativeRuntimeReceipt
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .foregroundStyle(color)
+            Text("NMP receipt")
+                .font(.caption.weight(.semibold))
+            Text(receipt.id)
+                .font(.caption2.monospaced())
+                .lineLimit(1)
+            Text(receipt.delivery)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+            Spacer()
+            if let latestStateJSON = receipt.latestStateJSON {
+                Text(latestStateJSON)
+                    .font(.caption2.monospaced())
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(.regularMaterial)
+        .accessibilityIdentifier("nap-outbox-receipt-status")
+    }
+
+    private var symbol: String {
+        receipt.delivery.contains("pending") ? "clock" : "checkmark.seal.fill"
+    }
+
+    private var color: Color {
+        receipt.delivery.contains("pending") ? .orange : .green
     }
 }

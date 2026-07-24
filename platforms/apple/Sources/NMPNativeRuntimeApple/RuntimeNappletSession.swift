@@ -455,6 +455,78 @@ public final class NativeRuntimePendingWriteObservation: @unchecked Sendable {
     }
 }
 
+/// A durable NMP receipt mechanically projected for native presentation.
+/// NMP remains the sole owner of delivery state and canonical event rows.
+public struct NativeRuntimeReceipt: Sendable, Identifiable {
+    public let id: String
+    public let delivery: String
+    public let latestStateJSON: String?
+
+    fileprivate init(_ receipt: RuntimeReceiptSnapshot) {
+        id = receipt.receiptId
+        delivery = receipt.delivery
+        latestStateJSON = receipt.latestStateJson
+    }
+}
+
+public struct NativeRuntimeReceiptProjection: Sendable {
+    public let revision: UInt64
+    public let receipts: [NativeRuntimeReceipt]
+
+    fileprivate init(_ snapshot: RuntimeSnapshot) {
+        revision = snapshot.revision
+        receipts = snapshot.receipts.map(NativeRuntimeReceipt.init)
+    }
+}
+
+public enum NativeRuntimeReceiptUpdate: Sendable {
+    case authoritative(NativeRuntimeReceiptProjection)
+    case next(
+        NativeRuntimeReceiptProjection,
+        predecessorRevision: UInt64,
+        eventCursorWasStale: Bool
+    )
+}
+
+public enum NativeRuntimeReceiptObservationError:
+    Error,
+    LocalizedError,
+    Equatable
+{
+    case profileClosed
+    case observerCapacity(maximum: Int)
+
+    public var errorDescription: String? {
+        switch self {
+        case .profileClosed:
+            "The native runtime profile is closed."
+        case let .observerCapacity(maximum):
+            "The native receipt observer limit of \(maximum) was reached."
+        }
+    }
+}
+
+public final class NativeRuntimeReceiptObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancellation: (@Sendable () -> Void)?
+
+    fileprivate init(cancellation: @escaping @Sendable () -> Void) {
+        self.cancellation = cancellation
+    }
+
+    public func cancel() {
+        lock.lock()
+        let cancellation = cancellation
+        self.cancellation = nil
+        lock.unlock()
+        cancellation?()
+    }
+
+    deinit {
+        cancel()
+    }
+}
+
 /// A bounded replacement projection sourced from the Rust runtime.
 ///
 /// Bindings, receipts, and resources are intentionally not projected here:
@@ -548,6 +620,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         @Sendable (NativeRuntimeCatalogUpdate) -> Void
     private typealias PendingWriteReceiver =
         @Sendable (NativeRuntimePendingWriteUpdate) -> Void
+    private typealias ReceiptReceiver =
+        @Sendable (NativeRuntimeReceiptUpdate) -> Void
 
     private struct ActivityObserverEntry {
         let scope: NativeRuntimeActivityScope
@@ -575,6 +649,13 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         var pendingUpdate: NativeRuntimePendingWriteUpdate?
     }
 
+    private struct ReceiptObserverEntry {
+        let receive: ReceiptReceiver
+        var lastDeliveredRevision: UInt64
+        var isReadyForNext = false
+        var pendingUpdate: NativeRuntimeReceiptUpdate?
+    }
+
     private final class WeakSession {
         weak var value: RustRuntimeNappletSession?
 
@@ -588,6 +669,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private static let maximumApplicationLibraryObservers = 8
     private static let maximumApplicationCatalogObservers = 8
     private static let maximumApplicationPendingWriteObservers = 8
+    private static let maximumApplicationReceiptObservers = 8
     private static let maximumAccounts = 32
 
     private let profileID = UUID()
@@ -605,10 +687,12 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private var libraryObservers: [UUID: LibraryObserverEntry] = [:]
     private var catalogObservers: [UUID: CatalogObserverEntry] = [:]
     private var pendingWriteObservers: [UUID: PendingWriteObserverEntry] = [:]
+    private var receiptObservers: [UUID: ReceiptObserverEntry] = [:]
     private var lastActivityRevision: UInt64
     private var lastLibraryRevision: UInt64
     private var lastCatalogSnapshot: NativeRuntimeCatalogFeedSnapshot
     private var lastPendingWriteRevision: UInt64
+    private var lastReceiptRevision: UInt64
     private var accountPersistenceProblem:
         NativeRuntimeAccountPersistenceIssue?
     private var isClosed = false
@@ -726,6 +810,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         lastLibraryRevision = revision
         lastCatalogSnapshot = controller.catalogFeedSnapshot()
         lastPendingWriteRevision = revision
+        lastReceiptRevision = revision
         accountPersistenceProblem = nil
     }
 
@@ -1079,6 +1164,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         libraryObservers.removeAll()
         catalogObservers.removeAll()
         pendingWriteObservers.removeAll()
+        receiptObservers.removeAll()
         lock.unlock()
 
         observation?.stop()
@@ -1383,6 +1469,40 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         return observation
     }
 
+    /// Observes the bounded durable receipt replacement owned by the profile.
+    /// Delivery state is presented mechanically; native does not infer an
+    /// outcome from relay payloads.
+    public func observeReceipts(
+        _ receive: @escaping @Sendable (NativeRuntimeReceiptUpdate) -> Void
+    ) throws -> NativeRuntimeReceiptObservation {
+        lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            throw NativeRuntimeReceiptObservationError.profileClosed
+        }
+        guard receiptObservers.count < Self.maximumApplicationReceiptObservers
+        else {
+            lock.unlock()
+            throw NativeRuntimeReceiptObservationError.observerCapacity(
+                maximum: Self.maximumApplicationReceiptObservers
+            )
+        }
+        let identifier = UUID()
+        let authoritative = NativeRuntimeReceiptProjection(controller.snapshot())
+        receiptObservers[identifier] = ReceiptObserverEntry(
+            receive: receive,
+            lastDeliveredRevision: authoritative.revision
+        )
+        lock.unlock()
+
+        let observation = NativeRuntimeReceiptObservation { [weak self] in
+            self?.removeReceiptObserver(identifier)
+        }
+        receive(.authoritative(authoritative))
+        drainReceiptUpdates(for: identifier)
+        return observation
+    }
+
     /// Returns the latest complete installed-library replacement from the
     /// Rust-owned profile snapshot.
     public func installedLibraryProjection()
@@ -1563,9 +1683,11 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         let previousLibraryRevision = lastLibraryRevision
         let previousCatalogRevision = lastCatalogSnapshot.revision
         let previousPendingWriteRevision = lastPendingWriteRevision
+        let previousReceiptRevision = lastReceiptRevision
         lastActivityRevision = frame.snapshot.revision
         lastLibraryRevision = frame.snapshot.revision
         lastPendingWriteRevision = frame.snapshot.revision
+        lastReceiptRevision = frame.snapshot.revision
         if frame.catalog.revision >= previousCatalogRevision {
             lastCatalogSnapshot = frame.catalog
         }
@@ -1578,6 +1700,9 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         ] = []
         var pendingWriteDeliveries: [
             (receive: PendingWriteReceiver, update: NativeRuntimePendingWriteUpdate)
+        ] = []
+        var receiptDeliveries: [
+            (receive: ReceiptReceiver, update: NativeRuntimeReceiptUpdate)
         ] = []
         if frame.snapshot.revision > previousLibraryRevision
             || frame.eventCursorWasStale
@@ -1679,6 +1804,38 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
                 pendingWriteObservers[identifier] = observer
             }
         }
+        if frame.snapshot.revision > previousReceiptRevision
+            || frame.eventCursorWasStale
+        {
+            let projection = NativeRuntimeReceiptProjection(frame.snapshot)
+            let update = NativeRuntimeReceiptUpdate.next(
+                projection,
+                predecessorRevision: previousReceiptRevision,
+                eventCursorWasStale: frame.eventCursorWasStale
+            )
+            for identifier in Array(receiptObservers.keys) {
+                guard var observer = receiptObservers[identifier] else {
+                    continue
+                }
+                let isNewer = projection.revision > observer.lastDeliveredRevision
+                let isCurrentStaleReplacement = frame.eventCursorWasStale
+                    && projection.revision == observer.lastDeliveredRevision
+                guard isNewer || isCurrentStaleReplacement else { continue }
+                if observer.isReadyForNext {
+                    observer.lastDeliveredRevision = projection.revision
+                    receiptObservers[identifier] = observer
+                    receiptDeliveries.append((observer.receive, update))
+                    continue
+                }
+                if let pendingUpdate = observer.pendingUpdate,
+                   projection.revision < receiptRevision(of: pendingUpdate)
+                {
+                    continue
+                }
+                observer.pendingUpdate = update
+                receiptObservers[identifier] = observer
+            }
+        }
         lock.unlock()
         settingsExecutor.retainRunningSessions(
             Set(frame.snapshot.sessions.filter { $0.state == "running" }.map(\.id))
@@ -1711,6 +1868,9 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         for delivery in pendingWriteDeliveries {
             delivery.receive(delivery.update)
         }
+        for delivery in receiptDeliveries {
+            delivery.receive(delivery.update)
+        }
     }
 
     private func removeActivityObserver(_ identifier: UUID) {
@@ -1734,6 +1894,12 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private func removePendingWriteObserver(_ identifier: UUID) {
         lock.lock()
         pendingWriteObservers.removeValue(forKey: identifier)
+        lock.unlock()
+    }
+
+    private func removeReceiptObserver(_ identifier: UUID) {
+        lock.lock()
+        receiptObservers.removeValue(forKey: identifier)
         lock.unlock()
     }
 
@@ -1813,6 +1979,32 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         }
     }
 
+    private func drainReceiptUpdates(for identifier: UUID) {
+        while true {
+            lock.lock()
+            guard !isClosed, var observer = receiptObservers[identifier]
+            else {
+                lock.unlock()
+                return
+            }
+            guard let pendingUpdate = observer.pendingUpdate else {
+                observer.isReadyForNext = true
+                receiptObservers[identifier] = observer
+                lock.unlock()
+                return
+            }
+            observer.pendingUpdate = nil
+            observer.lastDeliveredRevision = max(
+                observer.lastDeliveredRevision,
+                receiptRevision(of: pendingUpdate)
+            )
+            receiptObservers[identifier] = observer
+            let receive = observer.receive
+            lock.unlock()
+            receive(pendingUpdate)
+        }
+    }
+
     private func libraryRevision(
         of update: NativeRuntimeLibraryUpdate
     ) -> UInt64 {
@@ -1835,6 +2027,16 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
 
     private func pendingWriteRevision(
         of update: NativeRuntimePendingWriteUpdate
+    ) -> UInt64 {
+        switch update {
+        case let .authoritative(projection),
+             let .next(projection, _, _):
+            projection.revision
+        }
+    }
+
+    private func receiptRevision(
+        of update: NativeRuntimeReceiptUpdate
     ) -> UInt64 {
         switch update {
         case let .authoritative(projection),
