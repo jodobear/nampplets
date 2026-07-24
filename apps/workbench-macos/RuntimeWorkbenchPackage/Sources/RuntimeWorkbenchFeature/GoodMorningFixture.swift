@@ -20,14 +20,6 @@ struct GoodMorningFixture: Sendable {
         "ffd35eea5c84d03cdda74c23e1bbb2c40500f503833503aa688036faa52f3808"
     static let aggregateHash =
         "828a6df02afd56782ea20f805084acce65c53f7c37554948c1e0a64aa5a2b0a8"
-    static let grantedDomains = [
-        "identity",
-        "inc",
-        "link",
-        "outbox",
-        "resource",
-        "theme",
-    ]
 
     let eventJSON: Data
     let indexHTML: Data
@@ -48,7 +40,7 @@ struct GoodMorningFixture: Sendable {
             author: Self.author,
             dTag: Self.dTag,
             blobsBySHA256: [Self.indexDigest: indexHTML],
-            grantDomains: Self.grantedDomains
+            grantDomains: ["identity", "inc", "storage", "theme"]
         )
     }
 
