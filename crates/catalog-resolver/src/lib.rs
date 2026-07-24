@@ -1731,11 +1731,14 @@ impl ManifestBlobSource for SafeManifestBlobSource {
                 return Err(self.refuse(request.logical_path(), candidate, reason));
             }
             if response.redirect_location.is_some() || (300..400).contains(&response.status) {
-                return Err(self.refuse(
+                self.record(
                     request.logical_path(),
                     candidate,
-                    AcquisitionRefusal::Redirect,
-                ));
+                    AcquisitionOutcome::Refused {
+                        reason: AcquisitionRefusal::Redirect,
+                    },
+                )?;
+                continue;
             }
             if response.effective_url.as_ref() != validated.as_str() {
                 return Err(self.refuse(
@@ -2008,6 +2011,7 @@ mod tests {
     enum TransportMode {
         Good,
         Redirect,
+        FirstRedirectThenGood,
         Private,
         Confused,
         Oversize,
@@ -2032,7 +2036,7 @@ mod tests {
             request: HttpsFetchRequest,
             completion: HttpsAcquisitionCompletion,
         ) -> Result<Arc<dyn HttpsAcquisitionOperation>, HttpsPortError> {
-            self.calls.fetch_add(1, Ordering::Relaxed);
+            let call = self.calls.fetch_add(1, Ordering::Relaxed);
             let (effective, status, redirect, addresses, body) = match self.mode {
                 TransportMode::Good => (
                     Arc::from(request.url()),
@@ -2047,6 +2051,20 @@ mod tests {
                     Some(Arc::from("https://evil.example/blob")),
                     Arc::from([PUBLIC_ADDRESS]),
                     Arc::<[u8]>::from([]),
+                ),
+                TransportMode::FirstRedirectThenGood if call == 0 => (
+                    Arc::from(request.url()),
+                    302,
+                    Some(Arc::from("https://redirect-target.example/blob")),
+                    Arc::from([PUBLIC_ADDRESS]),
+                    Arc::<[u8]>::from([]),
+                ),
+                TransportMode::FirstRedirectThenGood => (
+                    Arc::from(request.url()),
+                    200,
+                    None,
+                    Arc::from([PUBLIC_ADDRESS]),
+                    Arc::<[u8]>::from(INDEX),
                 ),
                 TransportMode::Private => (
                     Arc::from(request.url()),
@@ -2172,9 +2190,82 @@ mod tests {
     }
 
     #[test]
-    fn redirect_private_dns_source_confusion_and_oversize_fail_before_retention() {
+    fn first_redirect_falls_back_to_the_next_approved_direct_source() {
+        let fixture = Fixture::new(TransportMode::FirstRedirectThenGood);
+        fixture.with_resolver(|resolver| {
+            let resolved = resolver
+                .resolve(&Fixture::coordinate(), &CancellationToken::default())
+                .expect("the second approved source must resolve directly");
+            assert_eq!(
+                resolved
+                    .handle()
+                    .read_verified(INDEX_PATH, 4 * 1_024 * 1_024)
+                    .expect("verified bytes"),
+                INDEX
+            );
+            let facts = resolved.acquisition_facts();
+            assert_eq!(facts.len(), 2);
+            assert!(facts[0].source_url().contains("cdn.hzrd149.com"));
+            assert_eq!(
+                facts[0].outcome(),
+                &AcquisitionOutcome::Refused {
+                    reason: AcquisitionRefusal::Redirect
+                }
+            );
+            assert!(facts[1].source_url().contains("blossom.ditto.pub"));
+            assert_eq!(
+                facts[1].outcome(),
+                &AcquisitionOutcome::Succeeded { bytes: INDEX.len() }
+            );
+        });
+        assert_eq!(fixture.transport.calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn redirect_only_sources_fail_closed_after_the_bounded_candidate_set() {
+        let fixture = Fixture::new(TransportMode::Redirect);
+        fixture.with_resolver(|resolver| {
+            let error = resolver
+                .resolve(&Fixture::coordinate(), &CancellationToken::default())
+                .expect_err("redirect-only acquisition must fail closed");
+            assert!(matches!(
+                &error,
+                ResolveError::Acquisition {
+                    reason: AcquisitionRefusal::AllSourcesFailed,
+                    ..
+                }
+            ));
+            let facts = error
+                .acquisition_facts()
+                .expect("source-scoped refusal evidence");
+            assert_eq!(facts.len(), 3);
+            assert!(facts[..2].iter().all(|fact| {
+                fact.outcome()
+                    == &AcquisitionOutcome::Refused {
+                        reason: AcquisitionRefusal::Redirect,
+                    }
+            }));
+            assert_eq!(
+                facts[2].outcome(),
+                &AcquisitionOutcome::Refused {
+                    reason: AcquisitionRefusal::AllSourcesFailed
+                }
+            );
+            assert!(matches!(
+                resolver.resolve_offline(
+                    &Fixture::coordinate(),
+                    &Sha256Digest::parse(AGGREGATE).expect("aggregate"),
+                    &CancellationToken::default(),
+                ),
+                Err(ResolveError::OfflineMiss { .. })
+            ));
+        });
+        assert_eq!(fixture.transport.calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn private_dns_source_confusion_and_oversize_fail_before_retention() {
         let cases = [
-            (TransportMode::Redirect, "redirect"),
             (TransportMode::Private, "public address"),
             (TransportMode::Confused, "effective response URL"),
             (TransportMode::Oversize, "maximum"),
