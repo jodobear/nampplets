@@ -11,8 +11,9 @@ use std::{
 };
 
 use nmp_native_runtime_core::{
-    BoundedJson, Cancellation, Capability, ExecutionProfile, GrantDecision, GrantLedger, Principal,
-    ResourceClass, ResourceRefusal, ResourceTracker, SessionId, WorkLease,
+    ApprovedWrite, BoundedJson, Cancellation, Capability, ExecutionProfile, GrantDecision,
+    GrantLedger, Principal, ReceiptEventSink, ResourceClass, ResourceRefusal, ResourceTracker,
+    SessionId, WorkLease,
 };
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -157,6 +158,7 @@ pub struct ProviderRequest {
 pub struct ProviderCall {
     pub response: Option<BoundedJson>,
     operation: Option<ProviderOperation>,
+    write_proposal: Option<Box<ProviderWriteProposal>>,
 }
 
 impl ProviderCall {
@@ -164,6 +166,7 @@ impl ProviderCall {
         Self {
             response,
             operation: None,
+            write_proposal: None,
         }
     }
 
@@ -173,6 +176,30 @@ impl ProviderCall {
         Self {
             response,
             operation: Some(ProviderOperation::new(work)),
+            write_proposal: None,
+        }
+    }
+
+    /// Returns an exact write proposal for native review.
+    ///
+    /// Constructing a proposal does not accept a durable write. The caller
+    /// must approve the exact [`ApprovedWrite`], convert the one-shot
+    /// completion into a receipt sink, and pass both through the runtime's
+    /// single `accept_write` call.
+    pub fn proposed_write(
+        response: Option<BoundedJson>,
+        write: ApprovedWrite,
+        completion: Box<dyn ProviderWriteCompletion>,
+        work: WorkLease,
+    ) -> Self {
+        Self {
+            response,
+            operation: None,
+            write_proposal: Some(Box::new(ProviderWriteProposal {
+                write: Some(write),
+                completion: Some(completion),
+                work: Some(work),
+            })),
         }
     }
 
@@ -184,9 +211,75 @@ impl ProviderCall {
         self.operation.take()
     }
 
-    pub fn is_active(&self) -> bool {
-        self.operation.is_some()
+    pub fn write_proposal(&self) -> Option<&ProviderWriteProposal> {
+        self.write_proposal.as_deref()
     }
+
+    pub fn take_write_proposal(&mut self) -> Option<ProviderWriteProposal> {
+        self.write_proposal.take().map(|proposal| *proposal)
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.operation.is_some() || self.write_proposal.is_some()
+    }
+}
+
+/// One exact provider-originated write awaiting native approval.
+///
+/// The proposal retains its admitted-work lease until it is approved,
+/// refused, or dropped. Consuming it for approval transfers the exact write
+/// and its one-shot NAP completion together, preventing either half from
+/// being accidentally reused with another approval.
+#[derive(Debug)]
+pub struct ProviderWriteProposal {
+    pub write: Option<ApprovedWrite>,
+    completion: Option<Box<dyn ProviderWriteCompletion>>,
+    work: Option<WorkLease>,
+}
+
+impl ProviderWriteProposal {
+    pub fn into_parts(mut self) -> (ApprovedWrite, Box<dyn ProviderWriteCompletion>, WorkLease) {
+        let write = self
+            .write
+            .take()
+            .expect("a retained write proposal always owns its approved write");
+        let completion = self
+            .completion
+            .take()
+            .expect("a retained write proposal always owns its completion");
+        let work = self
+            .work
+            .take()
+            .expect("a retained write proposal always owns its work lease");
+        (write, completion, work)
+    }
+
+    pub fn refuse(mut self, reason: Arc<str>) {
+        if let Some(completion) = self.completion.take() {
+            completion.refused(reason);
+        }
+        if let Some(work) = self.work.take() {
+            work.cancellation().cancel();
+        }
+    }
+}
+
+impl Drop for ProviderWriteProposal {
+    fn drop(&mut self) {
+        if let Some(work) = self.work.take() {
+            work.cancellation().cancel();
+        }
+    }
+}
+
+/// One-shot continuation for a provider write after native approval.
+///
+/// The completion becomes a receipt sink before the runtime calls
+/// `HostDataPlane::accept_write`, allowing the app to fan out its own receipt
+/// projection and the provider's protocol result through one observation.
+pub trait ProviderWriteCompletion: Send + Sync + fmt::Debug {
+    fn into_receipt_sink(self: Box<Self>) -> Arc<dyn ReceiptEventSink>;
+    fn refused(self: Box<Self>, reason: Arc<str>);
 }
 
 /// The lifecycle owner for one active provider operation.
@@ -1371,6 +1464,118 @@ mod tests {
             *self.cancellation.lock() = Some(request.work.cancellation().clone());
             Ok(ProviderCall::streaming(None, request.work))
         }
+    }
+
+    #[derive(Debug)]
+    struct ProposalReceiptSink;
+
+    impl ReceiptEventSink for ProposalReceiptSink {
+        fn push_latest(
+            &self,
+            _snapshot: nmp_native_runtime_core::ReceiptSnapshot,
+        ) -> Result<(), nmp_native_runtime_core::ReceiptSinkError> {
+            Ok(())
+        }
+
+        fn close(&self, _reason: Option<Arc<str>>) {}
+    }
+
+    #[derive(Debug)]
+    struct TestWriteCompletion {
+        converted: Arc<AtomicUsize>,
+        refused: Arc<AtomicUsize>,
+    }
+
+    impl ProviderWriteCompletion for TestWriteCompletion {
+        fn into_receipt_sink(self: Box<Self>) -> Arc<dyn ReceiptEventSink> {
+            self.converted.fetch_add(1, Ordering::Relaxed);
+            Arc::new(ProposalReceiptSink)
+        }
+
+        fn refused(self: Box<Self>, _reason: Arc<str>) {
+            self.refused.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn test_approved_write(session: SessionId) -> ApprovedWrite {
+        ApprovedWrite {
+            approval_id: Arc::from("approval-1"),
+            origin_principal: Principal::new("a".repeat(64), "app", "b".repeat(64)).unwrap(),
+            origin_session: session,
+            account: nmp_native_runtime_core::AccountRef(Arc::from("c".repeat(64))),
+            draft: BoundedJson::from_raw("{}", 16).unwrap(),
+        }
+    }
+
+    #[test]
+    fn write_proposal_retains_work_and_transfers_completion_once() {
+        let resources = ResourceTracker::new(ResourceLimits::default()).unwrap();
+        let session = SessionId(91);
+        let converted = Arc::new(AtomicUsize::new(0));
+        let refused = Arc::new(AtomicUsize::new(0));
+        let work = resources
+            .admit(session, None, ResourceClass::ProviderCall)
+            .unwrap();
+        let mut call = ProviderCall::proposed_write(
+            None,
+            test_approved_write(session),
+            Box::new(TestWriteCompletion {
+                converted: Arc::clone(&converted),
+                refused: Arc::clone(&refused),
+            }),
+            work,
+        );
+
+        assert!(call.is_active());
+        assert_eq!(resources.census().admitted, 1);
+        assert_eq!(
+            call.write_proposal()
+                .unwrap()
+                .write
+                .as_ref()
+                .unwrap()
+                .approval_id
+                .as_ref(),
+            "approval-1"
+        );
+
+        let proposal = call.take_write_proposal().unwrap();
+        assert!(!call.is_active());
+        let (write, completion, work) = proposal.into_parts();
+        assert_eq!(write.origin_session, session);
+        assert_eq!(resources.census().admitted, 1);
+        drop(work);
+        assert_eq!(resources.census().admitted, 0);
+        let _sink = completion.into_receipt_sink();
+        assert_eq!(converted.load(Ordering::Relaxed), 1);
+        assert_eq!(refused.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn write_proposal_refusal_is_typed_and_releases_work() {
+        let resources = ResourceTracker::new(ResourceLimits::default()).unwrap();
+        let session = SessionId(92);
+        let converted = Arc::new(AtomicUsize::new(0));
+        let refused = Arc::new(AtomicUsize::new(0));
+        let work = resources
+            .admit(session, None, ResourceClass::ProviderCall)
+            .unwrap();
+        let mut call = ProviderCall::proposed_write(
+            None,
+            test_approved_write(session),
+            Box::new(TestWriteCompletion {
+                converted: Arc::clone(&converted),
+                refused: Arc::clone(&refused),
+            }),
+            work,
+        );
+
+        call.take_write_proposal()
+            .unwrap()
+            .refuse(Arc::from("not approved"));
+        assert_eq!(resources.census().admitted, 0);
+        assert_eq!(converted.load(Ordering::Relaxed), 0);
+        assert_eq!(refused.load(Ordering::Relaxed), 1);
     }
 
     #[test]

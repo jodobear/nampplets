@@ -48,7 +48,7 @@ use nmp_native_providers::{
 use nmp_native_runtime_app::{
     AppLimits, AppSnapshot, ExecutableArtifact, InstalledBuildAvailability, KernelClock,
     PermissionDecision, PermissionPlatformAvailability, PermissionReviewView, PlatformCommand,
-    PlatformEvent, RuntimeApp, RuntimeAppConfig, WorkspaceView,
+    PlatformEvent, ProviderOperationId, RuntimeApp, RuntimeAppConfig, WorkspaceView,
 };
 use nmp_native_runtime_core::{
     BoundedJson, Capability, CapabilityRequest, CapabilityRequirement, ExecutionProfile,
@@ -102,6 +102,12 @@ const GOOD_MORNING_CAPABILITY_PROFILE: &[(&str, CapabilityRequirement)] = &[
     ("link", CapabilityRequirement::Optional),
 ];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RuntimePermissionMode {
+    Interactive,
+    DemoPinnedGoodMorning,
+}
+
 uniffi::setup_scaffolding!();
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -125,6 +131,7 @@ pub struct RuntimeConfig {
     pub maximum_artifact_total_bytes: u64,
     pub maximum_verified_read_bytes: u64,
     pub maximum_blob_sources: u64,
+    pub permission_mode: RuntimePermissionMode,
 }
 
 impl RuntimeConfig {
@@ -210,6 +217,7 @@ impl RuntimeConfig {
             maximum_blob_sources,
             maximum_command_items: maximum_config_items,
             maximum_command_string_bytes: maximum_config_string_bytes,
+            permission_mode: self.permission_mode,
         })
     }
 }
@@ -236,6 +244,7 @@ impl Default for RuntimeConfig {
             maximum_artifact_total_bytes: 32 * 1_024 * 1_024,
             maximum_verified_read_bytes: DEFAULT_MAXIMUM_ARTIFACT_READ_BYTES,
             maximum_blob_sources: 8,
+            permission_mode: RuntimePermissionMode::Interactive,
         }
     }
 }
@@ -259,6 +268,7 @@ struct ValidatedConfig {
     maximum_blob_sources: usize,
     maximum_command_items: usize,
     maximum_command_string_bytes: usize,
+    permission_mode: RuntimePermissionMode,
 }
 
 #[derive(Clone, Debug, thiserror::Error, uniffi::Error)]
@@ -874,6 +884,18 @@ pub struct RuntimeReceiptSnapshot {
     pub latest_state_json: Option<String>,
 }
 
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct RuntimePendingWriteSnapshot {
+    pub operation_id: u64,
+    pub approval_id: String,
+    pub author: String,
+    pub d_tag: String,
+    pub aggregate_hash: String,
+    pub session_id: u64,
+    pub account: String,
+    pub draft_json: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum RuntimeWorkspaceAxis {
     Horizontal,
@@ -976,6 +998,7 @@ pub struct RuntimeSnapshot {
     pub installed_library: RuntimeInstalledLibrarySnapshot,
     pub sessions: Vec<RuntimeSessionSnapshot>,
     pub bindings: Vec<RuntimeBindingSnapshot>,
+    pub pending_writes: Vec<RuntimePendingWriteSnapshot>,
     pub receipts: Vec<RuntimeReceiptSnapshot>,
     pub workspaces: Vec<RuntimeWorkspaceDefinition>,
     pub recent_activity: Vec<RuntimeActivitySnapshot>,
@@ -1061,6 +1084,7 @@ pub struct RuntimeController {
     signal: watch::Sender<u64>,
     observers: Arc<AtomicUsize>,
     maximum_observers: usize,
+    permission_mode: RuntimePermissionMode,
     closed: AtomicBool,
 }
 
@@ -1437,6 +1461,7 @@ fn open_runtime_controller(
         signal,
         observers: Arc::new(AtomicUsize::new(0)),
         maximum_observers: config.maximum_observers,
+        permission_mode: config.permission_mode,
         closed: AtomicBool::new(false),
     }))
 }
@@ -2180,18 +2205,28 @@ impl RuntimeController {
             },
             artifact: executable,
         });
-        self.grant_good_morning_demo_permissions(&principal);
+        self.grant_good_morning_demo_permissions(
+            principal.manifest_author(),
+            principal.d_tag(),
+            principal.aggregate_hash(),
+        );
         bump_signal(&self.signal);
     }
 
-    fn grant_good_morning_demo_permissions(&self, principal: &Principal) {
-        let is_good_morning = principal.manifest_author() == GOOD_MORNING_AUTHOR
-            && principal.d_tag() == GOOD_MORNING_D_TAG
-            && principal.aggregate_hash() == GOOD_MORNING_AGGREGATE_HASH;
+    fn grant_good_morning_demo_permissions(&self, author: &str, d_tag: &str, aggregate_hash: &str) {
+        if self.permission_mode != RuntimePermissionMode::DemoPinnedGoodMorning {
+            return;
+        }
+        let is_good_morning = author == GOOD_MORNING_AUTHOR
+            && d_tag == GOOD_MORNING_D_TAG
+            && aggregate_hash == GOOD_MORNING_AGGREGATE_HASH;
         if !is_good_morning {
             return;
         }
-        let Ok(review) = self.app.permission_review(principal) else {
+        let Ok(principal) = Principal::new(author, d_tag, aggregate_hash) else {
+            return;
+        };
+        let Ok(review) = self.app.permission_review(&principal) else {
             return;
         };
         let decisions = review
@@ -2608,6 +2643,24 @@ impl RuntimeController {
         bump_signal(&self.signal);
     }
 
+    /// Resolves one Rust-retained provider write proposal. Native supplies
+    /// only the bounded operation id and decision; the exact principal,
+    /// account, correlation, and draft remain inside RuntimeApp.
+    pub fn decide_provider_write(&self, operation_id: u64, approve: bool) {
+        if operation_id == 0 {
+            self.record_refusal(
+                "invalid-provider-operation",
+                "provider operation identifiers are positive",
+            );
+            return;
+        }
+        self.app.dispatch(PlatformCommand::DecideProviderWrite {
+            operation: ProviderOperationId(operation_id),
+            approve,
+        });
+        bump_signal(&self.signal);
+    }
+
     pub fn mapped_envelope(&self, session_id: u64, bytes: Vec<u8>) {
         if bytes.len() > self.maximum_envelope_bytes {
             self.record_refusal(
@@ -3007,6 +3060,20 @@ impl RuntimeController {
                     schema: binding.schema.to_string(),
                     logical_source_id: binding.logical_source_id.as_deref().map(str::to_owned),
                     revision: binding.revision,
+                })
+                .collect(),
+            pending_writes: snapshot
+                .pending_writes
+                .iter()
+                .map(|pending| RuntimePendingWriteSnapshot {
+                    operation_id: pending.operation.0,
+                    approval_id: pending.approval_id.to_string(),
+                    author: pending.principal.manifest_author().to_owned(),
+                    d_tag: pending.principal.d_tag().to_owned(),
+                    aggregate_hash: pending.principal.aggregate_hash().to_owned(),
+                    session_id: pending.session.0,
+                    account: pending.account.0.to_string(),
+                    draft_json: pending.draft.as_str().to_owned(),
                 })
                 .collect(),
             receipts: snapshot

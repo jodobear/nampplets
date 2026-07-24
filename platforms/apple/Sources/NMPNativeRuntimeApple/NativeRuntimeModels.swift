@@ -32,3 +32,4 @@ public typealias NativeRuntimeWorkspaceRestore = RuntimeWorkspaceRestore
 public typealias NativeRuntimeWorkspaceRole = RuntimeWorkspaceRole
 public typealias NativeRuntimeWorkspaceSlot = RuntimeWorkspaceSlot
 public typealias NativeRuntimeWorkspaceUpdate = RuntimeWorkspaceUpdate
+public typealias NativeRuntimePermissionMode = RuntimePermissionMode

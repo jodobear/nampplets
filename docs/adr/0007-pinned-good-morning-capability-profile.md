@@ -14,6 +14,8 @@ and outbox as essential and resource, theme, and link as optional.
 NIP-5D permits an artifact with no `requires` tags to load with capabilities
 the shell provides. That does not authorize Swift to invent requirements,
 auto-grant a sensitive domain, or launch as a side effect of installation.
+The Workbench may opt into a clearly named, isolated demo mode, but that mode
+must remain Rust-owned and exact-triple guarded.
 
 ## Decision
 
@@ -29,7 +31,11 @@ Native code cannot select a compatibility profile or pass capability names
 into installation. Rust persists the derived request inventory, owns the
 atomic decision batch, and rederives required launch domains from the sealed
 artifact identity. Install, permission application, and launch remain three
-separate operations.
+separate operations. A dedicated `DemoPinnedGoodMorning` runtime mode may
+submit that same atomic batch after installation, only for the complete pinned
+identity; it grants only registered available providers and explicitly denies
+unknown or unavailable optional domains. The normal `Interactive` mode never
+does this.
 
 Any publisher, dTag, or aggregate change is a different principal, receives no
 profile match, and inherits no grant. The profile does not claim that an
@@ -40,8 +46,8 @@ unknown and allows denial only.
 
 - The unchanged published artifact can receive a truthful exact-build review
   without changing or re-signing its bytes.
-- Outbox remains sensitive and cannot be granted by the Workbench startup
-  path.
+- Outbox remains sensitive and cannot be granted by the normal Workbench
+  startup path; the isolated demo mode is the sole exact-fixture exception.
 - Resource and link stay absent until real bounded native executors are
   registered.
 - A future Good Morning release with signed `requires` tags must use its new

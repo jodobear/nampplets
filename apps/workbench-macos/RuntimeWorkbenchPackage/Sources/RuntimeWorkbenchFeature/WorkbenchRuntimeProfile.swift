@@ -41,7 +41,8 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
             appRelays: network.appRelays,
             accountPersistence: keychainPersistence(
                 storageRoot: storageRoot
-            )
+            ),
+            permissionMode: .demoPinnedGoodMorning
         )
     }
 
@@ -134,14 +135,16 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
         storageRoot: URL,
         indexerRelays: [String] = [],
         appRelays: [String] = [],
-        accountPersistence: NativeRuntimeAccountPersistence = .transient
+        accountPersistence: NativeRuntimeAccountPersistence = .transient,
+        permissionMode: NativeRuntimePermissionMode = .interactive
     ) throws -> WorkbenchRuntimeProfile {
         let native = try NativeRuntimeProfile.open(
             configuration: NativeRuntimeProfileConfiguration(
                 storageRoot: storageRoot,
                 indexerRelays: indexerRelays,
                 appRelays: appRelays,
-                accountPersistence: accountPersistence
+                accountPersistence: accountPersistence,
+                permissionMode: permissionMode
             )
         )
         return WorkbenchRuntimeProfile(native: native)

@@ -188,6 +188,7 @@ public struct NativeRuntimeProfileConfiguration: Sendable {
     public let fallbackRelays: [String]
     public let allowedLocalRelayHosts: [String]
     public let accountPersistence: NativeRuntimeAccountPersistence
+    public let permissionMode: NativeRuntimePermissionMode
 
     public init(
         storageRoot: URL,
@@ -195,7 +196,8 @@ public struct NativeRuntimeProfileConfiguration: Sendable {
         appRelays: [String] = [],
         fallbackRelays: [String] = [],
         allowedLocalRelayHosts: [String] = [],
-        accountPersistence: NativeRuntimeAccountPersistence = .transient
+        accountPersistence: NativeRuntimeAccountPersistence = .transient,
+        permissionMode: NativeRuntimePermissionMode = .interactive
     ) {
         self.storageRoot = storageRoot
         self.indexerRelays = indexerRelays
@@ -203,6 +205,7 @@ public struct NativeRuntimeProfileConfiguration: Sendable {
         self.fallbackRelays = fallbackRelays
         self.allowedLocalRelayHosts = allowedLocalRelayHosts
         self.accountPersistence = accountPersistence
+        self.permissionMode = permissionMode
     }
 }
 
@@ -582,7 +585,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
                 maximumArtifactFileBytes: Self.maximumReadBytes,
                 maximumArtifactTotalBytes: 32 * 1_024 * 1_024,
                 maximumVerifiedReadBytes: Self.maximumReadBytes,
-                maximumBlobSources: 8
+                maximumBlobSources: 8,
+                permissionMode: configuration.permissionMode
             ),
             artifactSource: source,
             appearanceSource: appearanceSource,
@@ -1224,6 +1228,19 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         _ batch: NativeRuntimePermissionDecisionBatch
     ) -> NativeRuntimePermissionBatchUpdate {
         controller.applyPermissionDecisions(batch: batch)
+    }
+
+    /// Resolves one Rust-retained provider write proposal. The native shell
+    /// supplies only the opaque operation id and decision; the frozen write
+    /// remains owned by RuntimeApp.
+    public func decideProviderWrite(
+        operationID: UInt64,
+        approve: Bool
+    ) {
+        controller.decideProviderWrite(
+            operationId: operationID,
+            approve: approve
+        )
     }
 
     /// Returns the latest complete installed-library replacement from the

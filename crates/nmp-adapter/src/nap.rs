@@ -19,18 +19,17 @@ use std::{
 };
 
 use nmp::{
-    AccessContext, Binding, CacheMode, CorrelationToken, Demand, Durability, Engine, Filter,
-    Freshness, IndexedTagName, LiveQuery, ObservationCancel, PublicKey, RelayUrl, Row,
-    SourceAuthority, UnsignedEvent, Window, WriteIntent, WritePayload, WriteRouting,
+    AccessContext, Binding, CacheMode, Demand, Engine, Filter, Freshness, IndexedTagName,
+    LiveQuery, ObservationCancel, PublicKey, RelayUrl, Row, SourceAuthority, UnsignedEvent, Window,
 };
 use nmp_native_nap_bridge::{
     Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderPlatformAvailability,
     ProviderPushSender, ProviderRequest, ProviderSession, ProviderSessionContext,
-    ProviderSessionEnd,
+    ProviderSessionEnd, ProviderWriteCompletion,
 };
 use nmp_native_runtime_core::{
-    AccountRef, BoundedJson, Capability, Principal, PublicIdentityDataPlane, ReceiptEventSink,
-    ReceiptSinkError, ReceiptSnapshot, SessionId,
+    AccountRef, ApprovedWrite, BoundedJson, Capability, Principal, PublicIdentityDataPlane,
+    ReceiptEventSink, ReceiptSinkError, ReceiptSnapshot, SessionId,
 };
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
@@ -535,13 +534,22 @@ impl NapNostrProvider {
         let event = payload
             .get("event")
             .ok_or_else(|| self.invalid(&request, "event is required"))?;
-        let (write_payload, account) = if event.get("sig").is_some() {
+        let (draft, account, approval_id) = if event.get("sig").is_some() {
             let signed: nmp::Event = serde_json::from_value(event.clone()).map_err(|error| {
                 self.invalid(&request, format!("invalid signed event: {error}"))
             })?;
+            signed.verify().map_err(|error| {
+                self.invalid(&request, format!("invalid signed event: {error}"))
+            })?;
             (
-                WritePayload::Signed(signed.clone()),
+                BoundedJson::from_value(
+                    &serde_json::to_value(&signed)
+                        .map_err(|error| self.invalid(&request, error.to_string()))?,
+                    self.limits.maximum_response_bytes,
+                )
+                .map_err(|error| self.invalid(&request, error.to_string()))?,
                 AccountRef(Arc::from(signed.pubkey.to_string())),
+                Arc::from(signed.id.to_string()),
             )
         } else {
             let identity = self
@@ -551,41 +559,39 @@ impl NapNostrProvider {
             let account = identity
                 .account
                 .ok_or_else(|| self.denied(&request, "publishing requires an active account"))?;
-            let unsigned = parse_event_template(event, &account, self.limits, &request)?;
-            (WritePayload::Unsigned(unsigned), account)
+            let mut unsigned = parse_event_template(event, &account, self.limits, &request)?;
+            let approval_id: Arc<str> = Arc::from(unsigned.id().to_string());
+            (
+                BoundedJson::from_value(
+                    &serde_json::to_value(&unsigned)
+                        .map_err(|error| self.invalid(&request, error.to_string()))?,
+                    self.limits.maximum_response_bytes,
+                )
+                .map_err(|error| self.invalid(&request, error.to_string()))?,
+                account,
+                approval_id,
+            )
         };
-        let correlation = CorrelationToken::try_from(id.as_ref())
-            .map_err(|error| self.invalid(&request, error.to_string()))?;
-        let intent = WriteIntent {
-            payload: write_payload,
-            durability: Durability::Durable,
-            routing: WriteRouting::AuthorOutbox,
-            identity_override: Some(
-                PublicKey::from_str(&account.0)
-                    .map_err(|_| self.failed(&request, "frozen account is invalid"))?,
-            ),
-            correlation: Some(correlation),
+        let write = ApprovedWrite {
+            approval_id,
+            origin_principal: request.principal.clone(),
+            origin_session: request.session,
+            account,
+            draft,
         };
-        let sink: Arc<dyn ReceiptEventSink> = Arc::new(NapPublishReceiptSink {
+        let completion = Box::new(NapPublishCompletion {
             domain: self.domain,
-            id: Arc::clone(&id),
+            id,
             outbound,
             engine: Arc::clone(&self.plane.engine),
             maximum_response_bytes: self.limits.maximum_response_bytes,
-            delivered: AtomicBool::new(false),
         });
-        match self.plane.accept_intent(account, intent, sink) {
-            Ok(_) => Ok(ProviderCall::completed(None)),
-            Err(error) => self.completed_value(
-                &request,
-                json!({
-                    "type": format!("{}.publish.result", self.domain.name()),
-                    "id": &*id,
-                    "ok": false,
-                    "error": error.to_string(),
-                }),
-            ),
-        }
+        Ok(ProviderCall::proposed_write(
+            None,
+            write,
+            completion,
+            request.work,
+        ))
     }
 
     fn publish_encrypted(&self, request: ProviderRequest) -> Result<ProviderCall, ProviderError> {
@@ -1949,6 +1955,42 @@ fn validate_publish_options(
     Ok(())
 }
 
+struct NapPublishCompletion {
+    domain: NapDomain,
+    id: Arc<str>,
+    outbound: ProviderPushSender,
+    engine: Arc<Engine>,
+    maximum_response_bytes: usize,
+}
+
+impl fmt::Debug for NapPublishCompletion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NapPublishCompletion")
+            .field("domain", &self.domain)
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ProviderWriteCompletion for NapPublishCompletion {
+    fn into_receipt_sink(self: Box<Self>) -> Arc<dyn ReceiptEventSink> {
+        Arc::new(NapPublishReceiptSink {
+            domain: self.domain,
+            id: self.id,
+            outbound: self.outbound,
+            engine: self.engine,
+            maximum_response_bytes: self.maximum_response_bytes,
+            delivered: AtomicBool::new(false),
+        })
+    }
+
+    fn refused(self: Box<Self>, reason: Arc<str>) {
+        let sink = self.into_receipt_sink();
+        sink.close(Some(reason));
+    }
+}
+
 struct NapPublishReceiptSink {
     domain: NapDomain,
     id: Arc<str>,
@@ -2022,6 +2064,7 @@ impl ReceiptEventSink for NapPublishReceiptSink {
         let mut response = json!({
             "type": format!("{}.publish.result", self.domain.name()),
             "id": self.id,
+            "receiptId": snapshot.receipt_id.0,
             "ok": ok,
             "relays": relays,
         });
@@ -2147,14 +2190,17 @@ fn push_value(
 
 #[cfg(test)]
 mod tests {
-    use nmp::{EngineConfig, ReceiptReattachment, WriteStatus};
+    use nmp::{
+        Durability, EngineConfig, ReceiptReattachment, WriteIntent, WritePayload, WriteRouting,
+        WriteStatus,
+    };
     use nmp_native_nap_bridge::{
         BridgeLimits, DispatchOutcome, InjectionPlan, MemoryActivitySink, ProviderPushObserver,
         ProviderRegistry, SessionContext, SourceWindowId,
     };
     use nmp_native_runtime_core::{
-        ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, ResourceLimits, ResourceTracker,
-        Sensitivity, WriteReceiptId,
+        ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, HostDataPlane, ResourceLimits,
+        ResourceTracker, Sensitivity, WriteReceiptId,
     };
 
     use super::*;
@@ -2534,6 +2580,7 @@ mod tests {
         let value = batch.pushes[0].envelope.decode().unwrap();
         assert_eq!(value["type"], "outbox.publish.result");
         assert_eq!(value["id"], "publish-mixed-1");
+        assert_eq!(value["receiptId"], "receipt-mixed-1");
         assert_eq!(value["ok"], true);
         assert_eq!(value["relays"]["wss://acked.example"], true);
         assert_eq!(value["relays"]["wss://rejected.example"], false);
@@ -2626,10 +2673,20 @@ mod tests {
                 }
             }),
         );
-        let DispatchOutcome::Handled(call) = outcome else {
+        let DispatchOutcome::Handled(mut call) = outcome else {
             panic!("the NAP-OUTBOX publish must be handled");
         };
         assert!(call.response.is_none());
+        let proposal = call
+            .take_write_proposal()
+            .expect("live publish must await exact native approval");
+        let (write, completion, work) = proposal.into_parts();
+        let accepted = rig
+            .plane
+            .accept_write(write, completion.into_receipt_sink())
+            .expect("native approval must transfer the write to NMP");
+        drop(work);
+        assert!(!accepted.receipt_id.0.is_empty());
         assert!(!call.is_active());
 
         let batch = tokio::time::timeout(Duration::from_secs(45), rig.observer.changed(8))
@@ -2697,6 +2754,7 @@ mod tests {
         let value = batch.pushes[0].envelope.decode().unwrap();
         assert_eq!(value["type"], "relay.publish.result");
         assert_eq!(value["id"], "relay-publish-1");
+        assert_eq!(value["receiptId"], "receipt-relay-1");
         assert_eq!(value["ok"], true);
         assert_eq!(value["eventId"], event.id.to_string());
         assert_eq!(value["event"]["id"], event.id.to_string());
@@ -2706,8 +2764,54 @@ mod tests {
         rig.plane.close();
     }
 
+    #[tokio::test]
+    async fn signed_publish_is_proposed_exactly_and_refusal_completes_the_nap_request() {
+        let mut rig = nap_rig();
+        let event = public_note();
+        let DispatchOutcome::Handled(mut call) = dispatch(
+            &rig,
+            json!({
+                "type": "relay.publish",
+                "id": "signed-publish-1",
+                "event": event,
+            }),
+        ) else {
+            panic!("signed relay publish must be handled");
+        };
+        let proposal = call
+            .take_write_proposal()
+            .expect("signed publish must await exact native approval");
+        let write = proposal.write.as_ref().unwrap();
+        assert_eq!(write.origin_principal, rig.context.principal);
+        assert_eq!(write.origin_session, rig.context.id);
+        assert_eq!(write.account.0.as_ref(), event.pubkey.to_string());
+        assert_eq!(write.approval_id.as_ref(), event.id.to_string());
+        assert_eq!(write.draft.decode().unwrap()["sig"], event.sig.to_string());
+        assert!(matches!(
+            rig.plane
+                .engine
+                .reattach_by_correlation(write.approval_id.to_string())
+                .unwrap(),
+            ReceiptReattachment::NotFound
+        ));
+
+        proposal.refuse(Arc::from("native approval refused"));
+        let batch = tokio::time::timeout(Duration::from_secs(1), rig.observer.changed(1))
+            .await
+            .expect("refusal result must remain bounded")
+            .unwrap();
+        let value = batch.pushes[0].envelope.decode().unwrap();
+        assert_eq!(value["type"], "relay.publish.result");
+        assert_eq!(value["id"], "signed-publish-1");
+        assert_eq!(value["ok"], false);
+        assert_eq!(value["error"], "native approval refused");
+
+        rig.registry.close_session(rig.context.id);
+        rig.plane.close();
+    }
+
     #[test]
-    fn quick_gm_acceptance_is_one_reattachable_nmp_receipt_after_session_teardown() {
+    fn quick_gm_proposal_is_not_accepted_until_native_approval() {
         let rig = nap_rig();
         let first = rig
             .plane
@@ -2719,7 +2823,7 @@ mod tests {
             .unwrap();
         rig.plane.activate_local_account(&first).unwrap();
 
-        let DispatchOutcome::Handled(call) = dispatch(
+        let DispatchOutcome::Handled(mut call) = dispatch(
             &rig,
             json!({
                 "type": "outbox.publish",
@@ -2735,8 +2839,41 @@ mod tests {
             panic!("Quick GM publish must be handled");
         };
         assert!(call.response.is_none());
+        assert!(call.is_active());
+        let proposal = call
+            .take_write_proposal()
+            .expect("Quick GM must produce an exact write proposal");
         assert!(!call.is_active());
+        let proposed_write = proposal.write.as_ref().unwrap();
+        assert_eq!(proposed_write.origin_principal, rig.context.principal);
+        assert_eq!(proposed_write.origin_session, rig.context.id);
+        assert_eq!(proposed_write.account, first.account);
+        let draft = proposed_write.draft.decode().unwrap();
+        assert_eq!(draft["content"], "GM");
+        assert_eq!(draft["pubkey"], first.account.0.as_ref());
+        assert_eq!(proposed_write.approval_id.as_ref(), draft["id"]);
+        assert!(matches!(
+            rig.plane
+                .engine
+                .reattach_by_correlation(proposed_write.approval_id.to_string())
+                .unwrap(),
+            ReceiptReattachment::NotFound
+        ));
+        assert!(matches!(
+            rig.plane
+                .engine
+                .reattach_by_correlation("quick-gm-1".to_owned())
+                .unwrap(),
+            ReceiptReattachment::NotFound
+        ));
 
+        let (write, completion, work) = proposal.into_parts();
+        let approval_id = write.approval_id.to_string();
+        let accepted = rig
+            .plane
+            .accept_write(write, completion.into_receipt_sink())
+            .expect("native approval must create the single durable receipt");
+        drop(work);
         rig.registry.close_session(rig.context.id);
         rig.plane.activate_local_account(&second).unwrap();
         rig.plane.logout_local_account().unwrap();
@@ -2748,7 +2885,7 @@ mod tests {
         } = rig
             .plane
             .engine
-            .reattach_by_correlation("quick-gm-1".to_owned())
+            .reattach_by_correlation(approval_id.clone())
             .unwrap()
         else {
             panic!("accepted Quick GM must have one canonical NMP receipt");
@@ -2787,6 +2924,7 @@ mod tests {
             expected_event_id,
             "account changes after acceptance must not retarget the frozen event",
         );
+        assert_eq!(accepted.receipt_id.0.as_ref(), receipt_id.0.to_string());
 
         let ReceiptReattachment::Attached {
             id: same_receipt_id,
@@ -2794,7 +2932,7 @@ mod tests {
         } = rig
             .plane
             .engine
-            .reattach_by_correlation("quick-gm-1".to_owned())
+            .reattach_by_correlation(approval_id)
             .unwrap()
         else {
             panic!("correlation must keep resolving to the canonical receipt");
