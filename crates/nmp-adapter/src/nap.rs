@@ -309,7 +309,7 @@ impl NapNostrProvider {
             let filters = cap_filter_limits(filters, requested_limit);
             (filters, source, timeout)
         };
-        let demand = broad_demand(&filters, source, self.limits, &request)?;
+        let demand = broad_demand(&filters, source, &request)?;
         let permit = self
             .plane
             .workers
@@ -382,7 +382,7 @@ impl NapNostrProvider {
             }
         };
         let source = read_source(self.domain, &filters, &authors, relays, &request)?;
-        let demand = broad_demand(&filters, source, self.limits, &request)?;
+        let demand = broad_demand(&filters, source, &request)?;
         let maximum = NonZeroUsize::new(self.limits.maximum_events)
             .expect("validated provider event maximum is non-zero");
         let subscription = self
@@ -690,7 +690,6 @@ impl NapNostrProvider {
         let demand = broad_demand(
             std::slice::from_ref(&filter),
             SourceChoice::AuthorOutboxes,
-            self.limits,
             &request,
         )?;
         let permit = self
@@ -1415,7 +1414,6 @@ fn read_source(
 fn broad_demand(
     filters: &[NapFilter],
     source: SourceChoice,
-    limits: NapNostrProviderLimits,
     request: &ProviderRequest,
 ) -> Result<Demand, ProviderError> {
     let all_have = |field: fn(&NapFilter) -> bool| filters.iter().all(field);
@@ -1478,7 +1476,9 @@ fn broad_demand(
         tags,
         since,
         until,
-        limit: Some(limits.maximum_events),
+        // NMP windows own the bounded row count for these observations.
+        // Declaring a filter limit as well is an invalid double bound.
+        limit: None,
     };
     let source = match source {
         SourceChoice::AuthorOutboxes => SourceAuthority::AuthorOutboxes,
@@ -2145,7 +2145,142 @@ fn push_value(
 
 #[cfg(test)]
 mod tests {
+    use nmp::{EngineConfig, ReceiptReattachment, WriteStatus};
+    use nmp_native_nap_bridge::{
+        BridgeLimits, DispatchOutcome, InjectionPlan, MemoryActivitySink, ProviderPushObserver,
+        ProviderRegistry, SessionContext, SourceWindowId,
+    };
+    use nmp_native_runtime_core::{
+        ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, ResourceLimits, ResourceTracker,
+        Sensitivity,
+    };
+
     use super::*;
+
+    struct NapRig {
+        plane: Arc<NmpDataPlane>,
+        registry: ProviderRegistry,
+        context: SessionContext,
+        plan: InjectionPlan,
+        observer: ProviderPushObserver,
+    }
+
+    fn principal() -> Principal {
+        Principal::new("a".repeat(64), "good-morning", "b".repeat(64)).unwrap()
+    }
+
+    fn nap_rig() -> NapRig {
+        let plane = Arc::new(NmpDataPlane::open(EngineConfig::default(), 8).unwrap());
+        let providers =
+            NapNostrProviderSet::new(Arc::clone(&plane), NapNostrProviderLimits::default())
+                .unwrap();
+        let resources = Arc::new(ResourceTracker::new(ResourceLimits::default()).unwrap());
+        let grants =
+            Arc::new(GrantLedger::new(GrantLimits::default(), Arc::clone(&resources)).unwrap());
+        let mut registry = ProviderRegistry::new(
+            BridgeLimits::default(),
+            resources,
+            Arc::clone(&grants),
+            Arc::new(MemoryActivitySink::bounded(32)),
+        )
+        .unwrap();
+        let domains = BTreeSet::from([
+            Capability::new(OUTBOX_DOMAIN).unwrap(),
+            Capability::new(RELAY_DOMAIN).unwrap(),
+        ]);
+        for domain in &domains {
+            grants
+                .set(
+                    principal(),
+                    domain.clone(),
+                    Sensitivity::Sensitive,
+                    GrantDecision::AllowExactBuild,
+                )
+                .unwrap();
+        }
+        let outbox: Arc<dyn Provider> = providers.outbox;
+        let relay: Arc<dyn Provider> = providers.relay;
+        registry.register(outbox).unwrap();
+        registry.register(relay).unwrap();
+        let context = SessionContext {
+            id: SessionId(7),
+            principal: principal(),
+            profile: ExecutionProfile::Legacy,
+        };
+        let plan = registry
+            .negotiate(&context.principal, context.profile, &domains)
+            .unwrap();
+        let observer = registry
+            .open_session_bound(&context, &plan, SourceWindowId(19), 0)
+            .unwrap();
+        registry.mark_session_ready(context.id).unwrap();
+        NapRig {
+            plane,
+            registry,
+            context,
+            plan,
+            observer,
+        }
+    }
+
+    fn dispatch(rig: &NapRig, envelope: Value) -> DispatchOutcome {
+        rig.registry
+            .dispatch(
+                &rig.context,
+                &rig.plan,
+                serde_json::to_vec(&envelope).unwrap().as_slice(),
+                0,
+            )
+            .unwrap()
+    }
+
+    async fn pushed(rig: &mut NapRig, outcome: DispatchOutcome) -> Value {
+        let DispatchOutcome::Handled(call) = outcome else {
+            panic!("NAP request must be handled");
+        };
+        assert!(call.response.is_none());
+        assert!(!call.is_active());
+        let batch = tokio::time::timeout(Duration::from_secs(3), rig.observer.changed(8))
+            .await
+            .expect("provider push must remain within its bounded deadline")
+            .unwrap();
+        assert_eq!(batch.pushes.len(), 1);
+        batch.pushes[0].envelope.decode().unwrap()
+    }
+
+    fn public_note() -> nmp::Event {
+        serde_json::from_value(json!({
+            "kind": 1,
+            "id": "134ce22e517d5c5cd574fe276e52cf713d7ca1228da7530cef10c58286c03025",
+            "pubkey": "974ab003f85a1c8d6da5ed68f215a4a7b5d1c8b5382013a93fd301abf97a68d4",
+            "created_at": 1_700_000_000_u64,
+            "tags": [],
+            "content": "deterministic public note",
+            "sig": "ef6e98957a40ae0eba44499a34b30cec9dcf0c4e933de9a753e9b0b7e48eccfce56edc5b7704380dc4d2618876756a198f1acbf3e273a301881d1b702e19e15d",
+        }))
+        .unwrap()
+    }
+
+    fn seed_canonical_event(plane: &NmpDataPlane, event: &nmp::Event) {
+        let statuses = plane
+            .engine
+            .publish(WriteIntent {
+                payload: WritePayload::Signed(event.clone()),
+                durability: Durability::Durable,
+                routing: WriteRouting::AuthorOutbox,
+                identity_override: None,
+                correlation: None,
+            })
+            .unwrap();
+        for _ in 0..32 {
+            match statuses.recv_timeout(Duration::from_secs(2)).unwrap() {
+                WriteStatus::Signed(id) if id == event.id => return,
+                WriteStatus::Failed(reason) => panic!("signed fixture was rejected: {reason}"),
+                _ => {}
+            }
+        }
+        panic!("signed fixture never reached canonical NMP state");
+    }
 
     fn request(action: &str, payload: Value) -> ProviderRequest {
         let resources = nmp_native_runtime_core::ResourceTracker::new(
@@ -2185,7 +2320,6 @@ mod tests {
         let demand = broad_demand(
             &filters,
             SourceChoice::AuthorOutboxes,
-            NapNostrProviderLimits::default(),
             &request("query", json!({})),
         )
         .unwrap();
@@ -2271,5 +2405,158 @@ mod tests {
             json!(["wss://one.example", "wss://two.example"])
         );
         assert!(value["plan"].get("missingAuthors").is_none());
+    }
+
+    #[tokio::test]
+    async fn public_relay_and_good_morning_outbox_queries_read_nmp_canonical_rows() {
+        let mut rig = nap_rig();
+        let event = public_note();
+        seed_canonical_event(&rig.plane, &event);
+
+        let outcome = dispatch(
+            &rig,
+            json!({
+                "type": "relay.query",
+                "id": "public-query-1",
+                "filters": [{"ids": [event.id.to_string()], "limit": 1}],
+            }),
+        );
+        let relay_result = pushed(&mut rig, outcome).await;
+        assert_eq!(relay_result["type"], "relay.query.result");
+        assert_eq!(relay_result["id"], "public-query-1");
+        assert_eq!(
+            relay_result["events"][0]["event"]["id"],
+            event.id.to_string()
+        );
+        assert!(relay_result.get("synced").is_none());
+        assert!(relay_result.get("complete").is_none());
+
+        let author = event.pubkey.to_string();
+        let outcome = dispatch(
+            &rig,
+            json!({
+                "type": "outbox.query",
+                "id": "good-morning-query-1",
+                "filters": [{
+                    "kinds": [1],
+                    "authors": [author],
+                    "since": 0,
+                    "limit": 1
+                }],
+                "options": {
+                    "authors": [event.pubkey.to_string()],
+                    "timeoutMs": 50
+                }
+            }),
+        );
+        let outbox_result = pushed(&mut rig, outcome).await;
+        assert_eq!(outbox_result["type"], "outbox.query.result");
+        assert_eq!(outbox_result["id"], "good-morning-query-1");
+        assert_eq!(
+            outbox_result["events"][0]["event"]["id"],
+            event.id.to_string()
+        );
+        assert!(outbox_result.get("synced").is_none());
+        assert!(outbox_result.get("complete").is_none());
+
+        rig.registry.close_session(rig.context.id);
+        rig.plane.close();
+    }
+
+    #[test]
+    fn quick_gm_acceptance_is_one_reattachable_nmp_receipt_after_session_teardown() {
+        let rig = nap_rig();
+        let first = rig
+            .plane
+            .register_local_account(&format!("{:064x}", 11_u8))
+            .unwrap();
+        let second = rig
+            .plane
+            .register_local_account(&format!("{:064x}", 12_u8))
+            .unwrap();
+        rig.plane.activate_local_account(&first).unwrap();
+
+        let DispatchOutcome::Handled(call) = dispatch(
+            &rig,
+            json!({
+                "type": "outbox.publish",
+                "id": "quick-gm-1",
+                "event": {
+                    "kind": 1,
+                    "content": "GM",
+                    "tags": [],
+                    "created_at": 1
+                }
+            }),
+        ) else {
+            panic!("Quick GM publish must be handled");
+        };
+        assert!(call.response.is_none());
+        assert!(!call.is_active());
+
+        rig.registry.close_session(rig.context.id);
+        rig.plane.activate_local_account(&second).unwrap();
+        rig.plane.logout_local_account().unwrap();
+
+        let ReceiptReattachment::Attached {
+            id: receipt_id,
+            statuses,
+            ..
+        } = rig
+            .plane
+            .engine
+            .reattach_by_correlation("quick-gm-1".to_owned())
+            .unwrap()
+        else {
+            panic!("accepted Quick GM must have one canonical NMP receipt");
+        };
+        let expected_event = UnsignedEvent::new(
+            PublicKey::from_str(&first.account.0).unwrap(),
+            nmp::Timestamp::from(1_u64),
+            nmp::Kind::TextNote,
+            Vec::new(),
+            "GM".to_owned(),
+        );
+        let expected_event_id = nmp::EventId::new(
+            &expected_event.pubkey,
+            &expected_event.created_at,
+            &expected_event.kind,
+            &expected_event.tags,
+            &expected_event.content,
+        );
+        let mut signed_event_id = None;
+        for _ in 0..32 {
+            match statuses.recv_timeout(Duration::from_secs(2)).unwrap() {
+                WriteStatus::Accepted | WriteStatus::AwaitingCapability { .. } => {}
+                WriteStatus::Signed(event_id) => {
+                    signed_event_id = Some(event_id);
+                    break;
+                }
+                WriteStatus::Cancelled => {
+                    panic!("session teardown must not cancel an accepted Quick GM")
+                }
+                WriteStatus::Failed(reason) => panic!("Quick GM failed before signing: {reason}"),
+                _ => {}
+            }
+        }
+        assert_eq!(
+            signed_event_id.expect("Quick GM must be signed"),
+            expected_event_id,
+            "account changes after acceptance must not retarget the frozen event",
+        );
+
+        let ReceiptReattachment::Attached {
+            id: same_receipt_id,
+            ..
+        } = rig
+            .plane
+            .engine
+            .reattach_by_correlation("quick-gm-1".to_owned())
+            .unwrap()
+        else {
+            panic!("correlation must keep resolving to the canonical receipt");
+        };
+        assert_eq!(same_receipt_id, receipt_id);
+        rig.plane.close();
     }
 }
