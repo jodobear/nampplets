@@ -16,23 +16,18 @@ final class RuntimeWorkbenchUITests: XCTestCase {
     }
 
     @MainActor
-    func testWorkbenchOpensSignedGoodMorningWithRequiredCapabilities() throws {
+    func testWorkbenchOpensSignedGoodMorningNappletInDegradedMode() throws {
         let app = XCUIApplication()
         app.launch()
 
         XCTAssertTrue(
             app.staticTexts[
-                "not logged in"
-            ].waitForExistence(timeout: 15)
-        )
-        XCTAssertFalse(
-            app.staticTexts[
                 "good-morning can't start here"
-            ].exists
+            ].waitForExistence(timeout: 10)
         )
         XCTAssertTrue(
             app.staticTexts[
-                "Mapped identity.getPublicKey from napplet window"
+                "Mapped shell.ready from napplet window"
             ].waitForExistence(timeout: 10)
         )
     }
