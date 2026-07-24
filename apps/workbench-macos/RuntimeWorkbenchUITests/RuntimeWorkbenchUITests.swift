@@ -116,6 +116,12 @@ final class RuntimeWorkbenchUITests: XCTestCase {
             catalogEntries.firstMatch.waitForExistence(timeout: 60),
             "The production NMP catalog should project a bounded network result"
         )
+        // The permanent expandable window may deliver an initial small page
+        // before its next replacement adds more public candidates. Give the
+        // subscription one event-driven opportunity to expose the next rows.
+        _ = catalogEntries
+            .element(boundBy: Self.maximumLiveReviewAttempts - 1)
+            .waitForExistence(timeout: 30)
 
         let attempts = min(
             catalogEntries.count,
