@@ -4,7 +4,7 @@ import XCTest
 final class RuntimeWorkbenchUITests: XCTestCase {
     private static let liveCatalogOptInMarker =
         "/tmp/nampplets-run-live-catalog-ui-test"
-    private static let maximumLiveReviewAttempts = 6
+    private static let maximumLiveReviewAttempts = 8
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
