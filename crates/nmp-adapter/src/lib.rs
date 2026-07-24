@@ -35,6 +35,10 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod nap;
+
+pub use nap::{NapNostrProvider, NapNostrProviderLimits, NapNostrProviderSet};
+
 const EVENT_COLLECTION_FAMILY: &str = "event.collection";
 const EVENT_COLLECTION_SCHEMA: &str = "nostr.events.collection/1";
 const DEFAULT_INITIAL_ROWS: usize = 20;
@@ -443,6 +447,72 @@ impl NmpDataPlane {
             })?;
         Ok((worker, control))
     }
+
+    /// Accept one already-governed NMP intent while preserving the adapter's
+    /// pre-acceptance drain guarantee. This remains crate-private so no NMP
+    /// type crosses the runtime package boundary.
+    fn accept_intent(
+        &self,
+        frozen_account: nmp_native_runtime_core::AccountRef,
+        intent: WriteIntent,
+        receipt_sink: Arc<dyn ReceiptEventSink>,
+    ) -> Result<AcceptedWrite, HostDataError> {
+        self.ensure_open()?;
+        let permit = self.workers.reserve("nmp-receipt")?;
+        type InitialReceipt = Option<(FifoReceiver<WriteStatus>, WriteReceiptId, ReceiptId)>;
+        let (ready_tx, ready_rx): (
+            mpsc::SyncSender<InitialReceipt>,
+            mpsc::Receiver<InitialReceipt>,
+        ) = mpsc::sync_channel(1);
+        let receipt_sink_for_worker = Arc::clone(&receipt_sink);
+        let engine = Arc::clone(&self.engine);
+        let worker = thread::Builder::new()
+            .name("nmp-receipt".to_owned())
+            .spawn(move || {
+                let _permit = permit;
+                let Ok(Some((statuses, receipt_id, raw_receipt_id))) = ready_rx.recv() else {
+                    return;
+                };
+                drain_receipt_pages(
+                    engine,
+                    raw_receipt_id,
+                    statuses,
+                    None,
+                    receipt_id,
+                    receipt_sink_for_worker,
+                    None,
+                );
+            })
+            .map_err(|error| HostDataError::ThreadUnavailable {
+                component: Arc::from("nmp-receipt"),
+                reason: Arc::from(error.to_string()),
+            })?;
+
+        let stream = match self.engine.publish_tracked(intent) {
+            Ok(stream) => stream,
+            Err(error) => {
+                let _ = ready_tx.send(None);
+                let _ = worker.join();
+                return Err(map_write_engine_error(error));
+            }
+        };
+        let receipt_id = WriteReceiptId(Arc::from(stream.id.0.to_string()));
+        if ready_tx
+            .send(Some((stream.statuses, receipt_id.clone(), stream.id)))
+            .is_err()
+        {
+            return Err(HostDataError::ReceiptUnreadable {
+                reason: Arc::from("receipt drain terminated after NMP accepted the write"),
+            });
+        }
+        // The profile owns the drain until the receipt terminates or the
+        // engine closes. Detaching component UI never cancels the obligation.
+        drop(worker);
+        Ok(AcceptedWrite {
+            receipt_id,
+            frozen_account,
+        })
+    }
 }
 
 impl HostDataPlane for NmpDataPlane {
@@ -525,63 +595,9 @@ impl HostDataPlane for NmpDataPlane {
         approved: ApprovedWrite,
         receipt_sink: Arc<dyn ReceiptEventSink>,
     ) -> Result<AcceptedWrite, HostDataError> {
-        self.ensure_open()?;
-        let permit = self.workers.reserve("nmp-receipt")?;
-        type InitialReceipt = Option<(FifoReceiver<WriteStatus>, WriteReceiptId, ReceiptId)>;
-        let (ready_tx, ready_rx): (
-            mpsc::SyncSender<InitialReceipt>,
-            mpsc::Receiver<InitialReceipt>,
-        ) = mpsc::sync_channel(1);
         let frozen_account = approved.account.clone();
-        let receipt_sink_for_worker = Arc::clone(&receipt_sink);
-        let engine = Arc::clone(&self.engine);
-        let worker = thread::Builder::new()
-            .name("nmp-receipt".to_owned())
-            .spawn(move || {
-                let _permit = permit;
-                let Ok(Some((statuses, receipt_id, raw_receipt_id))) = ready_rx.recv() else {
-                    return;
-                };
-                drain_receipt_pages(
-                    engine,
-                    raw_receipt_id,
-                    statuses,
-                    None,
-                    receipt_id,
-                    receipt_sink_for_worker,
-                    None,
-                );
-            })
-            .map_err(|error| HostDataError::ThreadUnavailable {
-                component: Arc::from("nmp-receipt"),
-                reason: Arc::from(error.to_string()),
-            })?;
-
         let intent = approved_write_intent(&approved)?;
-        let stream = match self.engine.publish_tracked(intent) {
-            Ok(stream) => stream,
-            Err(error) => {
-                let _ = ready_tx.send(None);
-                let _ = worker.join();
-                return Err(map_write_engine_error(error));
-            }
-        };
-        let receipt_id = WriteReceiptId(Arc::from(stream.id.0.to_string()));
-        if ready_tx
-            .send(Some((stream.statuses, receipt_id.clone(), stream.id)))
-            .is_err()
-        {
-            return Err(HostDataError::ReceiptUnreadable {
-                reason: Arc::from("receipt drain terminated after NMP accepted the write"),
-            });
-        }
-        // The profile owns the drain until the receipt terminates or the
-        // engine closes. Detaching component UI never cancels the obligation.
-        drop(worker);
-        Ok(AcceptedWrite {
-            receipt_id,
-            frozen_account,
-        })
+        self.accept_intent(frozen_account, intent, receipt_sink)
     }
 
     fn reattach_receipt(

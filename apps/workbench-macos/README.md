@@ -18,9 +18,11 @@ The current reference flow loads the committed Good Morning evidence fixture:
 5. The sandboxed iframe sends exact flat NAP envelopes through its mapped
    source window.
 
-Good Morning currently renders its own limited-runtime screen because its full
-identity/INC/outbox/resource/theme/link set is not implemented. That degraded
-state is expected and covered by UI automation.
+Good Morning receives the pinned identity, INC, outbox, resource, theme, and
+link projections. A signed-out profile reaches the napplet's native signed-out
+state; after native account activation, reads and approved writes stay behind
+the Rust runtime and NMP facade. UI automation refuses the former degraded
+screen and verifies the first mapped identity request.
 
 ## Open in Xcode
 

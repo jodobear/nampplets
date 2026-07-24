@@ -151,4 +151,8 @@ import Testing
     }.value
 
     #expect(artifact.title == "Good Morning Protocol")
+    #expect(
+        GoodMorningFixture.grantedDomains
+            == ["identity", "inc", "link", "outbox", "resource", "theme"]
+    )
 }
