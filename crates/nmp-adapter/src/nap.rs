@@ -2162,6 +2162,7 @@ mod tests {
     struct NapRig {
         plane: Arc<NmpDataPlane>,
         outbox: Arc<NapNostrProvider>,
+        relay: Arc<NapNostrProvider>,
         registry: ProviderRegistry,
         context: SessionContext,
         plan: InjectionPlan,
@@ -2202,6 +2203,7 @@ mod tests {
                 .unwrap();
         }
         let outbox_provider = Arc::clone(&providers.outbox);
+        let relay_provider = Arc::clone(&providers.relay);
         let outbox: Arc<dyn Provider> = providers.outbox;
         let relay: Arc<dyn Provider> = providers.relay;
         registry.register(outbox).unwrap();
@@ -2221,6 +2223,7 @@ mod tests {
         NapRig {
             plane,
             outbox: outbox_provider,
+            relay: relay_provider,
             registry,
             context,
             plan,
@@ -2530,6 +2533,60 @@ mod tests {
         assert_eq!(value["ok"], true);
         assert_eq!(value["relays"]["wss://acked.example"], true);
         assert_eq!(value["relays"]["wss://rejected.example"], false);
+
+        rig.registry.close_session(rig.context.id);
+        rig.plane.close();
+    }
+
+    #[tokio::test]
+    async fn relay_publish_ack_projects_the_canonical_signed_event() {
+        let mut rig = nap_rig();
+        let event = public_note();
+        seed_canonical_event(&rig.plane, &event);
+        let outbound = rig
+            .relay
+            .state
+            .lock()
+            .sessions
+            .get(&rig.context.id)
+            .unwrap()
+            .outbound
+            .clone();
+        let sink = NapPublishReceiptSink {
+            domain: NapDomain::Relay,
+            id: Arc::from("relay-publish-1"),
+            outbound,
+            engine: Arc::clone(&rig.plane.engine),
+            maximum_response_bytes: NapNostrProviderLimits::default().maximum_response_bytes,
+            delivered: AtomicBool::new(false),
+        };
+        sink.push_latest(ReceiptSnapshot {
+            receipt_id: WriteReceiptId(Arc::from("receipt-relay-1")),
+            state: BoundedJson::from_value(
+                &json!({
+                    "state": "delivered",
+                    "eventId": event.id.to_string(),
+                    "relays": {
+                        "wss://acked.example": {"state": "acked"}
+                    }
+                }),
+                16 * 1024,
+            )
+            .unwrap(),
+        })
+        .unwrap();
+
+        let batch = tokio::time::timeout(Duration::from_secs(1), rig.observer.changed(1))
+            .await
+            .expect("relay receipt projection must remain bounded")
+            .unwrap();
+        let value = batch.pushes[0].envelope.decode().unwrap();
+        assert_eq!(value["type"], "relay.publish.result");
+        assert_eq!(value["id"], "relay-publish-1");
+        assert_eq!(value["ok"], true);
+        assert_eq!(value["eventId"], event.id.to_string());
+        assert_eq!(value["event"]["id"], event.id.to_string());
+        assert_eq!(value["relays"]["wss://acked.example"], true);
 
         rig.registry.close_session(rig.context.id);
         rig.plane.close();
