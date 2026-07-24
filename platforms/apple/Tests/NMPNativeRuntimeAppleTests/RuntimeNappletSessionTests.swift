@@ -187,6 +187,54 @@ final class RuntimeNappletSessionTests: XCTestCase {
         launched.runtimeSession?.stop()
     }
 
+    func testDemoPinnedGoodMorningAutoGrantsAndNegotiatesOutbox() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "runtime-apple-demo-pinned-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = repositoryRoot().appendingPathComponent(
+            "conformance/napplet-corpus/published/good-morning",
+            isDirectory: true
+        )
+        let event = try Data(contentsOf: fixture.appendingPathComponent("event.json"))
+        let index = try Data(contentsOf: fixture.appendingPathComponent("index.html"))
+        let profile = try NativeRuntimeProfile.open(
+            configuration: NativeRuntimeProfileConfiguration(
+                storageRoot: root,
+                permissionMode: .demoPinnedGoodMorning
+            )
+        )
+        defer { profile.close() }
+
+        let installed = try profile.installSignedNamed(
+            title: "Good Morning Demo",
+            eventJSON: event,
+            author: author,
+            dTag: "good-morning",
+            blobsBySHA256: [indexDigest: index]
+        )
+        let review = try XCTUnwrap(
+            profile.permissionReview(for: installed.permissionCoordinate).review
+        )
+        XCTAssertTrue(review.launchPermitted)
+        XCTAssertTrue(
+            review.capabilities.filter {
+                if case .available = $0.platformAvailability { return true }
+                return false
+            }.allSatisfy {
+                $0.existingDecision == .allowExactBuild
+            },
+            "demo mode must grant every available pinned Good Morning capability"
+        )
+
+        let launched = try profile.launchInstalled(installed)
+        XCTAssertTrue(launched.negotiatedDomains.contains("outbox"))
+        XCTAssertTrue(launched.negotiatedDomains.contains("identity"))
+        XCTAssertTrue(launched.negotiatedDomains.contains("inc"))
+    }
+
     func testInstalledHandleCannotCrossRuntimeProfiles() throws {
         let firstRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent(
