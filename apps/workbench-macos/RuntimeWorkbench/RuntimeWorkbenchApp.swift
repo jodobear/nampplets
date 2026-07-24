@@ -2,8 +2,24 @@ import AppKit
 import SwiftUI
 import RuntimeWorkbenchFeature
 
+final class RuntimeWorkbenchAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_: Notification) {
+        activateWorkbenchWindow()
+        DispatchQueue.main.async { [weak self] in
+            self?.activateWorkbenchWindow()
+        }
+    }
+
+    private func activateWorkbenchWindow() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        NSApplication.shared.windows.first?.makeKeyAndOrderFront(nil)
+    }
+}
+
 @main
 struct RuntimeWorkbenchApp: App {
+    @NSApplicationDelegateAdaptor(RuntimeWorkbenchAppDelegate.self)
+    private var appDelegate
     @State private var runtimeProfile: WorkbenchRuntimeProfile?
     @State private var runtimeError: String?
     @State private var isOpeningRuntime = false
