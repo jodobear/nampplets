@@ -373,6 +373,88 @@ public struct NativeRuntimeActivitySession: Sendable {
     }
 }
 
+/// A Rust-retained provider write awaiting one explicit native decision.
+/// The draft is display-only; native cannot replace the retained write.
+public struct NativeRuntimePendingWrite: Sendable, Identifiable {
+    public let id: UInt64
+    public let approvalID: String
+    public let scope: NativeRuntimeActivityScope
+    public let sessionID: UInt64
+    public let account: String
+    public let draftJSON: String
+
+    fileprivate init(_ pending: RuntimePendingWriteSnapshot) {
+        id = pending.operationId
+        approvalID = pending.approvalId
+        scope = NativeRuntimeActivityScope(
+            manifestAuthor: pending.author,
+            dTag: pending.dTag,
+            aggregateHash: pending.aggregateHash
+        )
+        sessionID = pending.sessionId
+        account = pending.account
+        draftJSON = pending.draftJson
+    }
+}
+
+public struct NativeRuntimePendingWriteProjection: Sendable {
+    public let revision: UInt64
+    public let writes: [NativeRuntimePendingWrite]
+
+    fileprivate init(_ snapshot: RuntimeSnapshot) {
+        revision = snapshot.revision
+        writes = snapshot.pendingWrites.map(NativeRuntimePendingWrite.init)
+    }
+}
+
+public enum NativeRuntimePendingWriteUpdate: Sendable {
+    case authoritative(NativeRuntimePendingWriteProjection)
+    case next(
+        NativeRuntimePendingWriteProjection,
+        predecessorRevision: UInt64,
+        eventCursorWasStale: Bool
+    )
+}
+
+public enum NativeRuntimePendingWriteObservationError:
+    Error,
+    LocalizedError,
+    Equatable
+{
+    case profileClosed
+    case observerCapacity(maximum: Int)
+
+    public var errorDescription: String? {
+        switch self {
+        case .profileClosed:
+            "The native runtime profile is closed."
+        case let .observerCapacity(maximum):
+            "The native pending-write observer limit of \(maximum) was reached."
+        }
+    }
+}
+
+public final class NativeRuntimePendingWriteObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancellation: (@Sendable () -> Void)?
+
+    fileprivate init(cancellation: @escaping @Sendable () -> Void) {
+        self.cancellation = cancellation
+    }
+
+    public func cancel() {
+        lock.lock()
+        let cancellation = cancellation
+        self.cancellation = nil
+        lock.unlock()
+        cancellation?()
+    }
+
+    deinit {
+        cancel()
+    }
+}
+
 /// A bounded replacement projection sourced from the Rust runtime.
 ///
 /// Bindings, receipts, and resources are intentionally not projected here:
@@ -464,6 +546,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         @Sendable (NativeRuntimeLibraryUpdate) -> Void
     private typealias CatalogReceiver =
         @Sendable (NativeRuntimeCatalogUpdate) -> Void
+    private typealias PendingWriteReceiver =
+        @Sendable (NativeRuntimePendingWriteUpdate) -> Void
 
     private struct ActivityObserverEntry {
         let scope: NativeRuntimeActivityScope
@@ -484,6 +568,13 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         var pendingUpdate: NativeRuntimeCatalogUpdate?
     }
 
+    private struct PendingWriteObserverEntry {
+        let receive: PendingWriteReceiver
+        var lastDeliveredRevision: UInt64
+        var isReadyForNext = false
+        var pendingUpdate: NativeRuntimePendingWriteUpdate?
+    }
+
     private final class WeakSession {
         weak var value: RustRuntimeNappletSession?
 
@@ -496,6 +587,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private static let maximumApplicationActivityObservers = 8
     private static let maximumApplicationLibraryObservers = 8
     private static let maximumApplicationCatalogObservers = 8
+    private static let maximumApplicationPendingWriteObservers = 8
     private static let maximumAccounts = 32
 
     private let profileID = UUID()
@@ -512,9 +604,11 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private var activityObservers: [UUID: ActivityObserverEntry] = [:]
     private var libraryObservers: [UUID: LibraryObserverEntry] = [:]
     private var catalogObservers: [UUID: CatalogObserverEntry] = [:]
+    private var pendingWriteObservers: [UUID: PendingWriteObserverEntry] = [:]
     private var lastActivityRevision: UInt64
     private var lastLibraryRevision: UInt64
     private var lastCatalogSnapshot: NativeRuntimeCatalogFeedSnapshot
+    private var lastPendingWriteRevision: UInt64
     private var accountPersistenceProblem:
         NativeRuntimeAccountPersistenceIssue?
     private var isClosed = false
@@ -631,6 +725,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         lastActivityRevision = revision
         lastLibraryRevision = revision
         lastCatalogSnapshot = controller.catalogFeedSnapshot()
+        lastPendingWriteRevision = revision
         accountPersistenceProblem = nil
     }
 
@@ -983,6 +1078,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         activityObservers.removeAll()
         libraryObservers.removeAll()
         catalogObservers.removeAll()
+        pendingWriteObservers.removeAll()
         lock.unlock()
 
         observation?.stop()
@@ -1243,6 +1339,50 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         )
     }
 
+    /// Returns the latest bounded set of Rust-retained provider writes.
+    public func pendingWriteProjection()
+        -> NativeRuntimePendingWriteProjection
+    {
+        NativeRuntimePendingWriteProjection(controller.snapshot())
+    }
+
+    /// Observes the profile-owned pending-write replacement stream. The
+    /// callback receives an authoritative replacement synchronously, followed
+    /// by conflated latest updates from the permanent Rust observation.
+    public func observePendingWrites(
+        _ receive: @escaping @Sendable (NativeRuntimePendingWriteUpdate) -> Void
+    ) throws -> NativeRuntimePendingWriteObservation {
+        lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            throw NativeRuntimePendingWriteObservationError.profileClosed
+        }
+        guard pendingWriteObservers.count
+            < Self.maximumApplicationPendingWriteObservers
+        else {
+            lock.unlock()
+            throw NativeRuntimePendingWriteObservationError.observerCapacity(
+                maximum: Self.maximumApplicationPendingWriteObservers
+            )
+        }
+        let identifier = UUID()
+        let authoritative = NativeRuntimePendingWriteProjection(
+            controller.snapshot()
+        )
+        pendingWriteObservers[identifier] = PendingWriteObserverEntry(
+            receive: receive,
+            lastDeliveredRevision: authoritative.revision
+        )
+        lock.unlock()
+
+        let observation = NativeRuntimePendingWriteObservation { [weak self] in
+            self?.removePendingWriteObserver(identifier)
+        }
+        receive(.authoritative(authoritative))
+        drainPendingWriteUpdates(for: identifier)
+        return observation
+    }
+
     /// Returns the latest complete installed-library replacement from the
     /// Rust-owned profile snapshot.
     public func installedLibraryProjection()
@@ -1422,8 +1562,10 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         let previousActivityRevision = lastActivityRevision
         let previousLibraryRevision = lastLibraryRevision
         let previousCatalogRevision = lastCatalogSnapshot.revision
+        let previousPendingWriteRevision = lastPendingWriteRevision
         lastActivityRevision = frame.snapshot.revision
         lastLibraryRevision = frame.snapshot.revision
+        lastPendingWriteRevision = frame.snapshot.revision
         if frame.catalog.revision >= previousCatalogRevision {
             lastCatalogSnapshot = frame.catalog
         }
@@ -1433,6 +1575,9 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         ] = []
         var catalogDeliveries: [
             (receive: CatalogReceiver, update: NativeRuntimeCatalogUpdate)
+        ] = []
+        var pendingWriteDeliveries: [
+            (receive: PendingWriteReceiver, update: NativeRuntimePendingWriteUpdate)
         ] = []
         if frame.snapshot.revision > previousLibraryRevision
             || frame.eventCursorWasStale
@@ -1497,6 +1642,43 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
                 catalogObservers[identifier] = observer
             }
         }
+        if frame.snapshot.revision > previousPendingWriteRevision
+            || frame.eventCursorWasStale
+        {
+            let projection = NativeRuntimePendingWriteProjection(frame.snapshot)
+            let update = NativeRuntimePendingWriteUpdate.next(
+                projection,
+                predecessorRevision: previousPendingWriteRevision,
+                eventCursorWasStale: frame.eventCursorWasStale
+            )
+            for identifier in Array(pendingWriteObservers.keys) {
+                guard var observer = pendingWriteObservers[identifier] else {
+                    continue
+                }
+                let isNewer = projection.revision
+                    > observer.lastDeliveredRevision
+                let isCurrentStaleReplacement = frame.eventCursorWasStale
+                    && projection.revision
+                        == observer.lastDeliveredRevision
+                guard isNewer || isCurrentStaleReplacement else {
+                    continue
+                }
+                if observer.isReadyForNext {
+                    observer.lastDeliveredRevision = projection.revision
+                    pendingWriteObservers[identifier] = observer
+                    pendingWriteDeliveries.append((observer.receive, update))
+                    continue
+                }
+                if let pendingUpdate = observer.pendingUpdate,
+                   projection.revision
+                        < pendingWriteRevision(of: pendingUpdate)
+                {
+                    continue
+                }
+                observer.pendingUpdate = update
+                pendingWriteObservers[identifier] = observer
+            }
+        }
         lock.unlock()
         settingsExecutor.retainRunningSessions(
             Set(frame.snapshot.sessions.filter { $0.state == "running" }.map(\.id))
@@ -1526,6 +1708,9 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         for delivery in catalogDeliveries {
             delivery.receive(delivery.update)
         }
+        for delivery in pendingWriteDeliveries {
+            delivery.receive(delivery.update)
+        }
     }
 
     private func removeActivityObserver(_ identifier: UUID) {
@@ -1543,6 +1728,12 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private func removeCatalogObserver(_ identifier: UUID) {
         lock.lock()
         catalogObservers.removeValue(forKey: identifier)
+        lock.unlock()
+    }
+
+    private func removePendingWriteObserver(_ identifier: UUID) {
+        lock.lock()
+        pendingWriteObservers.removeValue(forKey: identifier)
         lock.unlock()
     }
 
@@ -1596,6 +1787,32 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         }
     }
 
+    private func drainPendingWriteUpdates(for identifier: UUID) {
+        while true {
+            lock.lock()
+            guard !isClosed, var observer = pendingWriteObservers[identifier]
+            else {
+                lock.unlock()
+                return
+            }
+            guard let pendingUpdate = observer.pendingUpdate else {
+                observer.isReadyForNext = true
+                pendingWriteObservers[identifier] = observer
+                lock.unlock()
+                return
+            }
+            observer.pendingUpdate = nil
+            observer.lastDeliveredRevision = max(
+                observer.lastDeliveredRevision,
+                pendingWriteRevision(of: pendingUpdate)
+            )
+            pendingWriteObservers[identifier] = observer
+            let receive = observer.receive
+            lock.unlock()
+            receive(pendingUpdate)
+        }
+    }
+
     private func libraryRevision(
         of update: NativeRuntimeLibraryUpdate
     ) -> UInt64 {
@@ -1613,6 +1830,16 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         case let .authoritative(snapshot),
              let .next(snapshot, _):
             snapshot.revision
+        }
+    }
+
+    private func pendingWriteRevision(
+        of update: NativeRuntimePendingWriteUpdate
+    ) -> UInt64 {
+        switch update {
+        case let .authoritative(projection),
+             let .next(projection, _, _):
+            projection.revision
         }
     }
 

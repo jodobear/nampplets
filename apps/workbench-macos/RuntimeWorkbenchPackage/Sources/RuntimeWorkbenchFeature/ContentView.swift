@@ -43,6 +43,7 @@ public struct ContentView: View {
     @State private var permissionSheetError: String?
     @State private var settingsSnapshot: WorkbenchSettingsSnapshot?
     @State private var settingsRoute = WorkbenchSettingsRouteState()
+    @StateObject private var pendingWrites: RuntimeWorkbenchPendingWriteModel
 
     @MainActor
     public init(
@@ -83,6 +84,9 @@ public struct ContentView: View {
                     ?? "The application runtime profile is still opening."
             )
         injectedPermissionManager = permissionManager
+        _pendingWrites = StateObject(
+            wrappedValue: RuntimeWorkbenchPendingWriteModel(profile: profile)
+        )
 
         do {
             let restored = try resolvedLayoutStore.loadLayout(
@@ -105,6 +109,15 @@ public struct ContentView: View {
     public var body: some View {
         VStack(spacing: 0) {
             workspaceControlStrip
+            if let pendingWrite = pendingWrites.writes.first {
+                PendingWriteApprovalBar(write: pendingWrite) { approve in
+                    pendingWrites.decide(
+                        pendingWrite,
+                        approve: approve,
+                        profile: profile
+                    )
+                }
+            }
             HStack(spacing: 0) {
                 WorkbenchWorkspaceView(
                     layout: $layout,
