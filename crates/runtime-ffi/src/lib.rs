@@ -2205,7 +2205,7 @@ impl RuntimeController {
             },
             artifact: executable,
         });
-        self.grant_good_morning_demo_permissions(
+        self.grant_demo_permissions(
             principal.manifest_author(),
             principal.d_tag(),
             principal.aggregate_hash(),
@@ -2213,14 +2213,12 @@ impl RuntimeController {
         bump_signal(&self.signal);
     }
 
-    fn grant_good_morning_demo_permissions(&self, author: &str, d_tag: &str, aggregate_hash: &str) {
+    /// The explicit demo mode is intentionally permissive so a locally
+    /// verified network napplet can be rendered and exercised end-to-end.
+    /// Interactive production profiles still require the normal exact-build
+    /// permission review.
+    fn grant_demo_permissions(&self, author: &str, d_tag: &str, aggregate_hash: &str) {
         if self.permission_mode != RuntimePermissionMode::DemoPinnedGoodMorning {
-            return;
-        }
-        let is_good_morning = author == GOOD_MORNING_AUTHOR
-            && d_tag == GOOD_MORNING_D_TAG
-            && aggregate_hash == GOOD_MORNING_AGGREGATE_HASH;
-        if !is_good_morning {
             return;
         }
         let Ok(principal) = Principal::new(author, d_tag, aggregate_hash) else {
