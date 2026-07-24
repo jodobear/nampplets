@@ -15,6 +15,26 @@ public final class CatalogViewModel {
     public private(set) var isResolvingReview = false
     public private(set) var isInstalling = false
 
+    /// Live profiles expose a connecting replacement before the first relay
+    /// frame arrives, so the UI never turns a permanent subscription into an
+    /// empty or missing catalog surface.
+    public var connectingEvidence: CatalogBrowseEvidence? {
+        guard client.feedScope == .liveNMPWindow, evidence == nil else {
+            return nil
+        }
+        return CatalogBrowseEvidence(
+            scope: .liveNMPWindow,
+            queryWasLocalFilter: !query.isEmpty,
+            locallyFilteredRows: 0,
+            projectedRows: 0,
+            projectionLimitedRows: 0,
+            refusedRows: 0,
+            window: .requesting,
+            sourceEvidence: [],
+            shortfalls: []
+        )
+    }
+
     private let client: any CatalogClient
     private let onInstalled: @MainActor (CatalogInstalledBuild) -> Void
     private var operationGeneration: UInt = 0

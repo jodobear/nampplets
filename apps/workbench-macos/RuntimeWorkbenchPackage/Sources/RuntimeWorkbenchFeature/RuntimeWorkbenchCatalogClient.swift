@@ -65,6 +65,10 @@ public final class RuntimeWorkbenchCatalogClient: CatalogClient {
     private let loadIssue: CatalogIssue?
     private var activeLiveReviewID: String?
 
+    public var feedScope: CatalogBrowseScope {
+        profileBacking == nil ? .offlineFixture : .liveNMPWindow
+    }
+
     public convenience init() {
         self.init(
             profileBacking: nil,

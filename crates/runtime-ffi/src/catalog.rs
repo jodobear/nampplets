@@ -518,7 +518,6 @@ impl RuntimeCatalogService {
             Ok(result) => result.map_err(map_resolve_error),
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 cancellation.cancel();
-                let _ = receiver.recv();
                 Err(RuntimeCatalogError::Deadline {
                     milliseconds: duration_millis(self.deadline),
                 })
@@ -618,7 +617,13 @@ impl RuntimeCatalogService {
             }
         };
         self.remove_operation(operation_id);
-        let _ = worker.join();
+        // A timed-out resolver is cancelled cooperatively, but the public
+        // operation must remain bounded even if a transport does not wake
+        // immediately. Dropping the handle detaches that already-cancelled
+        // worker; successful and terminal workers are joined normally.
+        if !matches!(&result, Err(RuntimeCatalogError::Deadline { .. })) {
+            let _ = worker.join();
+        }
         let resolved = result?;
         Ok(RuntimeCatalogConfirmedArtifact {
             confirmation: RuntimeCatalogConfirmation {

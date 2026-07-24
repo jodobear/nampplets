@@ -19,6 +19,10 @@ public final class CatalogFeedObservation {
 
 @MainActor
 public protocol CatalogClient: AnyObject {
+    /// Identifies whether this client is backed by the profile's permanent
+    /// NMP subscription or by an offline/unavailable fixture.
+    var feedScope: CatalogBrowseScope { get }
+
     /// Observes replacement changes from the profile-owned catalog feed.
     /// The callback is a redraw signal; `search` reads the latest bounded
     /// replacement and applies the current local filter without opening a new
@@ -49,6 +53,8 @@ public protocol CatalogClient: AnyObject {
 }
 
 public extension CatalogClient {
+    var feedScope: CatalogBrowseScope { .offlineFixture }
+
     func observeChanges(
         _: @escaping @MainActor @Sendable () -> Void
     ) -> CatalogFeedObservation {

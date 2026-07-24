@@ -113,7 +113,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
 
         let catalogEntries = app.buttons.matching(identifier: "catalog-entry")
         XCTAssertTrue(
-            catalogEntries.firstMatch.waitForExistence(timeout: 30),
+            catalogEntries.firstMatch.waitForExistence(timeout: 60),
             "The production NMP catalog should project a bounded network result"
         )
 

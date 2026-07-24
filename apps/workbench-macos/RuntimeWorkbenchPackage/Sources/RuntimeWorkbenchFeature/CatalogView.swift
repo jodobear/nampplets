@@ -156,7 +156,7 @@ public struct CatalogSheet: View {
     @ViewBuilder
     private var results: some View {
         VStack(spacing: 0) {
-            if let evidence = model.evidence {
+            if let evidence = model.evidence ?? model.connectingEvidence {
                 CatalogBrowseEvidenceView(
                     evidence: evidence,
                     hasMore: model.hasMore
@@ -170,7 +170,15 @@ public struct CatalogSheet: View {
 
     @ViewBuilder
     private var resultRows: some View {
-        if model.entries.isEmpty {
+        if model.entries.isEmpty, model.connectingEvidence != nil {
+            ContentUnavailableView(
+                "Connecting to the live catalog",
+                systemImage: "antenna.radiowaves.left.and.right",
+                description: Text(
+                    "The permanent NMP subscription is waiting for its next bounded replacement."
+                )
+            )
+        } else if model.entries.isEmpty {
             ContentUnavailableView(
                 "No napplets in this feed",
                 systemImage: "square.grid.2x2",
