@@ -95,8 +95,17 @@ struct PendingWriteApprovalBar: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("NAP-OUTBOX approval required")
                     .font(.headline)
-                Text("\(write.account) · \(write.approvalID)")
+                Text("Account: \(write.account) · request: \(write.approvalID)")
                     .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                Text(
+                    "Build: \(write.scope.manifestAuthor) / \(write.scope.dTag) / "
+                        + write.scope.aggregateHash
+                )
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                Text("Routing: NMP public relay plan (native cannot retarget it)")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text(write.draftJSON)
                     .font(.caption2.monospaced())
