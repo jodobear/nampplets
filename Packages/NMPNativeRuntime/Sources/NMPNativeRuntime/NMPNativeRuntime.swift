@@ -625,7 +625,15 @@ public protocol RuntimeControllerProtocol: AnyObject, Sendable {
      */
     func decideProviderWrite(operationId: UInt64, approve: Bool)
 
-    func grantGoodMorningDemoPermissions(author: String, dTag: String, aggregateHash: String)
+    /**
+     * The explicit demo mode is intentionally permissive so a locally
+     * verified network napplet can be rendered and exercised end-to-end.
+     * Interactive production profiles still require the normal exact-build
+     * permission review.
+     */
+    func grantDemoPermissions(author: String, dTag: String, aggregateHash: String)
+
+    func grantDemoPermissionsForInstalledBuilds()
 
     func install(artifact: VerifiedArtifact)
 
@@ -1031,11 +1039,23 @@ open func decideProviderWrite(operationId: UInt64, approve: Bool)  {try! rustCal
 }
 }
 
-open func grantGoodMorningDemoPermissions(author: String, dTag: String, aggregateHash: String)  {try! rustCall() {
-    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_grant_good_morning_demo_permissions(self.uniffiClonePointer(),
+    /**
+     * The explicit demo mode is intentionally permissive so a locally
+     * verified network napplet can be rendered and exercised end-to-end.
+     * Interactive production profiles still require the normal exact-build
+     * permission review.
+     */
+open func grantDemoPermissions(author: String, dTag: String, aggregateHash: String)  {try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_grant_demo_permissions(self.uniffiClonePointer(),
         FfiConverterString.lower(author),
         FfiConverterString.lower(dTag),
         FfiConverterString.lower(aggregateHash),$0
+    )
+}
+}
+
+open func grantDemoPermissionsForInstalledBuilds()  {try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_grant_demo_permissions_for_installed_builds(self.uniffiClonePointer(),$0
     )
 }
 }
@@ -10245,7 +10265,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_decide_provider_write() != 21107) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_grant_good_morning_demo_permissions() != 10822) {
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_grant_demo_permissions() != 45570) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_grant_demo_permissions_for_installed_builds() != 40720) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_install() != 32984) {
