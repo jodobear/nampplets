@@ -5,8 +5,9 @@ use std::{
 };
 
 use nmp_native_nap_bridge::{
-    Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderPushSender, ProviderRequest,
-    ProviderSession, ProviderSessionContext, ProviderSessionEnd,
+    Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderPlatformAvailability,
+    ProviderPushSender, ProviderRequest, ProviderSession, ProviderSessionContext,
+    ProviderSessionEnd,
 };
 use nmp_native_runtime_core::{BoundedJson, Capability, Principal, SessionId};
 use nmp_native_runtime_store::RuntimeStore;
@@ -192,6 +193,8 @@ impl ConfigProvider {
                 .map(Arc::from)
                 .collect(),
                 sensitive: false,
+                dependencies: BTreeSet::new(),
+                platform_availability: ProviderPlatformAvailability::Available,
             },
             state: Mutex::new(ConfigState::default()),
         })

@@ -406,6 +406,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
+    typealias FfiType = UInt8
+    typealias SwiftType = UInt8
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: UInt8, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
     typealias FfiType = UInt16
     typealias SwiftType = UInt16
@@ -522,31 +538,86 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 
 
 public protocol RuntimeControllerProtocol: AnyObject, Sendable {
-    
-    func close() 
-    
-    func crash(sessionId: UInt64, reason: String) 
-    
-    func install(artifact: VerifiedArtifact) 
-    
-    func launch(artifact: VerifiedArtifact, profile: RuntimeExecutionProfile) 
-    
-    func mappedEnvelope(sessionId: UInt64, bytes: Data) 
-    
+
+    func accountSnapshot()  -> RuntimeAccountUpdate
+
+    /**
+     * Selects one exact, currently-owned local account installation.
+     */
+    func activateLocalAccount(handle: RuntimeAccountHandle)  -> RuntimeAccountUpdate
+
+    func close()
+
+    /**
+     * Trusted native settings commit. Rust rechecks the exact active session,
+     * exact-build principal, schema, values, and persistence before pushing.
+     */
+    func commitConfigValues(commit: NativeConfigCommit)  -> RuntimeProviderUpdate
+
+    func crash(sessionId: UInt64, reason: String)
+
+    func install(artifact: VerifiedArtifact)
+
+    func launch(artifact: VerifiedArtifact, profile: RuntimeExecutionProfile)
+
+    /**
+     * Signs out without removing any registered signer. Already accepted
+     * writes remain frozen to the account selected at acceptance.
+     */
+    func logoutLocalAccount()  -> RuntimeAccountUpdate
+
+    func mappedEnvelope(sessionId: UInt64, bytes: Data)
+
     func observe(observer: RuntimeObserver)  -> ObservationStart
-    
+
     func readVerified(sessionId: UInt64, logicalPath: String, maximumBytes: UInt64)  -> VerifiedRead
-    
-    func revoke(artifact: VerifiedArtifact, capability: String) 
-    
-    func setGrant(artifact: VerifiedArtifact, capability: String, sensitivity: RuntimeSensitivity, decision: RuntimeGrantDecision) 
-    
+
+    /**
+     * Registers a local signing account through NMP without retaining or
+     * reflecting the supplied secret. Registration does not silently switch
+     * the active account; native UI must explicitly activate the returned
+     * exact installation handle.
+     */
+    func registerLocalAccount(secretKey: String)  -> RuntimeAccountUpdate
+
+    /**
+     * Removes only the exact local account installation named by the opaque
+     * public handle. Forged, replaced, or stale handles are refused.
+     */
+    func removeLocalAccount(handle: RuntimeAccountHandle)  -> RuntimeAccountUpdate
+
+    /**
+     * Validates every durable row before making any restored workspace
+     * visible. Unknown versions or malformed rows refuse the whole restore.
+     */
+    func restoreWorkspaces()  -> RuntimeWorkspaceRestore
+
+    func revoke(artifact: VerifiedArtifact, capability: String)
+
+    /**
+     * Persists one complete, versioned native workspace definition.
+     *
+     * The boundary refuses partial/unknown schemas before dispatch. The
+     * runtime store performs the replacement atomically and the returned
+     * value is projected from the Rust-owned snapshot, never echoed from the
+     * Swift request.
+     */
+    func saveWorkspace(workspace: RuntimeWorkspaceDefinition)  -> RuntimeWorkspaceUpdate
+
+    func setGrant(artifact: VerifiedArtifact, capability: String, sensitivity: RuntimeSensitivity, decision: RuntimeGrantDecision)
+
     func snapshot()  -> RuntimeSnapshot
-    
-    func stop(sessionId: UInt64) 
-    
+
+    func stop(sessionId: UInt64)
+
+    /**
+     * Applies one event-driven native appearance change. The source is a
+     * single latest value; provider delivery uses finite conflating lanes.
+     */
+    func updateAppearance(appearance: NativeAppearanceSnapshot)  -> RuntimeProviderUpdate
+
     func verifyArtifact(eventJson: Data, coordinate: ArtifactCoordinate)  -> ArtifactVerification
-    
+
 }
 open class RuntimeController: RuntimeControllerProtocol, @unchecked Sendable {
     fileprivate let pointer: UnsafeMutableRawPointer!
@@ -597,7 +668,7 @@ open class RuntimeController: RuntimeControllerProtocol, @unchecked Sendable {
         try! rustCall { uniffi_nmp_native_runtime_ffi_fn_free_runtimecontroller(pointer, $0) }
     }
 
-    
+
 public static func `open`(config: RuntimeConfig, artifactSource: ArtifactSource)throws  -> RuntimeController  {
     return try  FfiConverterTypeRuntimeController_lift(try rustCallWithError(FfiConverterTypeRuntimeOpenError_lift) {
     uniffi_nmp_native_runtime_ffi_fn_constructor_runtimecontroller_open(
@@ -606,15 +677,88 @@ public static func `open`(config: RuntimeConfig, artifactSource: ArtifactSource)
     )
 })
 }
-    
 
-    
+public static func openWithAllNativeCapabilities(config: RuntimeConfig, artifactSource: ArtifactSource, appearanceSource: NativeAppearanceSource, settingsExecutor: NativeSettingsExecutor, incActionExecutor: NativeIncActionExecutor)throws  -> RuntimeController  {
+    return try  FfiConverterTypeRuntimeController_lift(try rustCallWithError(FfiConverterTypeRuntimeOpenError_lift) {
+    uniffi_nmp_native_runtime_ffi_fn_constructor_runtimecontroller_open_with_all_native_capabilities(
+        FfiConverterTypeRuntimeConfig_lower(config),
+        FfiConverterCallbackInterfaceArtifactSource_lower(artifactSource),
+        FfiConverterCallbackInterfaceNativeAppearanceSource_lower(appearanceSource),
+        FfiConverterCallbackInterfaceNativeSettingsExecutor_lower(settingsExecutor),
+        FfiConverterCallbackInterfaceNativeIncActionExecutor_lower(incActionExecutor),$0
+    )
+})
+}
+
+public static func openWithAppearance(config: RuntimeConfig, artifactSource: ArtifactSource, appearanceSource: NativeAppearanceSource)throws  -> RuntimeController  {
+    return try  FfiConverterTypeRuntimeController_lift(try rustCallWithError(FfiConverterTypeRuntimeOpenError_lift) {
+    uniffi_nmp_native_runtime_ffi_fn_constructor_runtimecontroller_open_with_appearance(
+        FfiConverterTypeRuntimeConfig_lower(config),
+        FfiConverterCallbackInterfaceArtifactSource_lower(artifactSource),
+        FfiConverterCallbackInterfaceNativeAppearanceSource_lower(appearanceSource),$0
+    )
+})
+}
+
+public static func openWithNativeCapabilities(config: RuntimeConfig, artifactSource: ArtifactSource, appearanceSource: NativeAppearanceSource, settingsExecutor: NativeSettingsExecutor)throws  -> RuntimeController  {
+    return try  FfiConverterTypeRuntimeController_lift(try rustCallWithError(FfiConverterTypeRuntimeOpenError_lift) {
+    uniffi_nmp_native_runtime_ffi_fn_constructor_runtimecontroller_open_with_native_capabilities(
+        FfiConverterTypeRuntimeConfig_lower(config),
+        FfiConverterCallbackInterfaceArtifactSource_lower(artifactSource),
+        FfiConverterCallbackInterfaceNativeAppearanceSource_lower(appearanceSource),
+        FfiConverterCallbackInterfaceNativeSettingsExecutor_lower(settingsExecutor),$0
+    )
+})
+}
+
+public static func openWithSettings(config: RuntimeConfig, artifactSource: ArtifactSource, settingsExecutor: NativeSettingsExecutor)throws  -> RuntimeController  {
+    return try  FfiConverterTypeRuntimeController_lift(try rustCallWithError(FfiConverterTypeRuntimeOpenError_lift) {
+    uniffi_nmp_native_runtime_ffi_fn_constructor_runtimecontroller_open_with_settings(
+        FfiConverterTypeRuntimeConfig_lower(config),
+        FfiConverterCallbackInterfaceArtifactSource_lower(artifactSource),
+        FfiConverterCallbackInterfaceNativeSettingsExecutor_lower(settingsExecutor),$0
+    )
+})
+}
+
+
+
+open func accountSnapshot() -> RuntimeAccountUpdate  {
+    return try!  FfiConverterTypeRuntimeAccountUpdate_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_account_snapshot(self.uniffiClonePointer(),$0
+    )
+})
+}
+
+    /**
+     * Selects one exact, currently-owned local account installation.
+     */
+open func activateLocalAccount(handle: RuntimeAccountHandle) -> RuntimeAccountUpdate  {
+    return try!  FfiConverterTypeRuntimeAccountUpdate_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_activate_local_account(self.uniffiClonePointer(),
+        FfiConverterTypeRuntimeAccountHandle_lower(handle),$0
+    )
+})
+}
+
 open func close()  {try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_close(self.uniffiClonePointer(),$0
     )
 }
 }
-    
+
+    /**
+     * Trusted native settings commit. Rust rechecks the exact active session,
+     * exact-build principal, schema, values, and persistence before pushing.
+     */
+open func commitConfigValues(commit: NativeConfigCommit) -> RuntimeProviderUpdate  {
+    return try!  FfiConverterTypeRuntimeProviderUpdate_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_commit_config_values(self.uniffiClonePointer(),
+        FfiConverterTypeNativeConfigCommit_lower(commit),$0
+    )
+})
+}
+
 open func crash(sessionId: UInt64, reason: String)  {try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_crash(self.uniffiClonePointer(),
         FfiConverterUInt64.lower(sessionId),
@@ -622,14 +766,14 @@ open func crash(sessionId: UInt64, reason: String)  {try! rustCall() {
     )
 }
 }
-    
+
 open func install(artifact: VerifiedArtifact)  {try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_install(self.uniffiClonePointer(),
         FfiConverterTypeVerifiedArtifact_lower(artifact),$0
     )
 }
 }
-    
+
 open func launch(artifact: VerifiedArtifact, profile: RuntimeExecutionProfile)  {try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_launch(self.uniffiClonePointer(),
         FfiConverterTypeVerifiedArtifact_lower(artifact),
@@ -637,7 +781,18 @@ open func launch(artifact: VerifiedArtifact, profile: RuntimeExecutionProfile)  
     )
 }
 }
-    
+
+    /**
+     * Signs out without removing any registered signer. Already accepted
+     * writes remain frozen to the account selected at acceptance.
+     */
+open func logoutLocalAccount() -> RuntimeAccountUpdate  {
+    return try!  FfiConverterTypeRuntimeAccountUpdate_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_logout_local_account(self.uniffiClonePointer(),$0
+    )
+})
+}
+
 open func mappedEnvelope(sessionId: UInt64, bytes: Data)  {try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_mapped_envelope(self.uniffiClonePointer(),
         FfiConverterUInt64.lower(sessionId),
@@ -645,7 +800,7 @@ open func mappedEnvelope(sessionId: UInt64, bytes: Data)  {try! rustCall() {
     )
 }
 }
-    
+
 open func observe(observer: RuntimeObserver) -> ObservationStart  {
     return try!  FfiConverterTypeObservationStart_lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_observe(self.uniffiClonePointer(),
@@ -653,7 +808,7 @@ open func observe(observer: RuntimeObserver) -> ObservationStart  {
     )
 })
 }
-    
+
 open func readVerified(sessionId: UInt64, logicalPath: String, maximumBytes: UInt64) -> VerifiedRead  {
     return try!  FfiConverterTypeVerifiedRead_lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_read_verified(self.uniffiClonePointer(),
@@ -663,7 +818,44 @@ open func readVerified(sessionId: UInt64, logicalPath: String, maximumBytes: UIn
     )
 })
 }
-    
+
+    /**
+     * Registers a local signing account through NMP without retaining or
+     * reflecting the supplied secret. Registration does not silently switch
+     * the active account; native UI must explicitly activate the returned
+     * exact installation handle.
+     */
+open func registerLocalAccount(secretKey: String) -> RuntimeAccountUpdate  {
+    return try!  FfiConverterTypeRuntimeAccountUpdate_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_register_local_account(self.uniffiClonePointer(),
+        FfiConverterString.lower(secretKey),$0
+    )
+})
+}
+
+    /**
+     * Removes only the exact local account installation named by the opaque
+     * public handle. Forged, replaced, or stale handles are refused.
+     */
+open func removeLocalAccount(handle: RuntimeAccountHandle) -> RuntimeAccountUpdate  {
+    return try!  FfiConverterTypeRuntimeAccountUpdate_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_remove_local_account(self.uniffiClonePointer(),
+        FfiConverterTypeRuntimeAccountHandle_lower(handle),$0
+    )
+})
+}
+
+    /**
+     * Validates every durable row before making any restored workspace
+     * visible. Unknown versions or malformed rows refuse the whole restore.
+     */
+open func restoreWorkspaces() -> RuntimeWorkspaceRestore  {
+    return try!  FfiConverterTypeRuntimeWorkspaceRestore_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_restore_workspaces(self.uniffiClonePointer(),$0
+    )
+})
+}
+
 open func revoke(artifact: VerifiedArtifact, capability: String)  {try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_revoke(self.uniffiClonePointer(),
         FfiConverterTypeVerifiedArtifact_lower(artifact),
@@ -671,7 +863,23 @@ open func revoke(artifact: VerifiedArtifact, capability: String)  {try! rustCall
     )
 }
 }
-    
+
+    /**
+     * Persists one complete, versioned native workspace definition.
+     *
+     * The boundary refuses partial/unknown schemas before dispatch. The
+     * runtime store performs the replacement atomically and the returned
+     * value is projected from the Rust-owned snapshot, never echoed from the
+     * Swift request.
+     */
+open func saveWorkspace(workspace: RuntimeWorkspaceDefinition) -> RuntimeWorkspaceUpdate  {
+    return try!  FfiConverterTypeRuntimeWorkspaceUpdate_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_save_workspace(self.uniffiClonePointer(),
+        FfiConverterTypeRuntimeWorkspaceDefinition_lower(workspace),$0
+    )
+})
+}
+
 open func setGrant(artifact: VerifiedArtifact, capability: String, sensitivity: RuntimeSensitivity, decision: RuntimeGrantDecision)  {try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_set_grant(self.uniffiClonePointer(),
         FfiConverterTypeVerifiedArtifact_lower(artifact),
@@ -681,21 +889,33 @@ open func setGrant(artifact: VerifiedArtifact, capability: String, sensitivity: 
     )
 }
 }
-    
+
 open func snapshot() -> RuntimeSnapshot  {
     return try!  FfiConverterTypeRuntimeSnapshot_lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_snapshot(self.uniffiClonePointer(),$0
     )
 })
 }
-    
+
 open func stop(sessionId: UInt64)  {try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_stop(self.uniffiClonePointer(),
         FfiConverterUInt64.lower(sessionId),$0
     )
 }
 }
-    
+
+    /**
+     * Applies one event-driven native appearance change. The source is a
+     * single latest value; provider delivery uses finite conflating lanes.
+     */
+open func updateAppearance(appearance: NativeAppearanceSnapshot) -> RuntimeProviderUpdate  {
+    return try!  FfiConverterTypeRuntimeProviderUpdate_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_update_appearance(self.uniffiClonePointer(),
+        FfiConverterTypeNativeAppearanceSnapshot_lower(appearance),$0
+    )
+})
+}
+
 open func verifyArtifact(eventJson: Data, coordinate: ArtifactCoordinate) -> ArtifactVerification  {
     return try!  FfiConverterTypeArtifactVerification_lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_verify_artifact(self.uniffiClonePointer(),
@@ -704,7 +924,7 @@ open func verifyArtifact(eventJson: Data, coordinate: ArtifactCoordinate) -> Art
     )
 })
 }
-    
+
 
 }
 
@@ -764,9 +984,9 @@ public func FfiConverterTypeRuntimeController_lower(_ value: RuntimeController) 
 
 
 public protocol RuntimeObservationProtocol: AnyObject, Sendable {
-    
-    func stop() 
-    
+
+    func stop()
+
 }
 open class RuntimeObservation: RuntimeObservationProtocol, @unchecked Sendable {
     fileprivate let pointer: UnsafeMutableRawPointer!
@@ -817,15 +1037,15 @@ open class RuntimeObservation: RuntimeObservationProtocol, @unchecked Sendable {
         try! rustCall { uniffi_nmp_native_runtime_ffi_fn_free_runtimeobservation(pointer, $0) }
     }
 
-    
 
-    
+
+
 open func stop()  {try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimeobservation_stop(self.uniffiClonePointer(),$0
     )
 }
 }
-    
+
 
 }
 
@@ -885,25 +1105,25 @@ public func FfiConverterTypeRuntimeObservation_lower(_ value: RuntimeObservation
 
 
 public protocol VerifiedArtifactProtocol: AnyObject, Sendable {
-    
+
     func aggregateHash()  -> String
-    
+
     func author()  -> String
-    
+
     func dTag()  -> String?
-    
+
     func logicalPaths()  -> [String]
-    
+
     func manifestKind()  -> UInt16
-    
+
     func mode()  -> ArtifactExecutionMode
-    
+
     /**
      * Verified manifest requirements. Native presentation may render these,
      * but launch authority always derives them again from the sealed handle.
      */
     func requires()  -> [String]
-    
+
 }
 open class VerifiedArtifact: VerifiedArtifactProtocol, @unchecked Sendable {
     fileprivate let pointer: UnsafeMutableRawPointer!
@@ -954,51 +1174,51 @@ open class VerifiedArtifact: VerifiedArtifactProtocol, @unchecked Sendable {
         try! rustCall { uniffi_nmp_native_runtime_ffi_fn_free_verifiedartifact(pointer, $0) }
     }
 
-    
 
-    
+
+
 open func aggregateHash() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_verifiedartifact_aggregate_hash(self.uniffiClonePointer(),$0
     )
 })
 }
-    
+
 open func author() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_verifiedartifact_author(self.uniffiClonePointer(),$0
     )
 })
 }
-    
+
 open func dTag() -> String?  {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_verifiedartifact_d_tag(self.uniffiClonePointer(),$0
     )
 })
 }
-    
+
 open func logicalPaths() -> [String]  {
     return try!  FfiConverterSequenceString.lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_verifiedartifact_logical_paths(self.uniffiClonePointer(),$0
     )
 })
 }
-    
+
 open func manifestKind() -> UInt16  {
     return try!  FfiConverterUInt16.lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_verifiedartifact_manifest_kind(self.uniffiClonePointer(),$0
     )
 })
 }
-    
+
 open func mode() -> ArtifactExecutionMode  {
     return try!  FfiConverterTypeArtifactExecutionMode_lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_verifiedartifact_mode(self.uniffiClonePointer(),$0
     )
 })
 }
-    
+
     /**
      * Verified manifest requirements. Native presentation may render these,
      * but launch authority always derives them again from the sealed handle.
@@ -1009,7 +1229,7 @@ open func requires() -> [String]  {
     )
 })
 }
-    
+
 
 }
 
@@ -1127,10 +1347,10 @@ public struct FfiConverterTypeArtifactFetchRequest: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArtifactFetchRequest {
         return
             try ArtifactFetchRequest(
-                logicalPath: FfiConverterString.read(from: &buf), 
-                expectedSha256: FfiConverterString.read(from: &buf), 
-                candidateUrls: FfiConverterSequenceString.read(from: &buf), 
-                maximumBytes: FfiConverterUInt64.read(from: &buf), 
+                logicalPath: FfiConverterString.read(from: &buf),
+                expectedSha256: FfiConverterString.read(from: &buf),
+                candidateUrls: FfiConverterSequenceString.read(from: &buf),
+                maximumBytes: FfiConverterUInt64.read(from: &buf),
                 redirectsAllowed: FfiConverterBool.read(from: &buf)
         )
     }
@@ -1185,7 +1405,7 @@ public struct FfiConverterTypeArtifactVerification: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArtifactVerification {
         return
             try ArtifactVerification(
-                artifact: FfiConverterOptionTypeVerifiedArtifact.read(from: &buf), 
+                artifact: FfiConverterOptionTypeVerifiedArtifact.read(from: &buf),
                 refusal: FfiConverterOptionTypeRuntimeRefusal.read(from: &buf)
         )
     }
@@ -1209,6 +1429,528 @@ public func FfiConverterTypeArtifactVerification_lift(_ buf: RustBuffer) throws 
 #endif
 public func FfiConverterTypeArtifactVerification_lower(_ value: ArtifactVerification) -> RustBuffer {
     return FfiConverterTypeArtifactVerification.lower(value)
+}
+
+
+/**
+ * Raw host appearance facts. Native reports OS state; Rust owns the mapping
+ * to the pinned NAP-THEME payload.
+ */
+public struct NativeAppearanceSnapshot {
+    public var dark: Bool
+    public var increasedContrast: Bool
+    public var reducedTransparency: Bool
+    public var accentRed: UInt8
+    public var accentGreen: UInt8
+    public var accentBlue: UInt8
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(dark: Bool, increasedContrast: Bool, reducedTransparency: Bool, accentRed: UInt8, accentGreen: UInt8, accentBlue: UInt8) {
+        self.dark = dark
+        self.increasedContrast = increasedContrast
+        self.reducedTransparency = reducedTransparency
+        self.accentRed = accentRed
+        self.accentGreen = accentGreen
+        self.accentBlue = accentBlue
+    }
+}
+
+#if compiler(>=6)
+extension NativeAppearanceSnapshot: Sendable {}
+#endif
+
+
+extension NativeAppearanceSnapshot: Equatable, Hashable {
+    public static func ==(lhs: NativeAppearanceSnapshot, rhs: NativeAppearanceSnapshot) -> Bool {
+        if lhs.dark != rhs.dark {
+            return false
+        }
+        if lhs.increasedContrast != rhs.increasedContrast {
+            return false
+        }
+        if lhs.reducedTransparency != rhs.reducedTransparency {
+            return false
+        }
+        if lhs.accentRed != rhs.accentRed {
+            return false
+        }
+        if lhs.accentGreen != rhs.accentGreen {
+            return false
+        }
+        if lhs.accentBlue != rhs.accentBlue {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(dark)
+        hasher.combine(increasedContrast)
+        hasher.combine(reducedTransparency)
+        hasher.combine(accentRed)
+        hasher.combine(accentGreen)
+        hasher.combine(accentBlue)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeAppearanceSnapshot: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeAppearanceSnapshot {
+        return
+            try NativeAppearanceSnapshot(
+                dark: FfiConverterBool.read(from: &buf),
+                increasedContrast: FfiConverterBool.read(from: &buf),
+                reducedTransparency: FfiConverterBool.read(from: &buf),
+                accentRed: FfiConverterUInt8.read(from: &buf),
+                accentGreen: FfiConverterUInt8.read(from: &buf),
+                accentBlue: FfiConverterUInt8.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeAppearanceSnapshot, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.dark, into: &buf)
+        FfiConverterBool.write(value.increasedContrast, into: &buf)
+        FfiConverterBool.write(value.reducedTransparency, into: &buf)
+        FfiConverterUInt8.write(value.accentRed, into: &buf)
+        FfiConverterUInt8.write(value.accentGreen, into: &buf)
+        FfiConverterUInt8.write(value.accentBlue, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeAppearanceSnapshot_lift(_ buf: RustBuffer) throws -> NativeAppearanceSnapshot {
+    return try FfiConverterTypeNativeAppearanceSnapshot.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeAppearanceSnapshot_lower(_ value: NativeAppearanceSnapshot) -> RustBuffer {
+    return FfiConverterTypeNativeAppearanceSnapshot.lower(value)
+}
+
+
+public struct NativeConfigCommit {
+    public var manifestAuthor: String
+    public var dTag: String
+    public var aggregateHash: String
+    public var sessionId: UInt64
+    public var valuesJson: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(manifestAuthor: String, dTag: String, aggregateHash: String, sessionId: UInt64, valuesJson: String) {
+        self.manifestAuthor = manifestAuthor
+        self.dTag = dTag
+        self.aggregateHash = aggregateHash
+        self.sessionId = sessionId
+        self.valuesJson = valuesJson
+    }
+}
+
+#if compiler(>=6)
+extension NativeConfigCommit: Sendable {}
+#endif
+
+
+extension NativeConfigCommit: Equatable, Hashable {
+    public static func ==(lhs: NativeConfigCommit, rhs: NativeConfigCommit) -> Bool {
+        if lhs.manifestAuthor != rhs.manifestAuthor {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
+            return false
+        }
+        if lhs.aggregateHash != rhs.aggregateHash {
+            return false
+        }
+        if lhs.sessionId != rhs.sessionId {
+            return false
+        }
+        if lhs.valuesJson != rhs.valuesJson {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(manifestAuthor)
+        hasher.combine(dTag)
+        hasher.combine(aggregateHash)
+        hasher.combine(sessionId)
+        hasher.combine(valuesJson)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeConfigCommit: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeConfigCommit {
+        return
+            try NativeConfigCommit(
+                manifestAuthor: FfiConverterString.read(from: &buf),
+                dTag: FfiConverterString.read(from: &buf),
+                aggregateHash: FfiConverterString.read(from: &buf),
+                sessionId: FfiConverterUInt64.read(from: &buf),
+                valuesJson: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeConfigCommit, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.manifestAuthor, into: &buf)
+        FfiConverterString.write(value.dTag, into: &buf)
+        FfiConverterString.write(value.aggregateHash, into: &buf)
+        FfiConverterUInt64.write(value.sessionId, into: &buf)
+        FfiConverterString.write(value.valuesJson, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeConfigCommit_lift(_ buf: RustBuffer) throws -> NativeConfigCommit {
+    return try FfiConverterTypeNativeConfigCommit.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeConfigCommit_lower(_ value: NativeConfigCommit) -> RustBuffer {
+    return FfiConverterTypeNativeConfigCommit.lower(value)
+}
+
+
+public struct NativeIncActionEnd {
+    public var manifestAuthor: String
+    public var dTag: String
+    public var aggregateHash: String
+    public var sessionId: UInt64
+    public var sourceWindowId: UInt64
+    public var reason: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(manifestAuthor: String, dTag: String, aggregateHash: String, sessionId: UInt64, sourceWindowId: UInt64, reason: String) {
+        self.manifestAuthor = manifestAuthor
+        self.dTag = dTag
+        self.aggregateHash = aggregateHash
+        self.sessionId = sessionId
+        self.sourceWindowId = sourceWindowId
+        self.reason = reason
+    }
+}
+
+#if compiler(>=6)
+extension NativeIncActionEnd: Sendable {}
+#endif
+
+
+extension NativeIncActionEnd: Equatable, Hashable {
+    public static func ==(lhs: NativeIncActionEnd, rhs: NativeIncActionEnd) -> Bool {
+        if lhs.manifestAuthor != rhs.manifestAuthor {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
+            return false
+        }
+        if lhs.aggregateHash != rhs.aggregateHash {
+            return false
+        }
+        if lhs.sessionId != rhs.sessionId {
+            return false
+        }
+        if lhs.sourceWindowId != rhs.sourceWindowId {
+            return false
+        }
+        if lhs.reason != rhs.reason {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(manifestAuthor)
+        hasher.combine(dTag)
+        hasher.combine(aggregateHash)
+        hasher.combine(sessionId)
+        hasher.combine(sourceWindowId)
+        hasher.combine(reason)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeIncActionEnd: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeIncActionEnd {
+        return
+            try NativeIncActionEnd(
+                manifestAuthor: FfiConverterString.read(from: &buf),
+                dTag: FfiConverterString.read(from: &buf),
+                aggregateHash: FfiConverterString.read(from: &buf),
+                sessionId: FfiConverterUInt64.read(from: &buf),
+                sourceWindowId: FfiConverterUInt64.read(from: &buf),
+                reason: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeIncActionEnd, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.manifestAuthor, into: &buf)
+        FfiConverterString.write(value.dTag, into: &buf)
+        FfiConverterString.write(value.aggregateHash, into: &buf)
+        FfiConverterUInt64.write(value.sessionId, into: &buf)
+        FfiConverterUInt64.write(value.sourceWindowId, into: &buf)
+        FfiConverterString.write(value.reason, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeIncActionEnd_lift(_ buf: RustBuffer) throws -> NativeIncActionEnd {
+    return try FfiConverterTypeNativeIncActionEnd.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeIncActionEnd_lower(_ value: NativeIncActionEnd) -> RustBuffer {
+    return FfiConverterTypeNativeIncActionEnd.lower(value)
+}
+
+
+public struct NativeIncActionRequest {
+    public var manifestAuthor: String
+    public var dTag: String
+    public var aggregateHash: String
+    public var sessionId: UInt64
+    public var sourceWindowId: UInt64
+    public var kind: String
+    public var payloadJson: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(manifestAuthor: String, dTag: String, aggregateHash: String, sessionId: UInt64, sourceWindowId: UInt64, kind: String, payloadJson: String) {
+        self.manifestAuthor = manifestAuthor
+        self.dTag = dTag
+        self.aggregateHash = aggregateHash
+        self.sessionId = sessionId
+        self.sourceWindowId = sourceWindowId
+        self.kind = kind
+        self.payloadJson = payloadJson
+    }
+}
+
+#if compiler(>=6)
+extension NativeIncActionRequest: Sendable {}
+#endif
+
+
+extension NativeIncActionRequest: Equatable, Hashable {
+    public static func ==(lhs: NativeIncActionRequest, rhs: NativeIncActionRequest) -> Bool {
+        if lhs.manifestAuthor != rhs.manifestAuthor {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
+            return false
+        }
+        if lhs.aggregateHash != rhs.aggregateHash {
+            return false
+        }
+        if lhs.sessionId != rhs.sessionId {
+            return false
+        }
+        if lhs.sourceWindowId != rhs.sourceWindowId {
+            return false
+        }
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.payloadJson != rhs.payloadJson {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(manifestAuthor)
+        hasher.combine(dTag)
+        hasher.combine(aggregateHash)
+        hasher.combine(sessionId)
+        hasher.combine(sourceWindowId)
+        hasher.combine(kind)
+        hasher.combine(payloadJson)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeIncActionRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeIncActionRequest {
+        return
+            try NativeIncActionRequest(
+                manifestAuthor: FfiConverterString.read(from: &buf),
+                dTag: FfiConverterString.read(from: &buf),
+                aggregateHash: FfiConverterString.read(from: &buf),
+                sessionId: FfiConverterUInt64.read(from: &buf),
+                sourceWindowId: FfiConverterUInt64.read(from: &buf),
+                kind: FfiConverterString.read(from: &buf),
+                payloadJson: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeIncActionRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.manifestAuthor, into: &buf)
+        FfiConverterString.write(value.dTag, into: &buf)
+        FfiConverterString.write(value.aggregateHash, into: &buf)
+        FfiConverterUInt64.write(value.sessionId, into: &buf)
+        FfiConverterUInt64.write(value.sourceWindowId, into: &buf)
+        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterString.write(value.payloadJson, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeIncActionRequest_lift(_ buf: RustBuffer) throws -> NativeIncActionRequest {
+    return try FfiConverterTypeNativeIncActionRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeIncActionRequest_lower(_ value: NativeIncActionRequest) -> RustBuffer {
+    return FfiConverterTypeNativeIncActionRequest.lower(value)
+}
+
+
+public struct NativeSettingsRequest {
+    public var manifestAuthor: String
+    public var dTag: String
+    public var aggregateHash: String
+    public var sessionId: UInt64
+    public var section: String?
+    public var schemaJson: String
+    public var valuesJson: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(manifestAuthor: String, dTag: String, aggregateHash: String, sessionId: UInt64, section: String?, schemaJson: String, valuesJson: String) {
+        self.manifestAuthor = manifestAuthor
+        self.dTag = dTag
+        self.aggregateHash = aggregateHash
+        self.sessionId = sessionId
+        self.section = section
+        self.schemaJson = schemaJson
+        self.valuesJson = valuesJson
+    }
+}
+
+#if compiler(>=6)
+extension NativeSettingsRequest: Sendable {}
+#endif
+
+
+extension NativeSettingsRequest: Equatable, Hashable {
+    public static func ==(lhs: NativeSettingsRequest, rhs: NativeSettingsRequest) -> Bool {
+        if lhs.manifestAuthor != rhs.manifestAuthor {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
+            return false
+        }
+        if lhs.aggregateHash != rhs.aggregateHash {
+            return false
+        }
+        if lhs.sessionId != rhs.sessionId {
+            return false
+        }
+        if lhs.section != rhs.section {
+            return false
+        }
+        if lhs.schemaJson != rhs.schemaJson {
+            return false
+        }
+        if lhs.valuesJson != rhs.valuesJson {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(manifestAuthor)
+        hasher.combine(dTag)
+        hasher.combine(aggregateHash)
+        hasher.combine(sessionId)
+        hasher.combine(section)
+        hasher.combine(schemaJson)
+        hasher.combine(valuesJson)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeSettingsRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeSettingsRequest {
+        return
+            try NativeSettingsRequest(
+                manifestAuthor: FfiConverterString.read(from: &buf),
+                dTag: FfiConverterString.read(from: &buf),
+                aggregateHash: FfiConverterString.read(from: &buf),
+                sessionId: FfiConverterUInt64.read(from: &buf),
+                section: FfiConverterOptionString.read(from: &buf),
+                schemaJson: FfiConverterString.read(from: &buf),
+                valuesJson: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeSettingsRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.manifestAuthor, into: &buf)
+        FfiConverterString.write(value.dTag, into: &buf)
+        FfiConverterString.write(value.aggregateHash, into: &buf)
+        FfiConverterUInt64.write(value.sessionId, into: &buf)
+        FfiConverterOptionString.write(value.section, into: &buf)
+        FfiConverterString.write(value.schemaJson, into: &buf)
+        FfiConverterString.write(value.valuesJson, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeSettingsRequest_lift(_ buf: RustBuffer) throws -> NativeSettingsRequest {
+    return try FfiConverterTypeNativeSettingsRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeSettingsRequest_lower(_ value: NativeSettingsRequest) -> RustBuffer {
+    return FfiConverterTypeNativeSettingsRequest.lower(value)
 }
 
 
@@ -1237,7 +1979,7 @@ public struct FfiConverterTypeObservationStart: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ObservationStart {
         return
             try ObservationStart(
-                observation: FfiConverterOptionTypeRuntimeObservation.read(from: &buf), 
+                observation: FfiConverterOptionTypeRuntimeObservation.read(from: &buf),
                 refusal: FfiConverterOptionTypeRuntimeRefusal.read(from: &buf)
         )
     }
@@ -1261,6 +2003,240 @@ public func FfiConverterTypeObservationStart_lift(_ buf: RustBuffer) throws -> O
 #endif
 public func FfiConverterTypeObservationStart_lower(_ value: ObservationStart) -> RustBuffer {
     return FfiConverterTypeObservationStart.lower(value)
+}
+
+
+public struct RuntimeAccountHandle {
+    public var installationId: UInt64
+    public var publicKey: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(installationId: UInt64, publicKey: String) {
+        self.installationId = installationId
+        self.publicKey = publicKey
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeAccountHandle: Sendable {}
+#endif
+
+
+extension RuntimeAccountHandle: Equatable, Hashable {
+    public static func ==(lhs: RuntimeAccountHandle, rhs: RuntimeAccountHandle) -> Bool {
+        if lhs.installationId != rhs.installationId {
+            return false
+        }
+        if lhs.publicKey != rhs.publicKey {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(installationId)
+        hasher.combine(publicKey)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeAccountHandle: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeAccountHandle {
+        return
+            try RuntimeAccountHandle(
+                installationId: FfiConverterUInt64.read(from: &buf),
+                publicKey: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeAccountHandle, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.installationId, into: &buf)
+        FfiConverterString.write(value.publicKey, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeAccountHandle_lift(_ buf: RustBuffer) throws -> RuntimeAccountHandle {
+    return try FfiConverterTypeRuntimeAccountHandle.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeAccountHandle_lower(_ value: RuntimeAccountHandle) -> RustBuffer {
+    return FfiConverterTypeRuntimeAccountHandle.lower(value)
+}
+
+
+public struct RuntimeAccountSnapshot {
+    public var generation: UInt64
+    public var activePublicKey: String?
+    public var localAccounts: [RuntimeAccountHandle]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(generation: UInt64, activePublicKey: String?, localAccounts: [RuntimeAccountHandle]) {
+        self.generation = generation
+        self.activePublicKey = activePublicKey
+        self.localAccounts = localAccounts
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeAccountSnapshot: Sendable {}
+#endif
+
+
+extension RuntimeAccountSnapshot: Equatable, Hashable {
+    public static func ==(lhs: RuntimeAccountSnapshot, rhs: RuntimeAccountSnapshot) -> Bool {
+        if lhs.generation != rhs.generation {
+            return false
+        }
+        if lhs.activePublicKey != rhs.activePublicKey {
+            return false
+        }
+        if lhs.localAccounts != rhs.localAccounts {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(generation)
+        hasher.combine(activePublicKey)
+        hasher.combine(localAccounts)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeAccountSnapshot: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeAccountSnapshot {
+        return
+            try RuntimeAccountSnapshot(
+                generation: FfiConverterUInt64.read(from: &buf),
+                activePublicKey: FfiConverterOptionString.read(from: &buf),
+                localAccounts: FfiConverterSequenceTypeRuntimeAccountHandle.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeAccountSnapshot, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.generation, into: &buf)
+        FfiConverterOptionString.write(value.activePublicKey, into: &buf)
+        FfiConverterSequenceTypeRuntimeAccountHandle.write(value.localAccounts, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeAccountSnapshot_lift(_ buf: RustBuffer) throws -> RuntimeAccountSnapshot {
+    return try FfiConverterTypeRuntimeAccountSnapshot.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeAccountSnapshot_lower(_ value: RuntimeAccountSnapshot) -> RustBuffer {
+    return FfiConverterTypeRuntimeAccountSnapshot.lower(value)
+}
+
+
+public struct RuntimeAccountUpdate {
+    public var accepted: Bool
+    public var handle: RuntimeAccountHandle?
+    public var snapshot: RuntimeAccountSnapshot?
+    public var failure: RuntimeAccountFailure?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(accepted: Bool, handle: RuntimeAccountHandle?, snapshot: RuntimeAccountSnapshot?, failure: RuntimeAccountFailure?) {
+        self.accepted = accepted
+        self.handle = handle
+        self.snapshot = snapshot
+        self.failure = failure
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeAccountUpdate: Sendable {}
+#endif
+
+
+extension RuntimeAccountUpdate: Equatable, Hashable {
+    public static func ==(lhs: RuntimeAccountUpdate, rhs: RuntimeAccountUpdate) -> Bool {
+        if lhs.accepted != rhs.accepted {
+            return false
+        }
+        if lhs.handle != rhs.handle {
+            return false
+        }
+        if lhs.snapshot != rhs.snapshot {
+            return false
+        }
+        if lhs.failure != rhs.failure {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(accepted)
+        hasher.combine(handle)
+        hasher.combine(snapshot)
+        hasher.combine(failure)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeAccountUpdate: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeAccountUpdate {
+        return
+            try RuntimeAccountUpdate(
+                accepted: FfiConverterBool.read(from: &buf),
+                handle: FfiConverterOptionTypeRuntimeAccountHandle.read(from: &buf),
+                snapshot: FfiConverterOptionTypeRuntimeAccountSnapshot.read(from: &buf),
+                failure: FfiConverterOptionTypeRuntimeAccountFailure.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeAccountUpdate, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.accepted, into: &buf)
+        FfiConverterOptionTypeRuntimeAccountHandle.write(value.handle, into: &buf)
+        FfiConverterOptionTypeRuntimeAccountSnapshot.write(value.snapshot, into: &buf)
+        FfiConverterOptionTypeRuntimeAccountFailure.write(value.failure, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeAccountUpdate_lift(_ buf: RustBuffer) throws -> RuntimeAccountUpdate {
+    return try FfiConverterTypeRuntimeAccountUpdate.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeAccountUpdate_lower(_ value: RuntimeAccountUpdate) -> RustBuffer {
+    return FfiConverterTypeRuntimeAccountUpdate.lower(value)
 }
 
 
@@ -1337,12 +2313,12 @@ public struct FfiConverterTypeRuntimeActivitySnapshot: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeActivitySnapshot {
         return
             try RuntimeActivitySnapshot(
-                author: FfiConverterString.read(from: &buf), 
-                dTag: FfiConverterString.read(from: &buf), 
-                aggregateHash: FfiConverterString.read(from: &buf), 
-                category: FfiConverterString.read(from: &buf), 
-                operation: FfiConverterString.read(from: &buf), 
-                outcome: FfiConverterString.read(from: &buf), 
+                author: FfiConverterString.read(from: &buf),
+                dTag: FfiConverterString.read(from: &buf),
+                aggregateHash: FfiConverterString.read(from: &buf),
+                category: FfiConverterString.read(from: &buf),
+                operation: FfiConverterString.read(from: &buf),
+                outcome: FfiConverterString.read(from: &buf),
                 occurredAtMillis: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -1429,9 +2405,9 @@ public struct FfiConverterTypeRuntimeBindingSnapshot: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeBindingSnapshot {
         return
             try RuntimeBindingSnapshot(
-                id: FfiConverterString.read(from: &buf), 
-                schema: FfiConverterString.read(from: &buf), 
-                logicalSourceId: FfiConverterOptionString.read(from: &buf), 
+                id: FfiConverterString.read(from: &buf),
+                schema: FfiConverterString.read(from: &buf),
+                logicalSourceId: FfiConverterOptionString.read(from: &buf),
                 revision: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
@@ -1605,24 +2581,24 @@ public struct FfiConverterTypeRuntimeConfig: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeConfig {
         return
             try RuntimeConfig(
-                runtimeStorePath: FfiConverterString.read(from: &buf), 
-                nmpStorePath: FfiConverterOptionString.read(from: &buf), 
-                artifactCachePath: FfiConverterString.read(from: &buf), 
-                indexerRelays: FfiConverterSequenceString.read(from: &buf), 
-                appRelays: FfiConverterSequenceString.read(from: &buf), 
-                fallbackRelays: FfiConverterSequenceString.read(from: &buf), 
-                allowedLocalRelayHosts: FfiConverterSequenceString.read(from: &buf), 
-                maximumNmpRelays: FfiConverterUInt64.read(from: &buf), 
-                maximumBridgeWorkers: FfiConverterUInt64.read(from: &buf), 
-                maximumObservers: FfiConverterUInt64.read(from: &buf), 
-                maximumBoundaryEvents: FfiConverterUInt64.read(from: &buf), 
-                maximumConfigItems: FfiConverterUInt64.read(from: &buf), 
-                maximumConfigStringBytes: FfiConverterUInt64.read(from: &buf), 
-                maximumManifestBytes: FfiConverterUInt64.read(from: &buf), 
-                maximumArtifactFiles: FfiConverterUInt64.read(from: &buf), 
-                maximumArtifactFileBytes: FfiConverterUInt64.read(from: &buf), 
-                maximumArtifactTotalBytes: FfiConverterUInt64.read(from: &buf), 
-                maximumVerifiedReadBytes: FfiConverterUInt64.read(from: &buf), 
+                runtimeStorePath: FfiConverterString.read(from: &buf),
+                nmpStorePath: FfiConverterOptionString.read(from: &buf),
+                artifactCachePath: FfiConverterString.read(from: &buf),
+                indexerRelays: FfiConverterSequenceString.read(from: &buf),
+                appRelays: FfiConverterSequenceString.read(from: &buf),
+                fallbackRelays: FfiConverterSequenceString.read(from: &buf),
+                allowedLocalRelayHosts: FfiConverterSequenceString.read(from: &buf),
+                maximumNmpRelays: FfiConverterUInt64.read(from: &buf),
+                maximumBridgeWorkers: FfiConverterUInt64.read(from: &buf),
+                maximumObservers: FfiConverterUInt64.read(from: &buf),
+                maximumBoundaryEvents: FfiConverterUInt64.read(from: &buf),
+                maximumConfigItems: FfiConverterUInt64.read(from: &buf),
+                maximumConfigStringBytes: FfiConverterUInt64.read(from: &buf),
+                maximumManifestBytes: FfiConverterUInt64.read(from: &buf),
+                maximumArtifactFiles: FfiConverterUInt64.read(from: &buf),
+                maximumArtifactFileBytes: FfiConverterUInt64.read(from: &buf),
+                maximumArtifactTotalBytes: FfiConverterUInt64.read(from: &buf),
+                maximumVerifiedReadBytes: FfiConverterUInt64.read(from: &buf),
                 maximumBlobSources: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -1739,12 +2715,12 @@ public struct FfiConverterTypeRuntimeErrorSnapshot: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeErrorSnapshot {
         return
             try RuntimeErrorSnapshot(
-                code: FfiConverterString.read(from: &buf), 
-                author: FfiConverterOptionString.read(from: &buf), 
-                dTag: FfiConverterOptionString.read(from: &buf), 
-                aggregateHash: FfiConverterOptionString.read(from: &buf), 
-                sessionId: FfiConverterOptionUInt64.read(from: &buf), 
-                detail: FfiConverterString.read(from: &buf), 
+                code: FfiConverterString.read(from: &buf),
+                author: FfiConverterOptionString.read(from: &buf),
+                dTag: FfiConverterOptionString.read(from: &buf),
+                aggregateHash: FfiConverterOptionString.read(from: &buf),
+                sessionId: FfiConverterOptionUInt64.read(from: &buf),
+                detail: FfiConverterString.read(from: &buf),
                 occurredAtMillis: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -1837,10 +2813,10 @@ public struct FfiConverterTypeRuntimeEvent: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeEvent {
         return
             try RuntimeEvent(
-                sequence: FfiConverterUInt64.read(from: &buf), 
-                kind: FfiConverterString.read(from: &buf), 
-                detail: FfiConverterString.read(from: &buf), 
-                sessionId: FfiConverterOptionUInt64.read(from: &buf), 
+                sequence: FfiConverterUInt64.read(from: &buf),
+                kind: FfiConverterString.read(from: &buf),
+                detail: FfiConverterString.read(from: &buf),
+                sessionId: FfiConverterOptionUInt64.read(from: &buf),
                 responseJson: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -1931,10 +2907,10 @@ public struct FfiConverterTypeRuntimeObservationFrame: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeObservationFrame {
         return
             try RuntimeObservationFrame(
-                snapshot: FfiConverterTypeRuntimeSnapshot.read(from: &buf), 
-                events: FfiConverterSequenceTypeRuntimeEvent.read(from: &buf), 
-                oldestAvailableEvent: FfiConverterUInt64.read(from: &buf), 
-                newestAvailableEvent: FfiConverterUInt64.read(from: &buf), 
+                snapshot: FfiConverterTypeRuntimeSnapshot.read(from: &buf),
+                events: FfiConverterSequenceTypeRuntimeEvent.read(from: &buf),
+                oldestAvailableEvent: FfiConverterUInt64.read(from: &buf),
+                newestAvailableEvent: FfiConverterUInt64.read(from: &buf),
                 eventCursorWasStale: FfiConverterBool.read(from: &buf)
         )
     }
@@ -1961,6 +2937,100 @@ public func FfiConverterTypeRuntimeObservationFrame_lift(_ buf: RustBuffer) thro
 #endif
 public func FfiConverterTypeRuntimeObservationFrame_lower(_ value: RuntimeObservationFrame) -> RustBuffer {
     return FfiConverterTypeRuntimeObservationFrame.lower(value)
+}
+
+
+public struct RuntimeProviderUpdate {
+    public var accepted: Bool
+    public var attempted: UInt64
+    public var delivered: UInt64
+    public var refused: UInt64
+    public var refusal: RuntimeRefusal?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(accepted: Bool, attempted: UInt64, delivered: UInt64, refused: UInt64, refusal: RuntimeRefusal?) {
+        self.accepted = accepted
+        self.attempted = attempted
+        self.delivered = delivered
+        self.refused = refused
+        self.refusal = refusal
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeProviderUpdate: Sendable {}
+#endif
+
+
+extension RuntimeProviderUpdate: Equatable, Hashable {
+    public static func ==(lhs: RuntimeProviderUpdate, rhs: RuntimeProviderUpdate) -> Bool {
+        if lhs.accepted != rhs.accepted {
+            return false
+        }
+        if lhs.attempted != rhs.attempted {
+            return false
+        }
+        if lhs.delivered != rhs.delivered {
+            return false
+        }
+        if lhs.refused != rhs.refused {
+            return false
+        }
+        if lhs.refusal != rhs.refusal {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(accepted)
+        hasher.combine(attempted)
+        hasher.combine(delivered)
+        hasher.combine(refused)
+        hasher.combine(refusal)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeProviderUpdate: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeProviderUpdate {
+        return
+            try RuntimeProviderUpdate(
+                accepted: FfiConverterBool.read(from: &buf),
+                attempted: FfiConverterUInt64.read(from: &buf),
+                delivered: FfiConverterUInt64.read(from: &buf),
+                refused: FfiConverterUInt64.read(from: &buf),
+                refusal: FfiConverterOptionTypeRuntimeRefusal.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeProviderUpdate, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.accepted, into: &buf)
+        FfiConverterUInt64.write(value.attempted, into: &buf)
+        FfiConverterUInt64.write(value.delivered, into: &buf)
+        FfiConverterUInt64.write(value.refused, into: &buf)
+        FfiConverterOptionTypeRuntimeRefusal.write(value.refusal, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeProviderUpdate_lift(_ buf: RustBuffer) throws -> RuntimeProviderUpdate {
+    return try FfiConverterTypeRuntimeProviderUpdate.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeProviderUpdate_lower(_ value: RuntimeProviderUpdate) -> RustBuffer {
+    return FfiConverterTypeRuntimeProviderUpdate.lower(value)
 }
 
 
@@ -2013,8 +3083,8 @@ public struct FfiConverterTypeRuntimeReceiptSnapshot: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeReceiptSnapshot {
         return
             try RuntimeReceiptSnapshot(
-                receiptId: FfiConverterString.read(from: &buf), 
-                delivery: FfiConverterString.read(from: &buf), 
+                receiptId: FfiConverterString.read(from: &buf),
+                delivery: FfiConverterString.read(from: &buf),
                 latestStateJson: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -2091,8 +3161,8 @@ public struct FfiConverterTypeRuntimeRefusal: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRefusal {
         return
             try RuntimeRefusal(
-                code: FfiConverterString.read(from: &buf), 
-                detail: FfiConverterString.read(from: &buf), 
+                code: FfiConverterString.read(from: &buf),
+                detail: FfiConverterString.read(from: &buf),
                 occurredAtMillis: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -2135,7 +3205,7 @@ public struct RuntimeSessionSnapshot {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: UInt64, author: String, dTag: String, aggregateHash: String, profile: RuntimeExecutionProfile, state: String, 
+    public init(id: UInt64, author: String, dTag: String, aggregateHash: String, profile: RuntimeExecutionProfile, state: String,
         /**
          * Exact kernel-negotiated domain set used by both native injection and
          * the NAP-SHELL `shell.init` response.
@@ -2201,12 +3271,12 @@ public struct FfiConverterTypeRuntimeSessionSnapshot: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeSessionSnapshot {
         return
             try RuntimeSessionSnapshot(
-                id: FfiConverterUInt64.read(from: &buf), 
-                author: FfiConverterString.read(from: &buf), 
-                dTag: FfiConverterString.read(from: &buf), 
-                aggregateHash: FfiConverterString.read(from: &buf), 
-                profile: FfiConverterTypeRuntimeExecutionProfile.read(from: &buf), 
-                state: FfiConverterString.read(from: &buf), 
+                id: FfiConverterUInt64.read(from: &buf),
+                author: FfiConverterString.read(from: &buf),
+                dTag: FfiConverterString.read(from: &buf),
+                aggregateHash: FfiConverterString.read(from: &buf),
+                profile: FfiConverterTypeRuntimeExecutionProfile.read(from: &buf),
+                state: FfiConverterString.read(from: &buf),
                 domains: FfiConverterSequenceString.read(from: &buf)
         )
     }
@@ -2244,6 +3314,7 @@ public struct RuntimeSnapshot {
     public var sessions: [RuntimeSessionSnapshot]
     public var bindings: [RuntimeBindingSnapshot]
     public var receipts: [RuntimeReceiptSnapshot]
+    public var workspaces: [RuntimeWorkspaceDefinition]
     public var recentActivity: [RuntimeActivitySnapshot]
     public var recentErrors: [RuntimeErrorSnapshot]
     public var boundaryRefusals: [RuntimeRefusal]
@@ -2253,12 +3324,13 @@ public struct RuntimeSnapshot {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(revision: UInt64, closed: Bool, sessions: [RuntimeSessionSnapshot], bindings: [RuntimeBindingSnapshot], receipts: [RuntimeReceiptSnapshot], recentActivity: [RuntimeActivitySnapshot], recentErrors: [RuntimeErrorSnapshot], boundaryRefusals: [RuntimeRefusal], activeResources: UInt64, resourceHighWatermark: UInt64, resourceRefusalCount: UInt64) {
+    public init(revision: UInt64, closed: Bool, sessions: [RuntimeSessionSnapshot], bindings: [RuntimeBindingSnapshot], receipts: [RuntimeReceiptSnapshot], workspaces: [RuntimeWorkspaceDefinition], recentActivity: [RuntimeActivitySnapshot], recentErrors: [RuntimeErrorSnapshot], boundaryRefusals: [RuntimeRefusal], activeResources: UInt64, resourceHighWatermark: UInt64, resourceRefusalCount: UInt64) {
         self.revision = revision
         self.closed = closed
         self.sessions = sessions
         self.bindings = bindings
         self.receipts = receipts
+        self.workspaces = workspaces
         self.recentActivity = recentActivity
         self.recentErrors = recentErrors
         self.boundaryRefusals = boundaryRefusals
@@ -2290,6 +3362,9 @@ extension RuntimeSnapshot: Equatable, Hashable {
         if lhs.receipts != rhs.receipts {
             return false
         }
+        if lhs.workspaces != rhs.workspaces {
+            return false
+        }
         if lhs.recentActivity != rhs.recentActivity {
             return false
         }
@@ -2317,6 +3392,7 @@ extension RuntimeSnapshot: Equatable, Hashable {
         hasher.combine(sessions)
         hasher.combine(bindings)
         hasher.combine(receipts)
+        hasher.combine(workspaces)
         hasher.combine(recentActivity)
         hasher.combine(recentErrors)
         hasher.combine(boundaryRefusals)
@@ -2335,16 +3411,17 @@ public struct FfiConverterTypeRuntimeSnapshot: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeSnapshot {
         return
             try RuntimeSnapshot(
-                revision: FfiConverterUInt64.read(from: &buf), 
-                closed: FfiConverterBool.read(from: &buf), 
-                sessions: FfiConverterSequenceTypeRuntimeSessionSnapshot.read(from: &buf), 
-                bindings: FfiConverterSequenceTypeRuntimeBindingSnapshot.read(from: &buf), 
-                receipts: FfiConverterSequenceTypeRuntimeReceiptSnapshot.read(from: &buf), 
-                recentActivity: FfiConverterSequenceTypeRuntimeActivitySnapshot.read(from: &buf), 
-                recentErrors: FfiConverterSequenceTypeRuntimeErrorSnapshot.read(from: &buf), 
-                boundaryRefusals: FfiConverterSequenceTypeRuntimeRefusal.read(from: &buf), 
-                activeResources: FfiConverterUInt64.read(from: &buf), 
-                resourceHighWatermark: FfiConverterUInt64.read(from: &buf), 
+                revision: FfiConverterUInt64.read(from: &buf),
+                closed: FfiConverterBool.read(from: &buf),
+                sessions: FfiConverterSequenceTypeRuntimeSessionSnapshot.read(from: &buf),
+                bindings: FfiConverterSequenceTypeRuntimeBindingSnapshot.read(from: &buf),
+                receipts: FfiConverterSequenceTypeRuntimeReceiptSnapshot.read(from: &buf),
+                workspaces: FfiConverterSequenceTypeRuntimeWorkspaceDefinition.read(from: &buf),
+                recentActivity: FfiConverterSequenceTypeRuntimeActivitySnapshot.read(from: &buf),
+                recentErrors: FfiConverterSequenceTypeRuntimeErrorSnapshot.read(from: &buf),
+                boundaryRefusals: FfiConverterSequenceTypeRuntimeRefusal.read(from: &buf),
+                activeResources: FfiConverterUInt64.read(from: &buf),
+                resourceHighWatermark: FfiConverterUInt64.read(from: &buf),
                 resourceRefusalCount: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -2355,6 +3432,7 @@ public struct FfiConverterTypeRuntimeSnapshot: FfiConverterRustBuffer {
         FfiConverterSequenceTypeRuntimeSessionSnapshot.write(value.sessions, into: &buf)
         FfiConverterSequenceTypeRuntimeBindingSnapshot.write(value.bindings, into: &buf)
         FfiConverterSequenceTypeRuntimeReceiptSnapshot.write(value.receipts, into: &buf)
+        FfiConverterSequenceTypeRuntimeWorkspaceDefinition.write(value.workspaces, into: &buf)
         FfiConverterSequenceTypeRuntimeActivitySnapshot.write(value.recentActivity, into: &buf)
         FfiConverterSequenceTypeRuntimeErrorSnapshot.write(value.recentErrors, into: &buf)
         FfiConverterSequenceTypeRuntimeRefusal.write(value.boundaryRefusals, into: &buf)
@@ -2379,11 +3457,457 @@ public func FfiConverterTypeRuntimeSnapshot_lower(_ value: RuntimeSnapshot) -> R
     return FfiConverterTypeRuntimeSnapshot.lower(value)
 }
 
+
+public struct RuntimeWorkspaceDefinition {
+    public var schemaVersion: UInt16
+    public var workspaceId: String
+    public var axis: RuntimeWorkspaceAxis
+    public var slots: [RuntimeWorkspaceSlot]
+    public var focusedSlotId: String?
+    public var activityDrawerVisible: Bool
+    public var preferencesJson: String
+    public var retainedReceiptIds: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(schemaVersion: UInt16, workspaceId: String, axis: RuntimeWorkspaceAxis, slots: [RuntimeWorkspaceSlot], focusedSlotId: String?, activityDrawerVisible: Bool, preferencesJson: String, retainedReceiptIds: [String]) {
+        self.schemaVersion = schemaVersion
+        self.workspaceId = workspaceId
+        self.axis = axis
+        self.slots = slots
+        self.focusedSlotId = focusedSlotId
+        self.activityDrawerVisible = activityDrawerVisible
+        self.preferencesJson = preferencesJson
+        self.retainedReceiptIds = retainedReceiptIds
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeWorkspaceDefinition: Sendable {}
+#endif
+
+
+extension RuntimeWorkspaceDefinition: Equatable, Hashable {
+    public static func ==(lhs: RuntimeWorkspaceDefinition, rhs: RuntimeWorkspaceDefinition) -> Bool {
+        if lhs.schemaVersion != rhs.schemaVersion {
+            return false
+        }
+        if lhs.workspaceId != rhs.workspaceId {
+            return false
+        }
+        if lhs.axis != rhs.axis {
+            return false
+        }
+        if lhs.slots != rhs.slots {
+            return false
+        }
+        if lhs.focusedSlotId != rhs.focusedSlotId {
+            return false
+        }
+        if lhs.activityDrawerVisible != rhs.activityDrawerVisible {
+            return false
+        }
+        if lhs.preferencesJson != rhs.preferencesJson {
+            return false
+        }
+        if lhs.retainedReceiptIds != rhs.retainedReceiptIds {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(schemaVersion)
+        hasher.combine(workspaceId)
+        hasher.combine(axis)
+        hasher.combine(slots)
+        hasher.combine(focusedSlotId)
+        hasher.combine(activityDrawerVisible)
+        hasher.combine(preferencesJson)
+        hasher.combine(retainedReceiptIds)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeWorkspaceDefinition: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeWorkspaceDefinition {
+        return
+            try RuntimeWorkspaceDefinition(
+                schemaVersion: FfiConverterUInt16.read(from: &buf),
+                workspaceId: FfiConverterString.read(from: &buf),
+                axis: FfiConverterTypeRuntimeWorkspaceAxis.read(from: &buf),
+                slots: FfiConverterSequenceTypeRuntimeWorkspaceSlot.read(from: &buf),
+                focusedSlotId: FfiConverterOptionString.read(from: &buf),
+                activityDrawerVisible: FfiConverterBool.read(from: &buf),
+                preferencesJson: FfiConverterString.read(from: &buf),
+                retainedReceiptIds: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeWorkspaceDefinition, into buf: inout [UInt8]) {
+        FfiConverterUInt16.write(value.schemaVersion, into: &buf)
+        FfiConverterString.write(value.workspaceId, into: &buf)
+        FfiConverterTypeRuntimeWorkspaceAxis.write(value.axis, into: &buf)
+        FfiConverterSequenceTypeRuntimeWorkspaceSlot.write(value.slots, into: &buf)
+        FfiConverterOptionString.write(value.focusedSlotId, into: &buf)
+        FfiConverterBool.write(value.activityDrawerVisible, into: &buf)
+        FfiConverterString.write(value.preferencesJson, into: &buf)
+        FfiConverterSequenceString.write(value.retainedReceiptIds, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceDefinition_lift(_ buf: RustBuffer) throws -> RuntimeWorkspaceDefinition {
+    return try FfiConverterTypeRuntimeWorkspaceDefinition.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceDefinition_lower(_ value: RuntimeWorkspaceDefinition) -> RustBuffer {
+    return FfiConverterTypeRuntimeWorkspaceDefinition.lower(value)
+}
+
+
+public struct RuntimeWorkspaceRestore {
+    public var accepted: Bool
+    public var workspaces: [RuntimeWorkspaceDefinition]
+    public var refusal: RuntimeRefusal?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(accepted: Bool, workspaces: [RuntimeWorkspaceDefinition], refusal: RuntimeRefusal?) {
+        self.accepted = accepted
+        self.workspaces = workspaces
+        self.refusal = refusal
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeWorkspaceRestore: Sendable {}
+#endif
+
+
+extension RuntimeWorkspaceRestore: Equatable, Hashable {
+    public static func ==(lhs: RuntimeWorkspaceRestore, rhs: RuntimeWorkspaceRestore) -> Bool {
+        if lhs.accepted != rhs.accepted {
+            return false
+        }
+        if lhs.workspaces != rhs.workspaces {
+            return false
+        }
+        if lhs.refusal != rhs.refusal {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(accepted)
+        hasher.combine(workspaces)
+        hasher.combine(refusal)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeWorkspaceRestore: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeWorkspaceRestore {
+        return
+            try RuntimeWorkspaceRestore(
+                accepted: FfiConverterBool.read(from: &buf),
+                workspaces: FfiConverterSequenceTypeRuntimeWorkspaceDefinition.read(from: &buf),
+                refusal: FfiConverterOptionTypeRuntimeRefusal.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeWorkspaceRestore, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.accepted, into: &buf)
+        FfiConverterSequenceTypeRuntimeWorkspaceDefinition.write(value.workspaces, into: &buf)
+        FfiConverterOptionTypeRuntimeRefusal.write(value.refusal, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceRestore_lift(_ buf: RustBuffer) throws -> RuntimeWorkspaceRestore {
+    return try FfiConverterTypeRuntimeWorkspaceRestore.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceRestore_lower(_ value: RuntimeWorkspaceRestore) -> RustBuffer {
+    return FfiConverterTypeRuntimeWorkspaceRestore.lower(value)
+}
+
+
+/**
+ * One coarse native workspace slot. Dynamic binding and navigation values
+ * remain bounded JSON objects because their schemas belong to the selected
+ * handler, while identity, role, renderer, visibility, and layout constraints
+ * are typed at this boundary.
+ */
+public struct RuntimeWorkspaceSlot {
+    public var slotId: String
+    public var role: RuntimeWorkspaceRole
+    public var renderer: RuntimeWorkspaceRenderer
+    public var handlerId: String
+    public var manifestAuthor: String?
+    public var dTag: String?
+    public var aggregateHash: String?
+    public var bindingParametersJson: String
+    public var navigationJson: String
+    public var visible: Bool
+    public var order: UInt16
+    public var sizePoints: UInt16
+    public var minimumPoints: UInt16
+    public var maximumPoints: UInt16
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(slotId: String, role: RuntimeWorkspaceRole, renderer: RuntimeWorkspaceRenderer, handlerId: String, manifestAuthor: String?, dTag: String?, aggregateHash: String?, bindingParametersJson: String, navigationJson: String, visible: Bool, order: UInt16, sizePoints: UInt16, minimumPoints: UInt16, maximumPoints: UInt16) {
+        self.slotId = slotId
+        self.role = role
+        self.renderer = renderer
+        self.handlerId = handlerId
+        self.manifestAuthor = manifestAuthor
+        self.dTag = dTag
+        self.aggregateHash = aggregateHash
+        self.bindingParametersJson = bindingParametersJson
+        self.navigationJson = navigationJson
+        self.visible = visible
+        self.order = order
+        self.sizePoints = sizePoints
+        self.minimumPoints = minimumPoints
+        self.maximumPoints = maximumPoints
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeWorkspaceSlot: Sendable {}
+#endif
+
+
+extension RuntimeWorkspaceSlot: Equatable, Hashable {
+    public static func ==(lhs: RuntimeWorkspaceSlot, rhs: RuntimeWorkspaceSlot) -> Bool {
+        if lhs.slotId != rhs.slotId {
+            return false
+        }
+        if lhs.role != rhs.role {
+            return false
+        }
+        if lhs.renderer != rhs.renderer {
+            return false
+        }
+        if lhs.handlerId != rhs.handlerId {
+            return false
+        }
+        if lhs.manifestAuthor != rhs.manifestAuthor {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
+            return false
+        }
+        if lhs.aggregateHash != rhs.aggregateHash {
+            return false
+        }
+        if lhs.bindingParametersJson != rhs.bindingParametersJson {
+            return false
+        }
+        if lhs.navigationJson != rhs.navigationJson {
+            return false
+        }
+        if lhs.visible != rhs.visible {
+            return false
+        }
+        if lhs.order != rhs.order {
+            return false
+        }
+        if lhs.sizePoints != rhs.sizePoints {
+            return false
+        }
+        if lhs.minimumPoints != rhs.minimumPoints {
+            return false
+        }
+        if lhs.maximumPoints != rhs.maximumPoints {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(slotId)
+        hasher.combine(role)
+        hasher.combine(renderer)
+        hasher.combine(handlerId)
+        hasher.combine(manifestAuthor)
+        hasher.combine(dTag)
+        hasher.combine(aggregateHash)
+        hasher.combine(bindingParametersJson)
+        hasher.combine(navigationJson)
+        hasher.combine(visible)
+        hasher.combine(order)
+        hasher.combine(sizePoints)
+        hasher.combine(minimumPoints)
+        hasher.combine(maximumPoints)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeWorkspaceSlot: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeWorkspaceSlot {
+        return
+            try RuntimeWorkspaceSlot(
+                slotId: FfiConverterString.read(from: &buf),
+                role: FfiConverterTypeRuntimeWorkspaceRole.read(from: &buf),
+                renderer: FfiConverterTypeRuntimeWorkspaceRenderer.read(from: &buf),
+                handlerId: FfiConverterString.read(from: &buf),
+                manifestAuthor: FfiConverterOptionString.read(from: &buf),
+                dTag: FfiConverterOptionString.read(from: &buf),
+                aggregateHash: FfiConverterOptionString.read(from: &buf),
+                bindingParametersJson: FfiConverterString.read(from: &buf),
+                navigationJson: FfiConverterString.read(from: &buf),
+                visible: FfiConverterBool.read(from: &buf),
+                order: FfiConverterUInt16.read(from: &buf),
+                sizePoints: FfiConverterUInt16.read(from: &buf),
+                minimumPoints: FfiConverterUInt16.read(from: &buf),
+                maximumPoints: FfiConverterUInt16.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeWorkspaceSlot, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.slotId, into: &buf)
+        FfiConverterTypeRuntimeWorkspaceRole.write(value.role, into: &buf)
+        FfiConverterTypeRuntimeWorkspaceRenderer.write(value.renderer, into: &buf)
+        FfiConverterString.write(value.handlerId, into: &buf)
+        FfiConverterOptionString.write(value.manifestAuthor, into: &buf)
+        FfiConverterOptionString.write(value.dTag, into: &buf)
+        FfiConverterOptionString.write(value.aggregateHash, into: &buf)
+        FfiConverterString.write(value.bindingParametersJson, into: &buf)
+        FfiConverterString.write(value.navigationJson, into: &buf)
+        FfiConverterBool.write(value.visible, into: &buf)
+        FfiConverterUInt16.write(value.order, into: &buf)
+        FfiConverterUInt16.write(value.sizePoints, into: &buf)
+        FfiConverterUInt16.write(value.minimumPoints, into: &buf)
+        FfiConverterUInt16.write(value.maximumPoints, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceSlot_lift(_ buf: RustBuffer) throws -> RuntimeWorkspaceSlot {
+    return try FfiConverterTypeRuntimeWorkspaceSlot.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceSlot_lower(_ value: RuntimeWorkspaceSlot) -> RustBuffer {
+    return FfiConverterTypeRuntimeWorkspaceSlot.lower(value)
+}
+
+
+public struct RuntimeWorkspaceUpdate {
+    public var accepted: Bool
+    public var workspace: RuntimeWorkspaceDefinition?
+    public var refusal: RuntimeRefusal?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(accepted: Bool, workspace: RuntimeWorkspaceDefinition?, refusal: RuntimeRefusal?) {
+        self.accepted = accepted
+        self.workspace = workspace
+        self.refusal = refusal
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeWorkspaceUpdate: Sendable {}
+#endif
+
+
+extension RuntimeWorkspaceUpdate: Equatable, Hashable {
+    public static func ==(lhs: RuntimeWorkspaceUpdate, rhs: RuntimeWorkspaceUpdate) -> Bool {
+        if lhs.accepted != rhs.accepted {
+            return false
+        }
+        if lhs.workspace != rhs.workspace {
+            return false
+        }
+        if lhs.refusal != rhs.refusal {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(accepted)
+        hasher.combine(workspace)
+        hasher.combine(refusal)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeWorkspaceUpdate: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeWorkspaceUpdate {
+        return
+            try RuntimeWorkspaceUpdate(
+                accepted: FfiConverterBool.read(from: &buf),
+                workspace: FfiConverterOptionTypeRuntimeWorkspaceDefinition.read(from: &buf),
+                refusal: FfiConverterOptionTypeRuntimeRefusal.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeWorkspaceUpdate, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.accepted, into: &buf)
+        FfiConverterOptionTypeRuntimeWorkspaceDefinition.write(value.workspace, into: &buf)
+        FfiConverterOptionTypeRuntimeRefusal.write(value.refusal, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceUpdate_lift(_ buf: RustBuffer) throws -> RuntimeWorkspaceUpdate {
+    return try FfiConverterTypeRuntimeWorkspaceUpdate.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceUpdate_lower(_ value: RuntimeWorkspaceUpdate) -> RustBuffer {
+    return FfiConverterTypeRuntimeWorkspaceUpdate.lower(value)
+}
+
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum ArtifactCoordinate {
-    
+
     case snapshot(eventId: String, author: String
     )
     case root(author: String
@@ -2406,40 +3930,40 @@ public struct FfiConverterTypeArtifactCoordinate: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArtifactCoordinate {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .snapshot(eventId: try FfiConverterString.read(from: &buf), author: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 2: return .root(author: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 3: return .named(author: try FfiConverterString.read(from: &buf), dTag: try FfiConverterString.read(from: &buf)
         )
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: ArtifactCoordinate, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case let .snapshot(eventId,author):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(eventId, into: &buf)
             FfiConverterString.write(author, into: &buf)
-            
-        
+
+
         case let .root(author):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(author, into: &buf)
-            
-        
+
+
         case let .named(author,dTag):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(author, into: &buf)
             FfiConverterString.write(dTag, into: &buf)
-            
+
         }
     }
 }
@@ -2471,7 +3995,7 @@ extension ArtifactCoordinate: Equatable, Hashable {}
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum ArtifactExecutionMode {
-    
+
     case singleFile
     case externalAssets
 }
@@ -2490,26 +4014,26 @@ public struct FfiConverterTypeArtifactExecutionMode: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArtifactExecutionMode {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .singleFile
-        
+
         case 2: return .externalAssets
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: ArtifactExecutionMode, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case .singleFile:
             writeInt(&buf, Int32(1))
-        
-        
+
+
         case .externalAssets:
             writeInt(&buf, Int32(2))
-        
+
         }
     }
 }
@@ -2541,7 +4065,7 @@ extension ArtifactExecutionMode: Equatable, Hashable {}
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum ArtifactFetchResponse {
-    
+
     case body(sourceUrl: String, httpStatus: UInt16, bytes: Data
     )
     case redirect(sourceUrl: String, httpStatus: UInt16, location: String
@@ -2564,42 +4088,42 @@ public struct FfiConverterTypeArtifactFetchResponse: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArtifactFetchResponse {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .body(sourceUrl: try FfiConverterString.read(from: &buf), httpStatus: try FfiConverterUInt16.read(from: &buf), bytes: try FfiConverterData.read(from: &buf)
         )
-        
+
         case 2: return .redirect(sourceUrl: try FfiConverterString.read(from: &buf), httpStatus: try FfiConverterUInt16.read(from: &buf), location: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 3: return .refused(reason: try FfiConverterString.read(from: &buf)
         )
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: ArtifactFetchResponse, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case let .body(sourceUrl,httpStatus,bytes):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(sourceUrl, into: &buf)
             FfiConverterUInt16.write(httpStatus, into: &buf)
             FfiConverterData.write(bytes, into: &buf)
-            
-        
+
+
         case let .redirect(sourceUrl,httpStatus,location):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(sourceUrl, into: &buf)
             FfiConverterUInt16.write(httpStatus, into: &buf)
             FfiConverterString.write(location, into: &buf)
-            
-        
+
+
         case let .refused(reason):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(reason, into: &buf)
-            
+
         }
     }
 }
@@ -2630,8 +4154,273 @@ extension ArtifactFetchResponse: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
+public enum NativeIncActionEnqueueResult {
+
+    case accepted
+    case backpressure
+    case closed
+}
+
+
+#if compiler(>=6)
+extension NativeIncActionEnqueueResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeIncActionEnqueueResult: FfiConverterRustBuffer {
+    typealias SwiftType = NativeIncActionEnqueueResult
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeIncActionEnqueueResult {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .accepted
+
+        case 2: return .backpressure
+
+        case 3: return .closed
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: NativeIncActionEnqueueResult, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .accepted:
+            writeInt(&buf, Int32(1))
+
+
+        case .backpressure:
+            writeInt(&buf, Int32(2))
+
+
+        case .closed:
+            writeInt(&buf, Int32(3))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeIncActionEnqueueResult_lift(_ buf: RustBuffer) throws -> NativeIncActionEnqueueResult {
+    return try FfiConverterTypeNativeIncActionEnqueueResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeIncActionEnqueueResult_lower(_ value: NativeIncActionEnqueueResult) -> RustBuffer {
+    return FfiConverterTypeNativeIncActionEnqueueResult.lower(value)
+}
+
+
+extension NativeIncActionEnqueueResult: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum NativeSettingsOpenResult {
+
+    case accepted
+    case saturated
+    case unavailable
+    case closed
+}
+
+
+#if compiler(>=6)
+extension NativeSettingsOpenResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeSettingsOpenResult: FfiConverterRustBuffer {
+    typealias SwiftType = NativeSettingsOpenResult
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeSettingsOpenResult {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .accepted
+
+        case 2: return .saturated
+
+        case 3: return .unavailable
+
+        case 4: return .closed
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: NativeSettingsOpenResult, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .accepted:
+            writeInt(&buf, Int32(1))
+
+
+        case .saturated:
+            writeInt(&buf, Int32(2))
+
+
+        case .unavailable:
+            writeInt(&buf, Int32(3))
+
+
+        case .closed:
+            writeInt(&buf, Int32(4))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeSettingsOpenResult_lift(_ buf: RustBuffer) throws -> NativeSettingsOpenResult {
+    return try FfiConverterTypeNativeSettingsOpenResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeSettingsOpenResult_lower(_ value: NativeSettingsOpenResult) -> RustBuffer {
+    return FfiConverterTypeNativeSettingsOpenResult.lower(value)
+}
+
+
+extension NativeSettingsOpenResult: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeAccountFailure {
+
+    case closed
+    case invalidSecretKey
+    case capacity(limit: UInt64
+    )
+    case instanceExhausted
+    case staleInstallation
+    case failed(reason: String
+    )
+}
+
+
+#if compiler(>=6)
+extension RuntimeAccountFailure: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeAccountFailure: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeAccountFailure
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeAccountFailure {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .closed
+
+        case 2: return .invalidSecretKey
+
+        case 3: return .capacity(limit: try FfiConverterUInt64.read(from: &buf)
+        )
+
+        case 4: return .instanceExhausted
+
+        case 5: return .staleInstallation
+
+        case 6: return .failed(reason: try FfiConverterString.read(from: &buf)
+        )
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeAccountFailure, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .closed:
+            writeInt(&buf, Int32(1))
+
+
+        case .invalidSecretKey:
+            writeInt(&buf, Int32(2))
+
+
+        case let .capacity(limit):
+            writeInt(&buf, Int32(3))
+            FfiConverterUInt64.write(limit, into: &buf)
+
+
+        case .instanceExhausted:
+            writeInt(&buf, Int32(4))
+
+
+        case .staleInstallation:
+            writeInt(&buf, Int32(5))
+
+
+        case let .failed(reason):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(reason, into: &buf)
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeAccountFailure_lift(_ buf: RustBuffer) throws -> RuntimeAccountFailure {
+    return try FfiConverterTypeRuntimeAccountFailure.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeAccountFailure_lower(_ value: RuntimeAccountFailure) -> RustBuffer {
+    return FfiConverterTypeRuntimeAccountFailure.lower(value)
+}
+
+
+extension RuntimeAccountFailure: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 public enum RuntimeExecutionProfile {
-    
+
     case legacy
     case renderer
     case hybrid
@@ -2651,32 +4440,32 @@ public struct FfiConverterTypeRuntimeExecutionProfile: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeExecutionProfile {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .legacy
-        
+
         case 2: return .renderer
-        
+
         case 3: return .hybrid
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: RuntimeExecutionProfile, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case .legacy:
             writeInt(&buf, Int32(1))
-        
-        
+
+
         case .renderer:
             writeInt(&buf, Int32(2))
-        
-        
+
+
         case .hybrid:
             writeInt(&buf, Int32(3))
-        
+
         }
     }
 }
@@ -2708,7 +4497,7 @@ extension RuntimeExecutionProfile: Equatable, Hashable {}
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum RuntimeGrantDecision {
-    
+
     case denied
     case askEveryTime
     case allowSession
@@ -2729,38 +4518,38 @@ public struct FfiConverterTypeRuntimeGrantDecision: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeGrantDecision {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .denied
-        
+
         case 2: return .askEveryTime
-        
+
         case 3: return .allowSession
-        
+
         case 4: return .allowExactBuild
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: RuntimeGrantDecision, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case .denied:
             writeInt(&buf, Int32(1))
-        
-        
+
+
         case .askEveryTime:
             writeInt(&buf, Int32(2))
-        
-        
+
+
         case .allowSession:
             writeInt(&buf, Int32(3))
-        
-        
+
+
         case .allowExactBuild:
             writeInt(&buf, Int32(4))
-        
+
         }
     }
 }
@@ -2791,8 +4580,8 @@ extension RuntimeGrantDecision: Equatable, Hashable {}
 
 public enum RuntimeOpenError: Swift.Error {
 
-    
-    
+
+
     case InvalidConfig(detail: String
     )
     case RuntimeStore(detail: String
@@ -2816,9 +4605,9 @@ public struct FfiConverterTypeRuntimeOpenError: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
 
-        
 
-        
+
+
         case 1: return .InvalidConfig(
             detail: try FfiConverterString.read(from: &buf)
             )
@@ -2842,34 +4631,34 @@ public struct FfiConverterTypeRuntimeOpenError: FfiConverterRustBuffer {
     public static func write(_ value: RuntimeOpenError, into buf: inout [UInt8]) {
         switch value {
 
-        
 
-        
-        
+
+
+
         case let .InvalidConfig(detail):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(detail, into: &buf)
-            
-        
+
+
         case let .RuntimeStore(detail):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(detail, into: &buf)
-            
-        
+
+
         case let .ArtifactCache(detail):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(detail, into: &buf)
-            
-        
+
+
         case let .Nmp(detail):
             writeInt(&buf, Int32(4))
             FfiConverterString.write(detail, into: &buf)
-            
-        
+
+
         case let .Runtime(detail):
             writeInt(&buf, Int32(5))
             FfiConverterString.write(detail, into: &buf)
-            
+
         }
     }
 }
@@ -2908,7 +4697,7 @@ extension RuntimeOpenError: Foundation.LocalizedError {
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum RuntimeSensitivity {
-    
+
     case ordinary
     case sensitive
 }
@@ -2927,26 +4716,26 @@ public struct FfiConverterTypeRuntimeSensitivity: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeSensitivity {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .ordinary
-        
+
         case 2: return .sensitive
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: RuntimeSensitivity, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case .ordinary:
             writeInt(&buf, Int32(1))
-        
-        
+
+
         case .sensitive:
             writeInt(&buf, Int32(2))
-        
+
         }
     }
 }
@@ -2977,8 +4766,267 @@ extension RuntimeSensitivity: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
+public enum RuntimeWorkspaceAxis {
+
+    case horizontal
+    case vertical
+}
+
+
+#if compiler(>=6)
+extension RuntimeWorkspaceAxis: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeWorkspaceAxis: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeWorkspaceAxis
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeWorkspaceAxis {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .horizontal
+
+        case 2: return .vertical
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeWorkspaceAxis, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .horizontal:
+            writeInt(&buf, Int32(1))
+
+
+        case .vertical:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceAxis_lift(_ buf: RustBuffer) throws -> RuntimeWorkspaceAxis {
+    return try FfiConverterTypeRuntimeWorkspaceAxis.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceAxis_lower(_ value: RuntimeWorkspaceAxis) -> RustBuffer {
+    return FfiConverterTypeRuntimeWorkspaceAxis.lower(value)
+}
+
+
+extension RuntimeWorkspaceAxis: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeWorkspaceRenderer {
+
+    case native
+    case legacyNapplet
+    case surface
+    case unavailable
+}
+
+
+#if compiler(>=6)
+extension RuntimeWorkspaceRenderer: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeWorkspaceRenderer: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeWorkspaceRenderer
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeWorkspaceRenderer {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .native
+
+        case 2: return .legacyNapplet
+
+        case 3: return .surface
+
+        case 4: return .unavailable
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeWorkspaceRenderer, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .native:
+            writeInt(&buf, Int32(1))
+
+
+        case .legacyNapplet:
+            writeInt(&buf, Int32(2))
+
+
+        case .surface:
+            writeInt(&buf, Int32(3))
+
+
+        case .unavailable:
+            writeInt(&buf, Int32(4))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceRenderer_lift(_ buf: RustBuffer) throws -> RuntimeWorkspaceRenderer {
+    return try FfiConverterTypeRuntimeWorkspaceRenderer.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceRenderer_lower(_ value: RuntimeWorkspaceRenderer) -> RustBuffer {
+    return FfiConverterTypeRuntimeWorkspaceRenderer.lower(value)
+}
+
+
+extension RuntimeWorkspaceRenderer: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeWorkspaceRole {
+
+    case feed
+    case detail
+    case profile
+    case thread
+    case composer
+    case mediaPlayer
+    case toolWindow
+}
+
+
+#if compiler(>=6)
+extension RuntimeWorkspaceRole: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeWorkspaceRole: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeWorkspaceRole
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeWorkspaceRole {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .feed
+
+        case 2: return .detail
+
+        case 3: return .profile
+
+        case 4: return .thread
+
+        case 5: return .composer
+
+        case 6: return .mediaPlayer
+
+        case 7: return .toolWindow
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeWorkspaceRole, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .feed:
+            writeInt(&buf, Int32(1))
+
+
+        case .detail:
+            writeInt(&buf, Int32(2))
+
+
+        case .profile:
+            writeInt(&buf, Int32(3))
+
+
+        case .thread:
+            writeInt(&buf, Int32(4))
+
+
+        case .composer:
+            writeInt(&buf, Int32(5))
+
+
+        case .mediaPlayer:
+            writeInt(&buf, Int32(6))
+
+
+        case .toolWindow:
+            writeInt(&buf, Int32(7))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceRole_lift(_ buf: RustBuffer) throws -> RuntimeWorkspaceRole {
+    return try FfiConverterTypeRuntimeWorkspaceRole.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeWorkspaceRole_lower(_ value: RuntimeWorkspaceRole) -> RustBuffer {
+    return FfiConverterTypeRuntimeWorkspaceRole.lower(value)
+}
+
+
+extension RuntimeWorkspaceRole: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 public enum VerifiedRead {
-    
+
     case bytes(bytes: Data, mediaType: String, sha256: String
     )
     case refused(refusal: RuntimeRefusal
@@ -2999,32 +5047,32 @@ public struct FfiConverterTypeVerifiedRead: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VerifiedRead {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .bytes(bytes: try FfiConverterData.read(from: &buf), mediaType: try FfiConverterString.read(from: &buf), sha256: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 2: return .refused(refusal: try FfiConverterTypeRuntimeRefusal.read(from: &buf)
         )
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: VerifiedRead, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case let .bytes(bytes,mediaType,sha256):
             writeInt(&buf, Int32(1))
             FfiConverterData.write(bytes, into: &buf)
             FfiConverterString.write(mediaType, into: &buf)
             FfiConverterString.write(sha256, into: &buf)
-            
-        
+
+
         case let .refused(refusal):
             writeInt(&buf, Int32(2))
             FfiConverterTypeRuntimeRefusal.write(refusal, into: &buf)
-            
+
         }
     }
 }
@@ -3056,9 +5104,9 @@ extension VerifiedRead: Equatable, Hashable {}
 
 
 public protocol ArtifactSource: AnyObject, Sendable {
-    
+
     func fetch(request: ArtifactFetchRequest)  -> ArtifactFetchResponse
-    
+
 }
 
 
@@ -3087,7 +5135,7 @@ fileprivate struct UniffiCallbackInterfaceArtifactSource {
                 )
             }
 
-            
+
             let writeReturn = { uniffiOutReturn.pointee = FfiConverterTypeArtifactFetchResponse_lower($0) }
             uniffiTraitInterfaceCall(
                 callStatus: uniffiCallStatus,
@@ -3171,10 +5219,382 @@ public func FfiConverterCallbackInterfaceArtifactSource_lower(_ v: ArtifactSourc
 
 
 
+public protocol NativeAppearanceSource: AnyObject, Sendable {
+
+    func current()  -> NativeAppearanceSnapshot?
+
+}
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceNativeAppearanceSource {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // This creates 1-element array, since this seems to be the only way to construct a const
+    // pointer that we can pass to the Rust code.
+    static let vtable: [UniffiVTableCallbackInterfaceNativeAppearanceSource] = [UniffiVTableCallbackInterfaceNativeAppearanceSource(
+        current: { (
+            uniffiHandle: UInt64,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> NativeAppearanceSnapshot? in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceNativeAppearanceSource.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.current(
+                )
+            }
+
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterOptionTypeNativeAppearanceSnapshot.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            let result = try? FfiConverterCallbackInterfaceNativeAppearanceSource.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface NativeAppearanceSource: handle missing in uniffiFree")
+            }
+        }
+    )]
+}
+
+private func uniffiCallbackInitNativeAppearanceSource() {
+    uniffi_nmp_native_runtime_ffi_fn_init_callback_vtable_nativeappearancesource(UniffiCallbackInterfaceNativeAppearanceSource.vtable)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfaceNativeAppearanceSource {
+    fileprivate static let handleMap = UniffiHandleMap<NativeAppearanceSource>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfaceNativeAppearanceSource : FfiConverter {
+    typealias SwiftType = NativeAppearanceSource
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceNativeAppearanceSource_lift(_ handle: UInt64) throws -> NativeAppearanceSource {
+    return try FfiConverterCallbackInterfaceNativeAppearanceSource.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceNativeAppearanceSource_lower(_ v: NativeAppearanceSource) -> UInt64 {
+    return FfiConverterCallbackInterfaceNativeAppearanceSource.lower(v)
+}
+
+
+
+
+public protocol NativeIncActionExecutor: AnyObject, Sendable {
+
+    func tryEnqueue(request: NativeIncActionRequest)  -> NativeIncActionEnqueueResult
+
+    func sessionEnded(end: NativeIncActionEnd)
+
+}
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceNativeIncActionExecutor {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // This creates 1-element array, since this seems to be the only way to construct a const
+    // pointer that we can pass to the Rust code.
+    static let vtable: [UniffiVTableCallbackInterfaceNativeIncActionExecutor] = [UniffiVTableCallbackInterfaceNativeIncActionExecutor(
+        tryEnqueue: { (
+            uniffiHandle: UInt64,
+            request: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> NativeIncActionEnqueueResult in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceNativeIncActionExecutor.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.tryEnqueue(
+                     request: try FfiConverterTypeNativeIncActionRequest_lift(request)
+                )
+            }
+
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterTypeNativeIncActionEnqueueResult_lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        sessionEnded: { (
+            uniffiHandle: UInt64,
+            end: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceNativeIncActionExecutor.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.sessionEnded(
+                     end: try FfiConverterTypeNativeIncActionEnd_lift(end)
+                )
+            }
+
+
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            let result = try? FfiConverterCallbackInterfaceNativeIncActionExecutor.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface NativeIncActionExecutor: handle missing in uniffiFree")
+            }
+        }
+    )]
+}
+
+private func uniffiCallbackInitNativeIncActionExecutor() {
+    uniffi_nmp_native_runtime_ffi_fn_init_callback_vtable_nativeincactionexecutor(UniffiCallbackInterfaceNativeIncActionExecutor.vtable)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfaceNativeIncActionExecutor {
+    fileprivate static let handleMap = UniffiHandleMap<NativeIncActionExecutor>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfaceNativeIncActionExecutor : FfiConverter {
+    typealias SwiftType = NativeIncActionExecutor
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceNativeIncActionExecutor_lift(_ handle: UInt64) throws -> NativeIncActionExecutor {
+    return try FfiConverterCallbackInterfaceNativeIncActionExecutor.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceNativeIncActionExecutor_lower(_ v: NativeIncActionExecutor) -> UInt64 {
+    return FfiConverterCallbackInterfaceNativeIncActionExecutor.lower(v)
+}
+
+
+
+
+public protocol NativeSettingsExecutor: AnyObject, Sendable {
+
+    func tryOpen(request: NativeSettingsRequest)  -> NativeSettingsOpenResult
+
+}
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceNativeSettingsExecutor {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // This creates 1-element array, since this seems to be the only way to construct a const
+    // pointer that we can pass to the Rust code.
+    static let vtable: [UniffiVTableCallbackInterfaceNativeSettingsExecutor] = [UniffiVTableCallbackInterfaceNativeSettingsExecutor(
+        tryOpen: { (
+            uniffiHandle: UInt64,
+            request: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> NativeSettingsOpenResult in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceNativeSettingsExecutor.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.tryOpen(
+                     request: try FfiConverterTypeNativeSettingsRequest_lift(request)
+                )
+            }
+
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterTypeNativeSettingsOpenResult_lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            let result = try? FfiConverterCallbackInterfaceNativeSettingsExecutor.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface NativeSettingsExecutor: handle missing in uniffiFree")
+            }
+        }
+    )]
+}
+
+private func uniffiCallbackInitNativeSettingsExecutor() {
+    uniffi_nmp_native_runtime_ffi_fn_init_callback_vtable_nativesettingsexecutor(UniffiCallbackInterfaceNativeSettingsExecutor.vtable)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfaceNativeSettingsExecutor {
+    fileprivate static let handleMap = UniffiHandleMap<NativeSettingsExecutor>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfaceNativeSettingsExecutor : FfiConverter {
+    typealias SwiftType = NativeSettingsExecutor
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceNativeSettingsExecutor_lift(_ handle: UInt64) throws -> NativeSettingsExecutor {
+    return try FfiConverterCallbackInterfaceNativeSettingsExecutor.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceNativeSettingsExecutor_lower(_ v: NativeSettingsExecutor) -> UInt64 {
+    return FfiConverterCallbackInterfaceNativeSettingsExecutor.lower(v)
+}
+
+
+
+
 public protocol RuntimeObserver: AnyObject, Sendable {
-    
-    func update(frame: RuntimeObservationFrame) 
-    
+
+    func update(frame: RuntimeObservationFrame)
+
 }
 
 
@@ -3203,7 +5623,7 @@ fileprivate struct UniffiCallbackInterfaceRuntimeObserver {
                 )
             }
 
-            
+
             let writeReturn = { () }
             uniffiTraitInterfaceCall(
                 callStatus: uniffiCallStatus,
@@ -3383,6 +5803,78 @@ fileprivate struct FfiConverterOptionTypeVerifiedArtifact: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeNativeAppearanceSnapshot: FfiConverterRustBuffer {
+    typealias SwiftType = NativeAppearanceSnapshot?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeNativeAppearanceSnapshot.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeNativeAppearanceSnapshot.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeAccountHandle: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeAccountHandle?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeAccountHandle.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeAccountHandle.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeAccountSnapshot: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeAccountSnapshot?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeAccountSnapshot.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeAccountSnapshot.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeRuntimeRefusal: FfiConverterRustBuffer {
     typealias SwiftType = RuntimeRefusal?
 
@@ -3399,6 +5891,54 @@ fileprivate struct FfiConverterOptionTypeRuntimeRefusal: FfiConverterRustBuffer 
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeRuntimeRefusal.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeWorkspaceDefinition: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeWorkspaceDefinition?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeWorkspaceDefinition.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeWorkspaceDefinition.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeAccountFailure: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeAccountFailure?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeAccountFailure.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeAccountFailure.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -3424,6 +5964,31 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeAccountHandle: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeAccountHandle]
+
+    public static func write(_ value: [RuntimeAccountHandle], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeAccountHandle.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeAccountHandle] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeAccountHandle]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeAccountHandle.read(from: &buf))
         }
         return seq
     }
@@ -3604,6 +6169,56 @@ fileprivate struct FfiConverterSequenceTypeRuntimeSessionSnapshot: FfiConverterR
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeWorkspaceDefinition: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeWorkspaceDefinition]
+
+    public static func write(_ value: [RuntimeWorkspaceDefinition], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeWorkspaceDefinition.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeWorkspaceDefinition] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeWorkspaceDefinition]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeWorkspaceDefinition.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeWorkspaceSlot: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeWorkspaceSlot]
+
+    public static func write(_ value: [RuntimeWorkspaceSlot], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeWorkspaceSlot.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeWorkspaceSlot] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeWorkspaceSlot]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeWorkspaceSlot.read(from: &buf))
+        }
+        return seq
+    }
+}
+
 private enum InitializationResult {
     case ok
     case contractVersionMismatch
@@ -3619,7 +6234,16 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_account_snapshot() != 10743) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_activate_local_account() != 20218) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_close() != 64840) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_commit_config_values() != 64747) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_crash() != 3191) {
@@ -3631,6 +6255,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_launch() != 23681) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_logout_local_account() != 10872) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_mapped_envelope() != 33743) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3640,7 +6267,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_read_verified() != 14937) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_register_local_account() != 57733) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_remove_local_account() != 63854) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_restore_workspaces() != 58153) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_revoke() != 26442) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_save_workspace() != 61736) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_set_grant() != 46939) {
@@ -3650,6 +6289,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_stop() != 36932) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_update_appearance() != 60014) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_verify_artifact() != 60547) {
@@ -3682,7 +6324,31 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open() != 25423) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_all_native_capabilities() != 22922) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_appearance() != 25867) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_native_capabilities() != 18420) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_settings() != 30740) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_artifactsource_fetch() != 10323) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_nativeappearancesource_current() != 35565) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_nativeincactionexecutor_try_enqueue() != 8495) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_nativeincactionexecutor_session_ended() != 28145) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_nativesettingsexecutor_try_open() != 19890) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimeobserver_update() != 4341) {
@@ -3690,6 +6356,9 @@ private let initializationResult: InitializationResult = {
     }
 
     uniffiCallbackInitArtifactSource()
+    uniffiCallbackInitNativeAppearanceSource()
+    uniffiCallbackInitNativeIncActionExecutor()
+    uniffiCallbackInitNativeSettingsExecutor()
     uniffiCallbackInitRuntimeObserver()
     return InitializationResult.ok
 }()

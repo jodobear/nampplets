@@ -22,8 +22,14 @@ python3 conformance/scripts/generate_baseline.py \
   --napplet-web /path/to/napplet-web \
   --kehto /path/to/kehto-web
 python3 conformance/scripts/generate_digests.py
+python3 conformance/scripts/generate_digests.py --check
 python3 conformance/scripts/verify_baseline.py
 ```
+
+Digest generation reads only Git-tracked files in the allowlisted conformance
+roots, sorts repository-relative POSIX paths, hashes file bytes only, and emits
+fixed UTF-8/LF output. The `--check` form is the clean-checkout/CI assertion: it
+does not write and fails when regenerating would change `digests.sha256`.
 
 Importing a published artifact requires an exact signed event already committed
 under `napplet-corpus/published/<name>/event.json`; the importer verifies the
@@ -66,9 +72,13 @@ Run the pinned Kehto source corpus from a reference checkout without modifying
 it:
 
 ```sh
-python3 conformance/legacy-host/run_kehto.py --source /path/to/kehto-web
+python3 conformance/legacy-host/run_kehto.py \
+  --source /path/to/kehto-web \
+  --dependency-store /path/to/pnpm-store
 ```
 
 Both commands use finite process, output, fixture, and artifact limits.
-Unavailable offline dependencies are emitted as machine-readable `not-run`
-reasons. See `legacy-host/README.md` for the full contract.
+The explicit store is populated from the pinned frozen lockfile in a separate
+step; the evidence run remains offline. Unavailable offline dependencies are
+emitted as machine-readable `not-run` reasons. See `legacy-host/README.md` for
+the full contract and preparation command.

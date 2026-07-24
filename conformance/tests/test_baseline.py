@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,9 +13,37 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "conformance" / "scripts"))
 
 import verify_baseline  # noqa: E402
+import generate_digests  # noqa: E402
 
 
 class BaselineTests(unittest.TestCase):
+    def test_digest_generation_is_deterministic_and_current(self) -> None:
+        first = generate_digests.manifest_bytes()
+        second = generate_digests.manifest_bytes()
+        self.assertEqual(first, second)
+        self.assertEqual(
+            first,
+            (ROOT / "conformance/digests.sha256").read_bytes(),
+        )
+
+    def test_digest_generation_ignores_untracked_environment_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evidence = root / "conformance/bdd/evidence.json"
+            evidence.parent.mkdir(parents=True)
+            evidence.write_text("{}\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "add", evidence.relative_to(root)],
+                check=True,
+            )
+
+            expected = generate_digests.manifest_bytes(root)
+            (root / "conformance/bdd/.DS_Store").write_bytes(b"environment")
+            (root / "conformance/bdd/editor.tmp").write_bytes(b"environment")
+
+            self.assertEqual(expected, generate_digests.manifest_bytes(root))
+
     def test_full_offline_baseline(self) -> None:
         result = verify_baseline.verify()
         self.assertEqual(result["status"], "unratified")

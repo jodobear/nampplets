@@ -9,9 +9,28 @@ the generated ABI mechanics; application targets import the generated
 - `VerifiedArtifact` is sealed by Rust after Nostr event id/signature,
   coordinate, path digest, aggregate, source, redirect, count, and byte-limit
   verification. Swift cannot construct one.
-- Install, grant, launch, revoke, stop, crash, and mapped-envelope methods are
-  fire-and-observe commands. Their semantic failures appear in bounded runtime
-  snapshots/events; they do not throw FFI operation errors.
+- Install, installed-library filtering, exact-build uninstall, workspace
+  assignment/clear, grant, launch, suspend, resume, revoke, stop, crash, and
+  mapped-envelope methods are fire-and-observe commands. Their semantic
+  failures appear in bounded runtime snapshots/events; they do not throw FFI
+  operation errors.
+- `RuntimeInstalledLibrarySnapshot` is the bounded Rust-owned library
+  projection. Each row carries an exact `(publisher, dTag, aggregateHash)`
+  coordinate, opaque verified manifest metadata, metadata-only versus
+  sealed-exact-bytes-ready availability, active session ids, and current
+  workspace assignments. Filtering is owned and bounded by `RuntimeApp`;
+  native code does not maintain another installation index.
+- Suspend and resume act on the session ids projected for an installed build;
+  stale handles and illegal transitions are refused by the Rust lifecycle
+  state machine.
+- Uninstall stops only that exact build's sessions and removes runtime-owned
+  installation, grant, component-value, and workspace-assignment state.
+  Workspace definitions, activity evidence, retained NMP receipt ids,
+  canonical NMP state, and outstanding durable writes are preserved.
+  `RuntimeController` releases its in-process verifier handle only after the
+  kernel confirms the build is absent. Cached artifact bytes are deliberately
+  not deleted because the artifact owner does not yet expose an exact-build
+  deletion API.
 - The only throwing call is controller construction, where no runtime exists
   yet to own a semantic error state.
 - Mapped envelopes accept only a Rust-issued active session id. Principal,
@@ -21,18 +40,57 @@ the generated ABI mechanics; application targets import the generated
 - Artifact acquisition is a finite native capability callback. Rust supplies
   an explicit byte ceiling and approved candidate list, denies redirects, and
   rechecks response source, length, digest, and aggregate before committing.
+- Theme and settings providers are registered only by constructors that
+  receive real native callbacks. Native appearance reports raw OS traits;
+  Rust maps and validates NAP-THEME. Native settings receives only bounded,
+  validated schema/current values and commits edits back through Rust's
+  exact-build config store.
+
+## Permission-review boundary status
+
+`RuntimeController.permission_review` returns one bounded projection for an
+installed exact `(publisher, dTag, aggregateHash)` build. The projection comes
+from `RuntimeApp` and includes the persisted capability-request inventory,
+provider-owned sensitivity/dependencies/platform availability, effective live
+or durable decision, Rust-owned requested default, and all four user decision
+options with typed validity reasons. A missing provider is explicit `unknown`;
+it is never reported as available and only denial is a valid decision.
+
+`RuntimeController.apply_permission_decisions` accepts exactly one complete,
+finite decision batch for that exact build. `RuntimeApp` validates the
+principal, capability-set equality, duplicates, provider availability,
+dependencies, managed-policy ownership, and required-domain consequences.
+`GrantLedger` holds its exact-principal write boundary while
+`RuntimeStore.set_grants_atomic` commits SQLite; memory changes only after the
+store transaction succeeds. Revocation, resource cancellation, provider-push
+teardown, and activity facts happen after that combined commit. One
+`PermissionBatchApplied` event is the success outcome. The call never launches
+the napplet.
+
+`RuntimeController.set_grant` and `RuntimeController.revoke` remain individual
+fire-and-observe maintenance commands. Swift must not sequence them to simulate
+a review transaction.
+
+The pinned NIP-5D manifest currently declares required domains only. The typed
+runtime/store model supports optional requests, but production artifact
+installation does not invent them by scanning JavaScript or accepting
+native-authored policy. Optional requests therefore remain empty unless a
+future verified artifact/catalog owner supplies a canonical declaration.
 
 ## D0-D10 discharge
 
 - D0/D4: `RuntimeApp` is the single product writer; this crate only validates,
-  maps, and observes its commands and projections.
+  maps, and observes its commands and projections. Installed-library and
+  workspace-assignment facts are projected mechanically from its bounded
+  snapshot rather than mirrored in native state.
 - D1/D5: observation emits the latest complete bounded app snapshot plus finite
   cursor-based event replay.
 - D2/D3/D10: all Nostr acquisition, routing, persistence, and privacy stay
   behind the pinned `nmp::Engine` facade in `NmpDataPlane`.
 - D6: command outcomes are state/events. Only pre-kernel open can throw.
-- D7: the artifact callback returns raw HTTP facts and bytes; Rust decides
-  trust, policy, and lifecycle.
+- D7: native callbacks return raw HTTP, appearance, and settings execution
+  facts; Rust decides trust, mapping, schema policy, persistence, and
+  lifecycle.
 - D8: observers are finitely admitted, updates conflate through watch channels,
   and stop/close are event-driven. There is no polling.
 - D9: `RuntimeApp` receives one injected Rust clock; native callers never
@@ -44,7 +102,7 @@ the generated ABI mechanics; application targets import the generated
 cargo test -p nmp-native-runtime-ffi
 cargo clippy -p nmp-native-runtime-ffi --all-targets -- -D warnings
 scripts/tests/test-build-runtime-swift-xcframework.sh
-scripts/build-runtime-swift-xcframework.sh --universal
+scripts/build-runtime-swift-xcframework.sh --universal --check-bindings
 xcodebuildmcp swift-package test \
   --package-path "$PWD/Packages/NMPNativeRuntime" \
   --output text
@@ -52,3 +110,5 @@ xcodebuildmcp swift-package test \
 
 The Swift tests cross the actual ABI for open/snapshot/close, a callback-backed
 signed artifact install/launch/read, and conflated observation teardown.
+The clean-checkout procedure and exact Rust/Xcode pins are documented in
+[`docs/build-from-clean-checkout.md`](../../docs/build-from-clean-checkout.md).

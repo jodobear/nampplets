@@ -480,15 +480,14 @@ def main() -> int:
         },
         "classification_findings": [
             {
-                "code": "reference-probe-rejected-by-pinned-wire-validator",
+                "code": "registry-control-and-host-probes-separated-from-package-traffic",
                 "fixtures": sorted(
                     record["name"]
                     for record in records
                     if record["corpus"] == "reference"
-                    and record["host"].get("conformance", {}).get("status")
-                    == "fail"
+                    and record["host"].get("host_control_or_probe_emitted")
                 ),
-                "effect": "These fixtures prove host edge behavior but cannot be called accepted conformant napplets without changing their emitted probe envelopes or classifying them as negative probes.",
+                "effect": "The pinned package validator receives only package-active NAP envelopes. Registry-only shell control and explicit forward-compatibility probes remain visible in the host evidence and are judged by host assertions.",
             }
         ],
         "status": (

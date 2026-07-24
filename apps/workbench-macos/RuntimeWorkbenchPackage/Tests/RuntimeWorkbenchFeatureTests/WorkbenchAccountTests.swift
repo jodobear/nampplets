@@ -1,0 +1,162 @@
+import Foundation
+@testable import RuntimeWorkbenchFeature
+import Testing
+
+@MainActor
+@Test func unavailableAccountManagerRefusesEveryMutation() async {
+    let reason = "Signer adapter not installed"
+    let manager = UnavailableWorkbenchAccountManager(reason: reason)
+
+    #expect(manager.snapshot() == .unavailable(reason: reason))
+
+    await manager.register(secret: "not-a-real-secret")
+    await manager.activate(
+        handle: WorkbenchAccountHandle(opaqueValue: "account")
+    )
+    await manager.logout()
+    await manager.remove(
+        handle: WorkbenchAccountHandle(opaqueValue: "account")
+    )
+
+    #expect(manager.snapshot() == .unavailable(reason: reason))
+}
+
+@Test func activeAccountIsDerivedFromOpaqueHandle() throws {
+    let account = WorkbenchStoredAccount.fixture(handle: "account-a")
+    let snapshot = try #require(WorkbenchAccountSnapshot(
+        accounts: [account],
+        activeHandle: account.handle
+    ))
+
+    #expect(snapshot.activeAccount?.handle == account.handle)
+    #expect(snapshot.activeAccount?.npub == account.npub)
+    #expect(snapshot.activeAccount?.publicKeyHex == account.publicKeyHex)
+}
+
+@Test func accountSnapshotRejectsUnboundedOrInconsistentState() {
+    let tooMany = (0 ... WorkbenchAccountSnapshot.maximumAccountCount).map {
+        WorkbenchStoredAccount.fixture(handle: "account-\($0)")
+    }
+
+    #expect(
+        WorkbenchAccountSnapshot(
+            accounts: tooMany,
+            activeHandle: nil
+        ) == nil
+    )
+    #expect(
+        WorkbenchAccountSnapshot(
+            accounts: [],
+            activeHandle: WorkbenchAccountHandle(opaqueValue: "missing")
+        ) == nil
+    )
+}
+
+@MainActor
+@Test func registrationAndActivationRemainExplicitSeparateActions() async throws {
+    let manager = RecordingAccountManager()
+    let model = WorkbenchAccountSheetModel(manager: manager)
+
+    model.secret = "test-secret"
+    await model.register()
+
+    #expect(model.secret.isEmpty)
+    #expect(model.snapshot.accounts.count == 1)
+    #expect(model.snapshot.activeAccount == nil)
+    #expect(manager.actions == [.register])
+
+    let handle = try #require(model.snapshot.accounts.first?.handle)
+    await model.activate(handle)
+
+    #expect(model.snapshot.activeAccount?.handle == handle)
+    #expect(manager.actions == [.register, .activate(handle)])
+}
+
+@MainActor
+@Test func registrationErrorCannotEchoSubmittedSecret() async {
+    let manager = EchoingFailureAccountManager()
+    let model = WorkbenchAccountSheetModel(manager: manager)
+    let submittedSecret = "secret-that-must-not-render"
+
+    model.secret = submittedSecret
+    await model.register()
+
+    #expect(model.secret.isEmpty)
+    #expect(model.errorMessage?.contains(submittedSecret) == false)
+    #expect(model.errorMessage?.contains("••••") == true)
+}
+
+private extension WorkbenchStoredAccount {
+    static func fixture(handle: String) -> WorkbenchStoredAccount {
+        WorkbenchStoredAccount(
+            handle: WorkbenchAccountHandle(opaqueValue: handle),
+            npub: "npub1fixture\(handle)",
+            publicKeyHex: String(repeating: "a", count: 64),
+            connectionKind: .localSigner
+        )
+    }
+}
+
+@MainActor
+private final class RecordingAccountManager: WorkbenchAccountManaging {
+    enum Action: Equatable {
+        case register
+        case activate(WorkbenchAccountHandle)
+    }
+
+    private var accounts: [WorkbenchStoredAccount] = []
+    private var activeHandle: WorkbenchAccountHandle?
+    private(set) var actions: [Action] = []
+
+    func snapshot() -> WorkbenchAccountSnapshot {
+        WorkbenchAccountSnapshot(
+            accounts: accounts,
+            activeHandle: activeHandle
+        )!
+    }
+
+    func register(secret: String) async {
+        guard secret == "test-secret" else { return }
+        let account = WorkbenchStoredAccount.fixture(handle: "registered")
+        accounts.append(account)
+        actions.append(.register)
+    }
+
+    func activate(handle: WorkbenchAccountHandle) async {
+        guard accounts.contains(where: { $0.handle == handle }) else { return }
+        activeHandle = handle
+        actions.append(.activate(handle))
+    }
+
+    func logout() async {
+        activeHandle = nil
+    }
+
+    func remove(handle: WorkbenchAccountHandle) async {
+        accounts.removeAll { $0.handle == handle }
+        if activeHandle == handle {
+            activeHandle = nil
+        }
+    }
+}
+
+@MainActor
+private final class EchoingFailureAccountManager: WorkbenchAccountManaging {
+    private var errorMessage: String?
+
+    func snapshot() -> WorkbenchAccountSnapshot {
+        WorkbenchAccountSnapshot(
+            accounts: [],
+            activeHandle: nil,
+            errorMessage: errorMessage
+        )!
+    }
+
+    func register(secret: String) async {
+        errorMessage = "Rejected \(secret)"
+    }
+
+    func activate(handle _: WorkbenchAccountHandle) async {}
+    func logout() async {}
+    func remove(handle _: WorkbenchAccountHandle) async {}
+}

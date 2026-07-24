@@ -1,0 +1,77 @@
+{
+  "classification": "runtime-reference-fixtures",
+  "digest": "5013983282a03741305b2f9740e2268ea6c038843b6e2214b0f34cbd611fd70a",
+  "fixtures": [
+    {
+      "aggregate_sha256": "0136a6481a347a856d877c8729650222cc6ca8110095f35a9f2bd016b3534d81",
+      "artifact_mode": "external-assets",
+      "files": [
+        {
+          "artifact_path": "/index.html",
+          "bytes": 272,
+          "path": "index.html",
+          "sha256": "6eecd1f42a2a885a0e56969f6c8d2140928cb8ef8135d6fda3faa25fe32af593"
+        },
+        {
+          "artifact_path": "/main.js",
+          "bytes": 216,
+          "path": "main.js",
+          "sha256": "259b6e87915d96469e0b539954dac20718b9266a43bf4355cff4ed9fb117bd63"
+        },
+        {
+          "artifact_path": "/style.css",
+          "bytes": 71,
+          "path": "style.css",
+          "sha256": "ef9935374822fd9586b5c54117ddccd4670bd2b67037de40c5fe5fe0ab31eb98"
+        }
+      ],
+      "name": "external-assets",
+      "requires": []
+    },
+    {
+      "aggregate_sha256": "0d7a3b5d2275aa9adfd1baa05747052ebd984599231692d25074a93fe36aac40",
+      "artifact_mode": "single-file",
+      "files": [
+        {
+          "artifact_path": "/index.html",
+          "bytes": 310,
+          "path": "index.html",
+          "sha256": "8dd85415b53f890450d48ed03869c9c848de6b2e4212e329993028744db2d754"
+        }
+      ],
+      "name": "missing-domain",
+      "requires": [
+        "ble"
+      ]
+    },
+    {
+      "aggregate_sha256": "f545a5a0153e8b932c281990226bad88f02c8f2db5fe782f4748439c10f70db3",
+      "artifact_mode": "single-file",
+      "files": [
+        {
+          "artifact_path": "/index.html",
+          "bytes": 476,
+          "path": "index.html",
+          "sha256": "694e8f9b769622b5c9ebaa3a9543662278c34bc2ae26bb3f98ad3025ce231f33"
+        }
+      ],
+      "name": "prelude-order",
+      "requires": []
+    },
+    {
+      "aggregate_sha256": "b60820a5941826c0168356e534e9655973edcd480039981ff3e8736415b0c18f",
+      "artifact_mode": "single-file",
+      "files": [
+        {
+          "artifact_path": "/index.html",
+          "bytes": 379,
+          "path": "index.html",
+          "sha256": "eaccf84f654824abff61394bd4ca4f1d861aa27b44b4f8e4e77e22e4f7184c43"
+        }
+      ],
+      "name": "unknown-message",
+      "requires": []
+    }
+  ],
+  "schema": 1
+}

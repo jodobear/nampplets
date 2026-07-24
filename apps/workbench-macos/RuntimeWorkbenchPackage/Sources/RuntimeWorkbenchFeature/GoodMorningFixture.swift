@@ -18,6 +18,8 @@ struct GoodMorningFixture: Sendable {
     static let dTag = "good-morning"
     static let indexDigest =
         "ffd35eea5c84d03cdda74c23e1bbb2c40500f503833503aa688036faa52f3808"
+    static let aggregateHash =
+        "828a6df02afd56782ea20f805084acce65c53f7c37554948c1e0a64aa5a2b0a8"
 
     let eventJSON: Data
     let indexHTML: Data
@@ -31,15 +33,14 @@ struct GoodMorningFixture: Sendable {
         )
     }
 
-    func open(storageRoot: URL) throws -> NappletArtifact {
-        try NappletArtifact.openSignedNamed(
+    func open(profile: WorkbenchRuntimeProfile) throws -> NappletArtifact {
+        try profile.native.openSignedNamed(
             title: "Good Morning Protocol",
             eventJSON: eventJSON,
             author: Self.author,
             dTag: Self.dTag,
             blobsBySHA256: [Self.indexDigest: indexHTML],
-            grantDomains: ["storage"],
-            storageRoot: storageRoot
+            grantDomains: ["identity", "inc", "storage", "theme"]
         )
     }
 

@@ -13,7 +13,10 @@ mod principal;
 mod resources;
 
 pub use cancellation::{Cancellation, Cancelled};
-pub use grants::{Capability, GrantDecision, GrantError, GrantLedger, GrantLimits, Sensitivity};
+pub use grants::{
+    Capability, CapabilityRequest, CapabilityRequirement, GrantBatchError, GrantDecision,
+    GrantError, GrantLedger, GrantLimits, Sensitivity,
+};
 pub use host_data::{
     AcceptedWrite, AccountRef, ApprovedWrite, BindingEventSink, BindingRequest, BindingSinkError,
     BoundedJson, BoundedJsonError, HostBindingHandle, HostBindingSnapshot, HostDataError,

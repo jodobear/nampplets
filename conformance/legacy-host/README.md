@@ -20,6 +20,13 @@ NAP-SHELL is deliberately separate:
 - `shell.ping` remains only an internal isolation canary and is never counted
   as registry-handshake evidence.
 
+The same separation applies to explicit host-boundary probes. The pinned
+package validator receives only envelopes whose domain is in the package's
+active-domain inventory. Registry-only `shell.*`, the deliberate
+`future-domain.*` forward-compatibility probe, and `conformance.*` observation
+markers remain in the report and are judged by host assertions; they are not
+misrepresented as package NAP traffic.
+
 Run the committed fixtures:
 
 ```sh
@@ -48,11 +55,33 @@ python3 conformance/legacy-host/run_kehto.py \
 ```
 
 The runner exports the pinned commit into a temporary directory, uses exact
-`pnpm@10.8.0`, and performs only a frozen offline install. A missing store
-tarball is recorded once and projected as a machine-readable `not-run` reason
-for every affected application. To clone the exact commit into a temporary
-directory first, replace `--source` with `--network`; dependency installation
-still remains offline.
+`pnpm@10.8.0`, installs only the 15 playground napplet projects, and performs
+only a frozen offline install. To supply a content-addressed store that was
+populated from this exact lockfile, add:
+
+```sh
+--dependency-store /path/to/pnpm-store
+```
+
+For example, an explicitly networked preparation step in a disposable checkout
+can populate that store without weakening the later execution run:
+
+```sh
+corepack pnpm@10.8.0 install \
+  --filter './apps/playground/napplets/**' \
+  --frozen-lockfile \
+  --ignore-scripts \
+  --store-dir /path/to/pnpm-store
+python3 conformance/legacy-host/run_kehto.py \
+  --source /path/to/kehto-web \
+  --dependency-store /path/to/pnpm-store
+```
+
+The second command still performs an offline frozen install from an exact
+source archive. A missing store tarball is recorded once and projected as a
+machine-readable `not-run` reason for every affected application. To clone the
+exact commit into a temporary directory first, replace `--source` with
+`--network`; dependency installation still remains offline.
 
 Reports are written to:
 

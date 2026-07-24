@@ -1,0 +1,14 @@
+import NMPNativeRuntime
+
+public typealias NativeRuntimeAccountFailure = RuntimeAccountFailure
+public typealias NativeRuntimeAccountHandle = RuntimeAccountHandle
+public typealias NativeRuntimeAccountSnapshot = RuntimeAccountSnapshot
+public typealias NativeRuntimeAccountUpdate = RuntimeAccountUpdate
+
+public typealias NativeRuntimeWorkspaceAxis = RuntimeWorkspaceAxis
+public typealias NativeRuntimeWorkspaceDefinition = RuntimeWorkspaceDefinition
+public typealias NativeRuntimeWorkspaceRenderer = RuntimeWorkspaceRenderer
+public typealias NativeRuntimeWorkspaceRestore = RuntimeWorkspaceRestore
+public typealias NativeRuntimeWorkspaceRole = RuntimeWorkspaceRole
+public typealias NativeRuntimeWorkspaceSlot = RuntimeWorkspaceSlot
+public typealias NativeRuntimeWorkspaceUpdate = RuntimeWorkspaceUpdate

@@ -81,6 +81,15 @@ class LegacyHostRunnerTests(unittest.TestCase):
             "https://registry.npmjs.org/example/-/example-1.tgz",
         )
 
+    def test_kehto_runner_accepts_an_explicit_offline_dependency_store(self) -> None:
+        source = (
+            ROOT / "conformance" / "legacy-host" / "run_kehto.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"--dependency-store"', source)
+        self.assertIn('"--offline"', source)
+        self.assertIn('"--frozen-lockfile"', source)
+        self.assertIn('"./apps/playground/napplets/**"', source)
+
     def test_verified_package_cache_refuses_wrong_digest_offline(self) -> None:
         pin = legacy.PackagePin(
             name="@napplet/conformance",
@@ -140,6 +149,43 @@ class LegacyHostRunnerTests(unittest.TestCase):
                 for name in recorded
             },
         )
+
+    def test_legacy_report_separates_package_naps_from_host_protocol(self) -> None:
+        report = json.loads(
+            (
+                ROOT / "conformance" / "reports" / "legacy-host.json"
+            ).read_text(encoding="utf-8")
+        )
+        package_domains = set(report["domain_contract"]["package_active_domains"])
+        self.assertEqual(
+            report["summary"]["pinned_conformance_engine"]["fail"],
+            0,
+        )
+        for fixture in report["fixtures"]:
+            host = fixture["host"]
+            if not host.get("execution_observed"):
+                continue
+            package_emitted = host["package_emitted"]
+            controls = host["host_control_or_probe_emitted"]
+            self.assertEqual(len(package_emitted) + len(controls), len(host["emitted"]))
+            for envelope in package_emitted:
+                self.assertIn(envelope["type"].split(".", 1)[0], package_domains)
+            for envelope in controls:
+                self.assertNotIn(envelope["type"].split(".", 1)[0], package_domains)
+
+    def test_kehto_report_proves_every_pinned_application_builds(self) -> None:
+        report = json.loads(
+            (
+                ROOT / "conformance" / "reports" / "kehto-corpus.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(report["install"]["status"], "pass")
+        self.assertEqual(report["counts"], {"built-not-run": 15})
+        for application in report["applications"]:
+            self.assertEqual(application["status"], "built-not-run")
+            self.assertTrue(application["artifact"]["index_html"])
+            self.assertGreater(application["artifact"]["file_count"], 0)
+            self.assertGreater(application["artifact"]["total_bytes"], 0)
 
 
 if __name__ == "__main__":

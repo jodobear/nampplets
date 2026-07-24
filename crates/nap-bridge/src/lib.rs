@@ -31,6 +31,7 @@ pub use outbound::{
 pub struct BridgeLimits {
     pub maximum_providers: usize,
     pub maximum_actions_per_provider: usize,
+    pub maximum_dependencies_per_provider: usize,
     pub maximum_envelope_bytes: usize,
     pub maximum_response_bytes: usize,
     pub maximum_sessions: usize,
@@ -44,6 +45,7 @@ impl Default for BridgeLimits {
         Self {
             maximum_providers: 64,
             maximum_actions_per_provider: 64,
+            maximum_dependencies_per_provider: 16,
             maximum_envelope_bytes: 256 * 1024,
             maximum_response_bytes: 512 * 1024,
             maximum_sessions: 64,
@@ -77,11 +79,19 @@ pub struct Envelope {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProviderPlatformAvailability {
+    Available,
+    Unavailable { reason: Arc<str> },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderDescriptor {
     pub domain: Capability,
     pub protocol_versions: BTreeSet<Arc<str>>,
     pub actions: BTreeSet<Arc<str>>,
     pub sensitive: bool,
+    pub dependencies: BTreeSet<Capability>,
+    pub platform_availability: ProviderPlatformAvailability,
 }
 
 pub trait Provider: Send + Sync + fmt::Debug {
@@ -337,6 +347,7 @@ impl ProviderRegistry {
     ) -> Result<Self, BridgeError> {
         if limits.maximum_providers == 0
             || limits.maximum_actions_per_provider == 0
+            || limits.maximum_dependencies_per_provider == 0
             || limits.maximum_envelope_bytes == 0
             || limits.maximum_response_bytes == 0
             || limits.maximum_sessions == 0
@@ -362,9 +373,19 @@ impl ProviderRegistry {
         let descriptor = provider.descriptor();
         if descriptor.actions.is_empty()
             || descriptor.actions.len() > self.limits.maximum_actions_per_provider
+            || descriptor.dependencies.len() > self.limits.maximum_dependencies_per_provider
+            || descriptor.dependencies.contains(&descriptor.domain)
         {
             return Err(BridgeError::InvalidProvider {
                 domain: descriptor.domain.clone(),
+            });
+        }
+        if let ProviderPlatformAvailability::Unavailable { reason } =
+            &descriptor.platform_availability
+        {
+            return Err(BridgeError::ProviderUnavailable {
+                domain: descriptor.domain.clone(),
+                reason: Arc::clone(reason),
             });
         }
         if self.providers.contains_key(&descriptor.domain) {
@@ -383,6 +404,19 @@ impl ProviderRegistry {
 
     pub fn advertised_domains(&self) -> BTreeSet<Capability> {
         self.providers.keys().cloned().collect()
+    }
+
+    pub fn permission_descriptor(&self, domain: &Capability) -> Option<ProviderDescriptor> {
+        self.providers
+            .get(domain)
+            .map(|provider| provider.descriptor().clone())
+    }
+
+    pub fn permission_descriptors(&self) -> Vec<ProviderDescriptor> {
+        self.providers
+            .values()
+            .map(|provider| provider.descriptor().clone())
+            .collect()
     }
 
     pub fn negotiate(
@@ -606,6 +640,22 @@ impl ProviderRegistry {
     /// Existing injection plans become unusable immediately because dispatch
     /// rechecks the live grant ledger before admitting provider work.
     pub fn revoke(&self, principal: &Principal, domain: &Capability) -> usize {
+        self.cancel_capability(principal, domain, true)
+    }
+
+    /// Cancels every non-durable operation and provider-push lane for one
+    /// exact-build capability after an owner-level grant transaction changed
+    /// the ledger. This does not overwrite the newly committed decision.
+    pub fn cancel_capability_work(&self, principal: &Principal, domain: &Capability) -> usize {
+        self.cancel_capability(principal, domain, false)
+    }
+
+    fn cancel_capability(
+        &self,
+        principal: &Principal,
+        domain: &Capability,
+        deny_grant: bool,
+    ) -> usize {
         let state = self.state.lock();
         let sessions = state
             .sessions
@@ -626,7 +676,14 @@ impl ProviderRegistry {
                 }
             })
             .collect::<Vec<_>>();
-        let cancelled = self.grants.revoke(principal, domain, sessions);
+        let cancelled = if deny_grant {
+            self.grants.revoke(principal, domain, sessions)
+        } else {
+            sessions
+                .into_iter()
+                .map(|session| self.resources.cancel_session_capability(session, domain))
+                .sum()
+        };
         drop(state);
         if let Some(provider) = self.providers.get(domain) {
             for context in lifecycle {
@@ -853,6 +910,11 @@ pub enum BridgeError {
     InvalidLimits,
     #[error("provider {domain} has an invalid bounded action inventory")]
     InvalidProvider { domain: Capability },
+    #[error("provider {domain} is unavailable on this platform: {reason}")]
+    ProviderUnavailable {
+        domain: Capability,
+        reason: Arc<str>,
+    },
     #[error("provider {domain} is already registered")]
     DuplicateProvider { domain: Capability },
     #[error("provider capacity {capacity} is full")]
@@ -972,6 +1034,8 @@ mod tests {
                     protocol_versions: BTreeSet::from([Arc::from("1")]),
                     actions: BTreeSet::from([Arc::from("get")]),
                     sensitive: false,
+                    dependencies: BTreeSet::new(),
+                    platform_availability: ProviderPlatformAvailability::Available,
                 },
                 calls: Arc::new(AtomicUsize::new(0)),
             }))
@@ -1011,6 +1075,8 @@ mod tests {
                     protocol_versions: BTreeSet::from([Arc::from("NAP-SHELL")]),
                     actions: BTreeSet::from([Arc::from("ready")]),
                     sensitive: false,
+                    dependencies: BTreeSet::new(),
+                    platform_availability: ProviderPlatformAvailability::Available,
                 },
                 calls: Arc::clone(&shell_calls),
             }))
@@ -1169,6 +1235,8 @@ mod tests {
                     protocol_versions: BTreeSet::from([Arc::from("1")]),
                     actions: BTreeSet::from([Arc::from("publish")]),
                     sensitive: true,
+                    dependencies: BTreeSet::new(),
+                    platform_availability: ProviderPlatformAvailability::Available,
                 },
                 calls: Arc::new(AtomicUsize::new(0)),
             }))
@@ -1327,6 +1395,8 @@ mod tests {
                     protocol_versions: BTreeSet::from([Arc::from("1")]),
                     actions: BTreeSet::from([Arc::from("subscribe")]),
                     sensitive: true,
+                    dependencies: BTreeSet::new(),
+                    platform_availability: ProviderPlatformAvailability::Available,
                 },
                 cancellation: Arc::clone(&cancellation),
             }))

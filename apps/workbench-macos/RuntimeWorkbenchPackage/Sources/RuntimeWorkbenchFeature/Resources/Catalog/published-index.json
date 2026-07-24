@@ -1,0 +1,31 @@
+{
+  "classification": "published-immutable-artifacts",
+  "digest": "4bbd1218609000deaa273ef43c232211a90515c481dbd1929c40536c1e44e466",
+  "fixtures": [
+    {
+      "aggregate_sha256": "828a6df02afd56782ea20f805084acce65c53f7c37554948c1e0a64aa5a2b0a8",
+      "artifact_mode": "single-file",
+      "coordinate": {
+        "author": "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5",
+        "d_tag": "good-morning",
+        "kind": 35129
+      },
+      "event_id": "b330bfaefd2ddf268ebe4196403e6163533c54f41dabc3518bdc1a896c68f40e",
+      "files": [
+        {
+          "bytes": 722,
+          "path": "event.json",
+          "sha256": "66d2a7ed73973e422c86119c3b5c5f1914cb15bad1bfbddecb61cc2edf1c9c17"
+        },
+        {
+          "artifact_path": "/index.html",
+          "bytes": 96172,
+          "path": "index.html",
+          "sha256": "ffd35eea5c84d03cdda74c23e1bbb2c40500f503833503aa688036faa52f3808"
+        }
+      ],
+      "name": "good-morning"
+    }
+  ],
+  "schema": 1
+}

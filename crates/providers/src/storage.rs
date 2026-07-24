@@ -1,7 +1,8 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use nmp_native_nap_bridge::{
-    Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderRequest,
+    Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderPlatformAvailability,
+    ProviderRequest,
 };
 use nmp_native_runtime_core::{BoundedJson, Capability, SessionId};
 use nmp_native_runtime_store::{RuntimeStore, StoreError};
@@ -62,6 +63,8 @@ impl StorageProvider {
                     .map(Arc::from)
                     .collect(),
                 sensitive: false,
+                dependencies: BTreeSet::new(),
+                platform_availability: ProviderPlatformAvailability::Available,
             },
             mutations: Mutex::new(()),
         })

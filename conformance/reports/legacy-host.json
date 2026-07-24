@@ -4,8 +4,8 @@
   "claim": "This report does not claim M2 compatibility while any fixture fails, is not run, or the registry-only shell handshake is absent.",
   "classification_findings": [
     {
-      "code": "reference-probe-rejected-by-pinned-wire-validator",
-      "effect": "These fixtures prove host edge behavior but cannot be called accepted conformant napplets without changing their emitted probe envelopes or classifying them as negative probes.",
+      "code": "registry-control-and-host-probes-separated-from-package-traffic",
+      "effect": "The pinned package validator receives only package-active NAP envelopes. Registry-only shell control and explicit forward-compatibility probes remain visible in the host evidence and are judged by host assertions.",
       "fixtures": [
         "external-assets",
         "prelude-order",
@@ -127,23 +127,10 @@
               },
               {
                 "area": "wire",
-                "detail": "1/1 emitted envelope(s) invalid",
-                "diagnostics": [
-                  {
-                    "envelope": {
-                      "type": "shell.ready"
-                    },
-                    "errors": [
-                      {
-                        "code": "unknown-domain",
-                        "message": "\"shell\" is not a known NAP domain"
-                      }
-                    ]
-                  }
-                ],
+                "detail": "Napplet emitted no envelopes",
                 "id": "wire/envelope-well-formed",
                 "severity": "error",
-                "status": "fail",
+                "status": "skip",
                 "title": "Every emitted envelope is well-formed"
               },
               {
@@ -163,18 +150,18 @@
               }
             ],
             "finishedAt": 1,
-            "ok": false,
+            "ok": true,
             "startedAt": 0,
             "summary": {
-              "errors": 1,
-              "failed": 1,
+              "errors": 0,
+              "failed": 0,
               "passed": 5,
-              "skipped": 4,
+              "skipped": 5,
               "total": 10,
               "warnings": 0
             }
           },
-          "status": "fail",
+          "status": "pass",
           "version": "0.13.0"
         },
         "emitted": [
@@ -183,9 +170,15 @@
           }
         ],
         "execution_observed": true,
+        "host_control_or_probe_emitted": [
+          {
+            "type": "shell.ready"
+          }
+        ],
         "observed_domains": [
           "shell"
         ],
+        "package_emitted": [],
         "page_errors": [],
         "pre_execution_refusal": false,
         "reason": "chromium-harness-cannot-register-the-native-nmp-artifact-url-scheme",
@@ -304,36 +297,10 @@
               },
               {
                 "area": "wire",
-                "detail": "2/2 emitted envelope(s) invalid",
-                "diagnostics": [
-                  {
-                    "envelope": {
-                      "type": "shell.ready"
-                    },
-                    "errors": [
-                      {
-                        "code": "unknown-domain",
-                        "message": "\"shell\" is not a known NAP domain"
-                      }
-                    ]
-                  },
-                  {
-                    "envelope": {
-                      "nappletPresent": true,
-                      "nostrAbsent": true,
-                      "type": "conformance.prelude-observed"
-                    },
-                    "errors": [
-                      {
-                        "code": "unknown-domain",
-                        "message": "\"conformance\" is not a known NAP domain"
-                      }
-                    ]
-                  }
-                ],
+                "detail": "Napplet emitted no envelopes",
                 "id": "wire/envelope-well-formed",
                 "severity": "error",
-                "status": "fail",
+                "status": "skip",
                 "title": "Every emitted envelope is well-formed"
               },
               {
@@ -353,18 +320,18 @@
               }
             ],
             "finishedAt": 1,
-            "ok": false,
+            "ok": true,
             "startedAt": 0,
             "summary": {
-              "errors": 1,
-              "failed": 1,
+              "errors": 0,
+              "failed": 0,
               "passed": 5,
-              "skipped": 4,
+              "skipped": 5,
               "total": 10,
               "warnings": 0
             }
           },
-          "status": "fail",
+          "status": "pass",
           "version": "0.13.0"
         },
         "emitted": [
@@ -378,9 +345,20 @@
           }
         ],
         "execution_observed": true,
+        "host_control_or_probe_emitted": [
+          {
+            "type": "shell.ready"
+          },
+          {
+            "nappletPresent": true,
+            "nostrAbsent": true,
+            "type": "conformance.prelude-observed"
+          }
+        ],
         "observed_domains": [
           "shell"
         ],
+        "package_emitted": [],
         "page_errors": [],
         "pre_execution_refusal": false,
         "reason": null,
@@ -467,35 +445,10 @@
               },
               {
                 "area": "wire",
-                "detail": "2/3 emitted envelope(s) invalid",
-                "diagnostics": [
-                  {
-                    "envelope": {
-                      "type": "shell.ready"
-                    },
-                    "errors": [
-                      {
-                        "code": "unknown-domain",
-                        "message": "\"shell\" is not a known NAP domain"
-                      }
-                    ]
-                  },
-                  {
-                    "envelope": {
-                      "type": "future-domain.operation",
-                      "value": 1
-                    },
-                    "errors": [
-                      {
-                        "code": "unknown-domain",
-                        "message": "\"future-domain\" is not a known NAP domain"
-                      }
-                    ]
-                  }
-                ],
+                "detail": "1 envelope(s) valid",
                 "id": "wire/envelope-well-formed",
                 "severity": "error",
-                "status": "fail",
+                "status": "pass",
                 "title": "Every emitted envelope is well-formed"
               },
               {
@@ -515,18 +468,18 @@
               }
             ],
             "finishedAt": 1,
-            "ok": false,
+            "ok": true,
             "startedAt": 0,
             "summary": {
-              "errors": 1,
-              "failed": 1,
-              "passed": 5,
+              "errors": 0,
+              "failed": 0,
+              "passed": 6,
               "skipped": 4,
               "total": 10,
               "warnings": 0
             }
           },
-          "status": "fail",
+          "status": "pass",
           "version": "0.13.0"
         },
         "emitted": [
@@ -543,8 +496,23 @@
           }
         ],
         "execution_observed": true,
+        "host_control_or_probe_emitted": [
+          {
+            "type": "shell.ready"
+          },
+          {
+            "type": "future-domain.operation",
+            "value": 1
+          }
+        ],
         "observed_domains": [
           "shell"
+        ],
+        "package_emitted": [
+          {
+            "id": "still-healthy",
+            "type": "theme.get"
+          }
         ],
         "page_errors": [],
         "pre_execution_refusal": false,
@@ -629,23 +597,10 @@
               },
               {
                 "area": "wire",
-                "detail": "1/1 emitted envelope(s) invalid",
-                "diagnostics": [
-                  {
-                    "envelope": {
-                      "type": "shell.ready"
-                    },
-                    "errors": [
-                      {
-                        "code": "unknown-domain",
-                        "message": "\"shell\" is not a known NAP domain"
-                      }
-                    ]
-                  }
-                ],
+                "detail": "Napplet emitted no envelopes",
                 "id": "wire/envelope-well-formed",
                 "severity": "error",
-                "status": "fail",
+                "status": "skip",
                 "title": "Every emitted envelope is well-formed"
               },
               {
@@ -666,18 +621,18 @@
             ],
             "finishedAt": 1,
             "napplet": "good-morning",
-            "ok": false,
+            "ok": true,
             "startedAt": 0,
             "summary": {
-              "errors": 1,
-              "failed": 1,
+              "errors": 0,
+              "failed": 0,
               "passed": 8,
-              "skipped": 1,
+              "skipped": 2,
               "total": 10,
               "warnings": 0
             }
           },
-          "status": "fail",
+          "status": "pass",
           "version": "0.13.0"
         },
         "emitted": [
@@ -686,9 +641,15 @@
           }
         ],
         "execution_observed": true,
+        "host_control_or_probe_emitted": [
+          {
+            "type": "shell.ready"
+          }
+        ],
         "observed_domains": [
           "shell"
         ],
+        "package_emitted": [],
         "page_errors": [],
         "pre_execution_refusal": false,
         "reason": null,
@@ -732,7 +693,7 @@
       "trusted-shell-policy.js": "d130c02862f8934caba77bfaca4a72cc2f94158daecfaf888830c0807e2352c4",
       "trusted-shell.css": "28ff9d810763208c5ee6acf9ec31950c7f3a5bcc02ba7156fdcf4acc74a2aa4c",
       "trusted-shell.html": "f9b64b0ddae5e01aaaeafebf4387de4c7e2dc911007955caa21c3838b68fdc0a",
-      "trusted-shell.js": "bc0624f1828a9b14e296254604d81bfdca0c8eac6abffcecc1c61cc537c0e5ca"
+      "trusted-shell.js": "c07fa0887de229df1436cc3610fdef74ec82a70c9b4eb9023658c88cc1b80c48"
     }
   },
   "status": "incomplete",
@@ -743,9 +704,9 @@
       "pass": 4
     },
     "pinned_conformance_engine": {
-      "fail": 4,
+      "fail": 0,
       "not-run": 1,
-      "pass": 0
+      "pass": 4
     }
   }
 }

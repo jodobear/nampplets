@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -7,21 +7,27 @@ use std::{
 };
 
 use nmp_native_nap_bridge::{
-    BridgeLimits, Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderRequest,
+    BridgeLimits, Provider, ProviderCall, ProviderDescriptor, ProviderError,
+    ProviderPlatformAvailability, ProviderPushError, ProviderPushSender, ProviderRequest,
+    ProviderSession, ProviderSessionContext, ProviderSessionEnd,
 };
 use nmp_native_providers::{
     ShellEnvironment, ShellEnvironmentError, ShellEnvironmentLimits, ShellEnvironmentSource,
     ShellProvider, ShellProviderLimits,
 };
 use nmp_native_runtime_app::{
-    AppErrorCode, AppLimits, ExecutableArtifact, KernelClock, PlatformCommand, RuntimeApp,
+    AppErrorCode, AppLimits, ExecutableArtifact, InstalledBuildAvailability, KernelClock,
+    PermissionDecision, PermissionPlatformAvailability, PlatformCommand, PlatformEvent, RuntimeApp,
     RuntimeAppConfig,
 };
 use nmp_native_runtime_core::{
-    AccountRef, ApprovedWrite, BindingRequest, BoundedJson, Capability, ExecutionProfile,
-    GrantDecision, GrantLimits, Principal, ResourceLimits, Sensitivity, SessionId,
+    AccountRef, ApprovedWrite, BindingRequest, BoundedJson, Capability, CapabilityRequest,
+    CapabilityRequirement, ExecutionProfile, GrantDecision, GrantLimits, Principal, ResourceLimits,
+    Sensitivity, SessionId, SessionState, WriteReceiptId,
 };
-use nmp_native_runtime_store::{InstalledBuild, RuntimeStore, StoreLimits, WorkspaceRecord};
+use nmp_native_runtime_store::{
+    InstalledBuild, RuntimeStore, StoreLimits, UninstallCleanupPolicy, WorkspaceRecord,
+};
 use nmp_native_surface::BindingLimits;
 use nmp_native_test_harness::FakeHostDataPlane;
 use parking_lot::Mutex;
@@ -77,6 +83,11 @@ impl ExecutableArtifact for TestArtifact {
 struct CapturingProvider {
     descriptor: ProviderDescriptor,
     seen: Mutex<Vec<(Principal, SessionId, Value)>>,
+    opened: Mutex<Vec<ProviderSessionContext>>,
+    ready: Mutex<Vec<ProviderSessionContext>>,
+    closed: Mutex<Vec<(ProviderSessionContext, ProviderSessionEnd)>>,
+    revoked: Mutex<Vec<ProviderSessionContext>>,
+    outbound: Mutex<BTreeMap<SessionId, ProviderPushSender>>,
     streaming: bool,
 }
 
@@ -88,10 +99,26 @@ impl CapturingProvider {
                 protocol_versions: BTreeSet::from([Arc::from("internal-canary/1")]),
                 actions: BTreeSet::from([Arc::from("ping")]),
                 sensitive: false,
+                dependencies: BTreeSet::new(),
+                platform_availability: ProviderPlatformAvailability::Available,
             },
             seen: Mutex::new(Vec::new()),
+            opened: Mutex::new(Vec::new()),
+            ready: Mutex::new(Vec::new()),
+            closed: Mutex::new(Vec::new()),
+            revoked: Mutex::new(Vec::new()),
+            outbound: Mutex::new(BTreeMap::new()),
             streaming,
         }
+    }
+
+    fn sender(&self, session: SessionId) -> ProviderPushSender {
+        self.outbound.lock().get(&session).cloned().unwrap()
+    }
+
+    fn with_dependencies(mut self, dependencies: impl IntoIterator<Item = Capability>) -> Self {
+        self.descriptor.dependencies = dependencies.into_iter().collect();
+        self
     }
 }
 
@@ -109,6 +136,27 @@ impl Provider for CapturingProvider {
         } else {
             Ok(ProviderCall::completed(None))
         }
+    }
+
+    fn session_opened(&self, session: ProviderSession) -> Result<(), ProviderError> {
+        self.opened.lock().push(session.context.clone());
+        self.outbound
+            .lock()
+            .insert(session.context.session, session.outbound);
+        Ok(())
+    }
+
+    fn session_ready(&self, session: &ProviderSessionContext) -> Result<(), ProviderError> {
+        self.ready.lock().push(session.clone());
+        Ok(())
+    }
+
+    fn session_closed(&self, session: &ProviderSessionContext, reason: ProviderSessionEnd) {
+        self.closed.lock().push((session.clone(), reason));
+    }
+
+    fn session_revoked(&self, session: &ProviderSessionContext) {
+        self.revoked.lock().push(session.clone());
     }
 }
 
@@ -166,11 +214,20 @@ impl Rig {
     }
 
     fn install(&self, principal: Principal) {
+        self.install_with_requests(principal, Vec::new());
+    }
+
+    fn install_with_requests(
+        &self,
+        principal: Principal,
+        capability_requests: Vec<CapabilityRequest>,
+    ) {
         self.app.dispatch(PlatformCommand::InstallVerified {
             build: InstalledBuild {
                 principal: principal.clone(),
                 title: Arc::from("Test napplet"),
                 manifest_metadata: json(serde_json::json!({"kind": 34128})),
+                capability_requests,
             },
             artifact: Arc::new(TestArtifact {
                 kind: 35_129,
@@ -276,6 +333,20 @@ fn canary() -> Capability {
     Capability::new("canary").unwrap()
 }
 
+fn request(capability: Capability, requirement: CapabilityRequirement) -> CapabilityRequest {
+    CapabilityRequest {
+        capability,
+        requirement,
+    }
+}
+
+fn permission(capability: Capability, decision: GrantDecision) -> PermissionDecision {
+    PermissionDecision {
+        capability,
+        decision,
+    }
+}
+
 fn json(value: Value) -> BoundedJson {
     BoundedJson::from_value(&value, 16 * 1024).unwrap()
 }
@@ -297,6 +368,205 @@ fn ready() -> Arc<[u8]> {
 
 fn mapped(value: Value) -> Arc<[u8]> {
     Arc::from(serde_json::to_vec(&value).unwrap())
+}
+
+fn wait_for_event(
+    app: &Arc<RuntimeApp>,
+    mut predicate: impl FnMut(&nmp_native_runtime_app::PlatformEvent) -> bool,
+) -> nmp_native_runtime_app::PlatformEvent {
+    let mut observer = app.observe();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap()
+        .block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                loop {
+                    if let Some(event) = app
+                        .events_after(0)
+                        .events
+                        .into_iter()
+                        .map(|event| event.event)
+                        .find(|event| predicate(event))
+                    {
+                        return event;
+                    }
+                    observer.changed().await.unwrap();
+                }
+            })
+            .await
+            .expect("event-driven app observation timed out")
+        })
+}
+
+#[test]
+fn provider_lifecycle_is_source_bound_and_conflated_pushes_start_after_ready() {
+    let rig = Rig::new(false);
+    let principal = principal('b');
+    rig.install(principal.clone());
+    rig.allow_runtime(principal.clone());
+    let session = rig.launch(principal.clone());
+
+    let opened = rig.provider.opened.lock().clone();
+    assert_eq!(opened.len(), 1);
+    assert_eq!(opened[0].principal, principal);
+    assert_eq!(opened[0].session, session);
+    assert_eq!(rig.app.snapshot().provider_push_lanes.len(), 1);
+    assert!(!rig.app.snapshot().provider_push_lanes[0].ready);
+    assert_eq!(
+        rig.app.snapshot().provider_push_lanes[0].source_window,
+        opened[0].source_window
+    );
+
+    let sender = rig.provider.sender(session);
+    let first = sender
+        .push(
+            "canary.state",
+            serde_json::Map::from_iter([("value".to_owned(), serde_json::json!(1))]),
+            Some("current"),
+        )
+        .unwrap();
+    let second = sender
+        .push(
+            "canary.state",
+            serde_json::Map::from_iter([("value".to_owned(), serde_json::json!(2))]),
+            Some("current"),
+        )
+        .unwrap();
+    assert!(second > first);
+    assert!(!rig.app.events_after(0).events.into_iter().any(|event| {
+        matches!(
+            event.event,
+            nmp_native_runtime_app::PlatformEvent::ProviderPush { .. }
+        )
+    }));
+
+    rig.ready(session);
+    let event = wait_for_event(&rig.app, |event| {
+        matches!(
+            event,
+            nmp_native_runtime_app::PlatformEvent::ProviderPush {
+                session: pushed_session,
+                ..
+            } if *pushed_session == session
+        )
+    });
+    let nmp_native_runtime_app::PlatformEvent::ProviderPush {
+        source_window,
+        provider_sequence,
+        domain,
+        envelope,
+        ..
+    } = event
+    else {
+        unreachable!()
+    };
+    assert_eq!(source_window, opened[0].source_window);
+    assert_eq!(provider_sequence, second);
+    assert_eq!(domain, canary());
+    assert_eq!(
+        envelope.decode().unwrap(),
+        serde_json::json!({"type": "canary.state", "value": 2})
+    );
+    assert_eq!(rig.provider.ready.lock().as_slice(), &[opened[0].clone()]);
+    let lane = &rig.app.snapshot().provider_push_lanes[0];
+    assert!(lane.ready);
+    assert_eq!(lane.last_provider_sequence, Some(second));
+    assert_eq!(lane.delivered_count, 1);
+
+    rig.ready(session);
+    assert_eq!(
+        rig.provider.ready.lock().len(),
+        1,
+        "ready lifecycle is idempotent"
+    );
+    rig.app.dispatch(PlatformCommand::Stop { session });
+    assert_eq!(
+        rig.provider.closed.lock().as_slice(),
+        &[(opened[0].clone(), ProviderSessionEnd::Stopped)]
+    );
+    assert_eq!(
+        sender.push("canary.state", serde_json::Map::new(), None),
+        Err(ProviderPushError::Closed)
+    );
+    assert_eq!(rig.app.snapshot().resources.admitted, 0);
+}
+
+#[test]
+fn provider_push_authority_spoof_revoke_and_termination_fail_closed() {
+    let rig = Rig::new(false);
+    let principal = principal('b');
+    rig.install(principal.clone());
+    rig.allow_runtime(principal.clone());
+    let session = rig.launch(principal.clone());
+    let sender = rig.provider.sender(session);
+
+    assert_eq!(
+        sender.push(
+            "canary.state",
+            serde_json::Map::from_iter([(
+                "principal".to_owned(),
+                serde_json::json!(principal.clone())
+            )]),
+            None,
+        ),
+        Err(ProviderPushError::AuthorityField)
+    );
+    assert_eq!(
+        sender.push("other.state", serde_json::Map::new(), None),
+        Err(ProviderPushError::DomainMismatch)
+    );
+
+    rig.ready(session);
+    rig.app.dispatch(PlatformCommand::Revoke {
+        principal: principal.clone(),
+        capability: canary(),
+    });
+    assert_eq!(
+        sender.push("canary.state", serde_json::Map::new(), None),
+        Err(ProviderPushError::Revoked)
+    );
+    assert_eq!(rig.provider.revoked.lock().len(), 1);
+    assert_eq!(rig.provider.revoked.lock()[0].session, session);
+    assert!(!rig.app.events_after(0).events.into_iter().any(|event| {
+        matches!(
+            event.event,
+            nmp_native_runtime_app::PlatformEvent::ProviderPush { .. }
+        )
+    }));
+    rig.app.dispatch(PlatformCommand::Crash {
+        session,
+        reason: Arc::from("test crash"),
+    });
+    assert_eq!(
+        rig.provider.closed.lock().last().unwrap().1,
+        ProviderSessionEnd::Crashed
+    );
+    assert_eq!(rig.app.snapshot().resources.admitted, 0);
+
+    rig.allow_runtime(principal.clone());
+    let replacement = rig.launch(principal);
+    let replacement_sender = rig.provider.sender(replacement);
+    rig.ready(replacement);
+    replacement_sender.terminate(nmp_native_nap_bridge::ProviderPushTermination::ProviderFailure);
+    let _ = wait_for_event(&rig.app, |event| {
+        matches!(
+            event,
+            nmp_native_runtime_app::PlatformEvent::ProviderPushLaneClosed {
+                session: closed_session,
+                termination: Some(
+                    nmp_native_nap_bridge::ProviderPushTermination::ProviderFailure
+                ),
+                ..
+            } if *closed_session == replacement
+        )
+    });
+    assert!(rig.app.snapshot().sessions.is_empty());
+    assert_eq!(rig.app.snapshot().resources.admitted, 0);
+    assert_eq!(
+        rig.provider.closed.lock().last().unwrap().1,
+        ProviderSessionEnd::Crashed
+    );
 }
 
 #[test]
@@ -476,6 +746,10 @@ fn nap_shell_state_is_closed_and_never_reused_by_a_relaunch() {
 
     rig.app.dispatch(PlatformCommand::Close);
     assert!(!rig.shell_provider.is_ready(second));
+    assert_eq!(
+        rig.provider.closed.lock().last().unwrap().1,
+        ProviderSessionEnd::RuntimeClosed
+    );
 }
 
 #[test]
@@ -494,6 +768,7 @@ fn launch_is_refused_when_shell_environment_differs_from_the_session_plan() {
             principal: principal.clone(),
             title: Arc::from("Test napplet"),
             manifest_metadata: json(serde_json::json!({"kind": 34128})),
+            capability_requests: Vec::new(),
         },
         artifact: Arc::new(TestArtifact {
             kind: 35_129,
@@ -552,13 +827,21 @@ fn stop_crash_and_revoke_return_session_resources_without_closing_binding() {
         session: first,
         bytes: ping(serde_json::json!({})),
     });
-    assert_eq!(rig.app.snapshot().resources.admitted, 2);
+    assert_eq!(
+        rig.app.snapshot().resources.admitted,
+        3,
+        "webview, provider delivery, and active provider operation are charged"
+    );
 
     rig.app.dispatch(PlatformCommand::Revoke {
         principal: principal.clone(),
         capability: canary(),
     });
-    assert_eq!(rig.app.snapshot().resources.admitted, 1);
+    assert_eq!(
+        rig.app.snapshot().resources.admitted,
+        2,
+        "revocation cancels the domain operation while the session delivery lane remains"
+    );
     rig.app.dispatch(PlatformCommand::Crash {
         session: first,
         reason: Arc::from("web-content-process-exited"),
@@ -579,6 +862,245 @@ fn stop_crash_and_revoke_return_session_resources_without_closing_binding() {
 }
 
 #[test]
+fn permission_review_is_exact_bounded_and_required_denial_blocks_launch() {
+    let rig = Rig::new(false);
+    let exact = principal('b');
+    let missing = Capability::new("missing").unwrap();
+    rig.install_with_requests(
+        exact.clone(),
+        vec![
+            request(canary(), CapabilityRequirement::Required),
+            request(missing.clone(), CapabilityRequirement::Optional),
+        ],
+    );
+
+    let review = rig.app.permission_review(&exact).unwrap();
+    assert_eq!(review.principal, exact);
+    assert_eq!(review.capabilities.len(), 2);
+    assert_eq!(review.capabilities[0].capability, canary());
+    assert_eq!(
+        review.capabilities[0].platform_availability,
+        PermissionPlatformAvailability::Available
+    );
+    assert_eq!(
+        review.capabilities[0].sensitivity,
+        Some(Sensitivity::Ordinary)
+    );
+    assert_eq!(
+        review.capabilities[1].platform_availability,
+        PermissionPlatformAvailability::Unknown {
+            reason: Arc::from(
+                "no provider metadata is registered for this capability on this runtime"
+            )
+        }
+    );
+    assert_eq!(
+        review.capabilities[1].requested_decision,
+        Some(GrantDecision::Denied)
+    );
+    assert!(
+        review.capabilities[1]
+            .decision_options
+            .iter()
+            .all(|option| option.decision == GrantDecision::Denied || !option.valid)
+    );
+
+    rig.app.dispatch(PlatformCommand::ApplyPermissionBatch {
+        principal: exact.clone(),
+        decisions: vec![
+            permission(canary(), GrantDecision::Denied),
+            permission(missing, GrantDecision::Denied),
+        ],
+    });
+    assert!(matches!(
+        rig.app.events_after(0).events.last().unwrap().event,
+        PlatformEvent::PermissionBatchApplied { .. }
+    ));
+    rig.app.dispatch(PlatformCommand::Launch {
+        principal: exact,
+        profile: ExecutionProfile::Legacy,
+        required_domains: BTreeSet::from([canary()]),
+    });
+    assert!(rig.app.snapshot().sessions.is_empty());
+    assert_eq!(
+        rig.app.snapshot().recent_errors.last().unwrap().code,
+        AppErrorCode::Bridge
+    );
+}
+
+#[test]
+fn permission_batch_revokes_live_work_without_overwriting_ask_every_time() {
+    let rig = Rig::new(true);
+    let exact = principal('b');
+    rig.install_with_requests(
+        exact.clone(),
+        vec![request(canary(), CapabilityRequirement::Required)],
+    );
+    rig.app.dispatch(PlatformCommand::ApplyPermissionBatch {
+        principal: exact.clone(),
+        decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
+    });
+    let session = rig.launch(exact.clone());
+    let sender = rig.provider.sender(session);
+    rig.ready(session);
+    rig.app.dispatch(PlatformCommand::MappedEnvelope {
+        session,
+        bytes: ping(serde_json::json!({})),
+    });
+    assert_eq!(rig.app.snapshot().resources.admitted, 3);
+
+    rig.app.dispatch(PlatformCommand::ApplyPermissionBatch {
+        principal: exact.clone(),
+        decisions: vec![permission(canary(), GrantDecision::AskEveryTime)],
+    });
+
+    assert_eq!(rig.app.snapshot().resources.admitted, 2);
+    assert_eq!(
+        rig.app.permission_review(&exact).unwrap().capabilities[0].current_decision,
+        GrantDecision::AskEveryTime
+    );
+    assert_eq!(
+        rig.store.grant(&exact, &canary()).unwrap(),
+        GrantDecision::AskEveryTime
+    );
+    assert_eq!(
+        sender.push("canary.state", serde_json::Map::new(), None),
+        Err(ProviderPushError::Revoked)
+    );
+    assert_eq!(rig.provider.revoked.lock().len(), 1);
+}
+
+#[test]
+fn permission_batch_store_failure_changes_neither_ledger_nor_outcome() {
+    let rig = Rig::new(false);
+    let exact = principal('b');
+    rig.install_with_requests(
+        exact.clone(),
+        vec![request(canary(), CapabilityRequirement::Required)],
+    );
+    rig.store
+        .uninstall_exact_build(&exact, UninstallCleanupPolicy::RuntimeOwnedExactBuildState)
+        .unwrap();
+
+    rig.app.dispatch(PlatformCommand::ApplyPermissionBatch {
+        principal: exact.clone(),
+        decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
+    });
+
+    assert_eq!(
+        rig.app.permission_review(&exact).unwrap().capabilities[0].current_decision,
+        GrantDecision::Denied
+    );
+    assert_eq!(
+        rig.app.snapshot().recent_errors.last().unwrap().code,
+        AppErrorCode::Store
+    );
+    assert!(
+        !rig.app
+            .events_after(0)
+            .events
+            .iter()
+            .any(|event| matches!(event.event, PlatformEvent::PermissionBatchApplied { .. }))
+    );
+}
+
+#[test]
+fn permission_batch_cannot_override_managed_host_policy() {
+    let rig = Rig::new(false);
+    let exact = principal('b');
+    rig.install_with_requests(
+        exact.clone(),
+        vec![request(canary(), CapabilityRequirement::Required)],
+    );
+    rig.store
+        .set_grant(&exact, &canary(), GrantDecision::Managed)
+        .unwrap();
+    let review = rig.app.permission_review(&exact).unwrap();
+    assert_eq!(
+        review.capabilities[0].current_decision,
+        GrantDecision::Managed
+    );
+    assert_eq!(review.capabilities[0].requested_decision, None);
+
+    rig.app.dispatch(PlatformCommand::ApplyPermissionBatch {
+        principal: exact.clone(),
+        decisions: vec![permission(canary(), GrantDecision::Denied)],
+    });
+
+    assert_eq!(
+        rig.store.grant(&exact, &canary()).unwrap(),
+        GrantDecision::Managed
+    );
+    assert_eq!(
+        rig.app.snapshot().recent_errors.last().unwrap().code,
+        AppErrorCode::Grant
+    );
+}
+
+#[test]
+fn permission_batch_persists_and_dependency_policy_is_owner_validated() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("runtime.db");
+    let store = Arc::new(RuntimeStore::open(&path, StoreLimits::default()).unwrap());
+    let host = Arc::new(FakeHostDataPlane::new(16));
+    let dependency = Capability::new("identity").unwrap();
+    let provider = Arc::new(CapturingProvider::new(false).with_dependencies([dependency]));
+    let (app, _) = open_app(Arc::clone(&store), host, provider);
+    let exact = principal('b');
+    app.dispatch(PlatformCommand::InstallVerified {
+        build: InstalledBuild {
+            principal: exact.clone(),
+            title: Arc::from("Dependent napplet"),
+            manifest_metadata: json(serde_json::json!({"kind": 35129})),
+            capability_requests: vec![request(canary(), CapabilityRequirement::Required)],
+        },
+        artifact: Arc::new(TestArtifact {
+            kind: 35_129,
+            author: exact.manifest_author().to_owned(),
+            d_tag: exact.d_tag().to_owned(),
+            aggregate: exact.aggregate_hash().to_owned(),
+        }),
+    });
+    app.dispatch(PlatformCommand::ApplyPermissionBatch {
+        principal: exact.clone(),
+        decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
+    });
+    assert_eq!(
+        app.snapshot().recent_errors.last().unwrap().code,
+        AppErrorCode::Grant
+    );
+
+    app.dispatch(PlatformCommand::SetGrant {
+        principal: exact.clone(),
+        capability: Capability::new("identity").unwrap(),
+        sensitivity: Sensitivity::Sensitive,
+        decision: GrantDecision::AllowExactBuild,
+    });
+    app.dispatch(PlatformCommand::ApplyPermissionBatch {
+        principal: exact.clone(),
+        decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
+    });
+    assert_eq!(
+        app.permission_review(&exact).unwrap().capabilities[0].current_decision,
+        GrantDecision::AllowExactBuild
+    );
+    app.dispatch(PlatformCommand::Close);
+    drop(app);
+    drop(store);
+
+    let reopened_store = Arc::new(RuntimeStore::open(&path, StoreLimits::default()).unwrap());
+    let reopened_host = Arc::new(FakeHostDataPlane::new(16));
+    let reopened_provider = Arc::new(
+        CapturingProvider::new(false).with_dependencies([Capability::new("identity").unwrap()]),
+    );
+    let (reopened, _) = open_app(reopened_store, reopened_host, reopened_provider);
+    assert_eq!(
+        reopened.permission_review(&exact).unwrap().capabilities[0].current_decision,
+        GrantDecision::AllowExactBuild
+    );
+}
+
+#[test]
 fn snapshot_manifest_without_d_tag_is_a_typed_identity_refusal() {
     let rig = Rig::new(false);
     let principal = principal('b');
@@ -587,6 +1109,7 @@ fn snapshot_manifest_without_d_tag_is_a_typed_identity_refusal() {
             principal: principal.clone(),
             title: Arc::from("Snapshot napplet"),
             manifest_metadata: json(serde_json::json!({"kind": 5129})),
+            capability_requests: Vec::new(),
         },
         artifact: Arc::new(TestArtifact {
             kind: 5_129,
@@ -614,6 +1137,13 @@ fn exact_build_revoke_does_not_cancel_another_principals_operation() {
     }
     let first = rig.launch(first_principal.clone());
     let second = rig.launch(second_principal);
+    let first_sender = rig.provider.sender(first);
+    let second_sender = rig.provider.sender(second);
+    assert_ne!(
+        first_sender.source_window(),
+        second_sender.source_window(),
+        "each launch owns an opaque source-window identity"
+    );
     for session in [first, second] {
         rig.ready(session);
         rig.app.dispatch(PlatformCommand::MappedEnvelope {
@@ -621,7 +1151,7 @@ fn exact_build_revoke_does_not_cancel_another_principals_operation() {
             bytes: ping(serde_json::json!({})),
         });
     }
-    assert_eq!(rig.app.snapshot().resources.admitted, 4);
+    assert_eq!(rig.app.snapshot().resources.admitted, 6);
 
     rig.app.dispatch(PlatformCommand::Revoke {
         principal: first_principal,
@@ -629,9 +1159,29 @@ fn exact_build_revoke_does_not_cancel_another_principals_operation() {
     });
     assert_eq!(
         rig.app.snapshot().resources.admitted,
-        3,
+        5,
         "only the revoked exact build's operation is cancelled"
     );
+    assert_eq!(
+        first_sender.push("canary.state", serde_json::Map::new(), None),
+        Err(ProviderPushError::Revoked)
+    );
+    second_sender
+        .push(
+            "canary.state",
+            serde_json::Map::from_iter([("owner".to_owned(), serde_json::json!("second"))]),
+            None,
+        )
+        .unwrap();
+    let _ = wait_for_event(&rig.app, |event| {
+        matches!(
+            event,
+            nmp_native_runtime_app::PlatformEvent::ProviderPush {
+                session: pushed_session,
+                ..
+            } if *pushed_session == second
+        )
+    });
     rig.app.dispatch(PlatformCommand::Stop { session: first });
     rig.app.dispatch(PlatformCommand::Stop { session: second });
     assert_eq!(rig.app.snapshot().resources.admitted, 0);
@@ -678,6 +1228,151 @@ fn mapped_payload_identity_is_ignored_and_stale_session_is_refused() {
         replacement.0 > session.0,
         "session ids are never caller-reused"
     );
+}
+
+#[test]
+fn library_filter_and_metadata_restore_are_bounded_and_offline_honest() {
+    let rig = Rig::new(false);
+    let first = principal('b');
+    let second = principal('c');
+    rig.install(first.clone());
+    rig.install(second.clone());
+    assert_eq!(rig.app.snapshot().library.total_installed, 2);
+    assert!(
+        rig.app.snapshot().library.builds.iter().all(|build| {
+            build.availability == InstalledBuildAvailability::SealedExactBytesReady
+        })
+    );
+
+    rig.app.dispatch(PlatformCommand::SetLibraryFilter {
+        query: Arc::from(second.aggregate_hash()),
+    });
+    assert_eq!(rig.app.snapshot().library.builds.len(), 1);
+    assert_eq!(rig.app.snapshot().library.builds[0].build.principal, second);
+    rig.app.dispatch(PlatformCommand::Close);
+
+    let (restored, _) = open_app(
+        Arc::clone(&rig.store),
+        rig.host.clone(),
+        rig.provider.clone(),
+    );
+    let snapshot = restored.snapshot();
+    assert_eq!(snapshot.library.total_installed, 2);
+    assert!(snapshot.library.builds.iter().all(|build| {
+        build.availability == InstalledBuildAvailability::MetadataOnly
+            && build.active_sessions.is_empty()
+    }));
+    restored.dispatch(PlatformCommand::Launch {
+        principal: first,
+        profile: ExecutionProfile::Legacy,
+        required_domains: BTreeSet::new(),
+    });
+    assert_eq!(
+        restored.snapshot().recent_errors.last().unwrap().code,
+        AppErrorCode::OfflineBytesUnavailable
+    );
+}
+
+#[test]
+fn suspend_resume_is_typed_and_stale_session_handles_remain_inert() {
+    let rig = Rig::new(false);
+    let principal = principal('b');
+    rig.install(principal.clone());
+    rig.allow_runtime(principal.clone());
+    let session = rig.launch(principal);
+
+    rig.app.dispatch(PlatformCommand::Suspend { session });
+    assert_eq!(
+        rig.app.snapshot().sessions[0].state,
+        SessionState::Suspended
+    );
+    rig.app.dispatch(PlatformCommand::MappedEnvelope {
+        session,
+        bytes: ready(),
+    });
+    assert_eq!(
+        rig.app.snapshot().recent_errors.last().unwrap().code,
+        AppErrorCode::InvalidLifecycle
+    );
+
+    rig.app.dispatch(PlatformCommand::Resume { session });
+    assert_eq!(rig.app.snapshot().sessions[0].state, SessionState::Running);
+    rig.ready(session);
+    assert!(rig.shell_provider.is_ready(session));
+
+    rig.app.dispatch(PlatformCommand::Stop { session });
+    rig.app.dispatch(PlatformCommand::Resume { session });
+    assert_eq!(
+        rig.app.snapshot().recent_errors.last().unwrap().code,
+        AppErrorCode::UnknownSession
+    );
+}
+
+#[test]
+fn uninstall_stops_only_exact_build_and_cleans_runtime_owned_state() {
+    let rig = Rig::new(false);
+    let removed = principal('b');
+    let retained = principal('c');
+    for principal in [removed.clone(), retained.clone()] {
+        rig.install(principal.clone());
+        rig.allow_runtime(principal);
+    }
+    rig.store
+        .put_component_value(&removed, "storage", "draft", b"gm")
+        .unwrap();
+    let receipt_id = WriteReceiptId(Arc::from("nmp-owned-receipt"));
+    rig.app.dispatch(PlatformCommand::SaveWorkspace {
+        workspace: WorkspaceRecord {
+            id: Arc::from("main"),
+            definition: json(serde_json::json!({"layout": "two-up"})),
+            retained_receipts: vec![receipt_id.clone()],
+        },
+    });
+    rig.app.dispatch(PlatformCommand::AssignWorkspaceBuild {
+        workspace_id: Arc::from("main"),
+        principal: removed.clone(),
+    });
+    let removed_session = rig.launch(removed.clone());
+    let retained_session = rig.launch(retained.clone());
+    assert_eq!(rig.app.snapshot().sessions.len(), 2);
+
+    rig.app.dispatch(PlatformCommand::Uninstall {
+        principal: removed.clone(),
+        cleanup: UninstallCleanupPolicy::RuntimeOwnedExactBuildState,
+    });
+
+    let snapshot = rig.app.snapshot();
+    assert_eq!(snapshot.library.total_installed, 1);
+    assert_eq!(snapshot.library.builds[0].build.principal, retained);
+    assert_eq!(snapshot.sessions.len(), 1);
+    assert_eq!(snapshot.sessions[0].id, retained_session);
+    assert_eq!(
+        rig.store
+            .component_value(&removed, "storage", "draft")
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        rig.store.grant(&removed, &canary()).unwrap(),
+        GrantDecision::Denied
+    );
+    assert!(rig.store.workspace_assignments("main").unwrap().is_empty());
+    assert_eq!(
+        rig.store.load_workspaces().unwrap()[0].retained_receipts,
+        [receipt_id]
+    );
+    assert!(snapshot.workspaces[0].assigned_builds.is_empty());
+
+    rig.app.dispatch(PlatformCommand::Resume {
+        session: removed_session,
+    });
+    assert_eq!(
+        rig.app.snapshot().recent_errors.last().unwrap().code,
+        AppErrorCode::UnknownSession
+    );
+    rig.app.dispatch(PlatformCommand::Stop {
+        session: retained_session,
+    });
 }
 
 #[test]

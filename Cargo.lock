@@ -1478,6 +1478,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nmp-native-catalog-resolver"
+version = "0.1.0"
+dependencies = [
+ "nmp-native-artifact",
+ "parking_lot",
+ "tempfile",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "nmp-native-nap-bridge"
 version = "0.1.0"
 dependencies = [
@@ -1511,6 +1522,49 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "nmp-native-provider-inc"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "hex",
+ "nmp-native-nap-bridge",
+ "nmp-native-runtime-core",
+ "parking_lot",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "nmp-native-provider-link"
+version = "0.1.0"
+dependencies = [
+ "nmp-native-nap-bridge",
+ "nmp-native-runtime-core",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "url",
+]
+
+[[package]]
+name = "nmp-native-provider-resource"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "hex",
+ "nmp-native-nap-bridge",
+ "nmp-native-runtime-core",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "url",
 ]
 
 [[package]]
@@ -1564,12 +1618,15 @@ dependencies = [
  "nmp-native-artifact",
  "nmp-native-nap-bridge",
  "nmp-native-nmp-adapter",
+ "nmp-native-provider-identity",
+ "nmp-native-provider-inc",
  "nmp-native-providers",
  "nmp-native-runtime-app",
  "nmp-native-runtime-core",
  "nmp-native-runtime-store",
  "nmp-native-surface",
  "parking_lot",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",

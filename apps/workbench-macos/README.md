@@ -36,7 +36,7 @@ Open `RuntimeWorkbench.xcworkspace`, not the project directly. The shared
 From the repository root:
 
 ```sh
-scripts/build-runtime-swift-xcframework.sh --universal
+scripts/build-runtime-swift-xcframework.sh --universal --check-bindings
 xcodebuildmcp swift-package test \
   --package-path apps/workbench-macos/RuntimeWorkbenchPackage
 xcodebuildmcp macos test \

@@ -1,0 +1,336 @@
+import Testing
+@testable import RuntimeWorkbenchFeature
+
+@MainActor
+private final class FakeActivitySubscription: ActivitySubscription {
+    private(set) var isCancelled = false
+
+    func cancel() {
+        isCancelled = true
+    }
+}
+
+@MainActor
+private final class FakeActivitySource: ActivitySource {
+    let initial: ActivitySnapshot
+    var refreshed: ActivitySnapshot
+
+    private(set) var subscribedScopes: [ActivityExactBuildScope] = []
+    private(set) var refreshedScopes: [ActivityExactBuildScope] = []
+    private(set) var subscription = FakeActivitySubscription()
+    private var receiver: (@MainActor (ActivityUpdate) -> Void)?
+
+    init(initial: ActivitySnapshot, refreshed: ActivitySnapshot? = nil) {
+        self.initial = initial
+        self.refreshed = refreshed ?? initial
+    }
+
+    func subscribe(
+        to scope: ActivityExactBuildScope,
+        receive: @escaping @MainActor (ActivityUpdate) -> Void
+    ) -> any ActivitySubscription {
+        subscribedScopes.append(scope)
+        receiver = receive
+        receive(.authoritative(initial))
+        return subscription
+    }
+
+    func refresh(scope: ActivityExactBuildScope) -> ActivitySnapshot {
+        refreshedScopes.append(scope)
+        return refreshed
+    }
+
+    func push(_ update: ActivityUpdate) {
+        receiver?(update)
+    }
+}
+
+private let activityScope = ActivityExactBuildScope(
+    manifestAuthor: "publisher-public-key",
+    dTag: "good-morning",
+    aggregateHash: "exact-aggregate-hash"
+)!
+
+private func activityFact(
+    id: String,
+    severity: ActivitySeverity,
+    category: ActivityCategory,
+    kind: ActivityFactKind,
+    scope: ActivityExactBuildScope = activityScope,
+    detailFields: [ActivityDetailField] = []
+) -> ActivityFact {
+    ActivityFact(
+        id: id,
+        scope: scope,
+        ordinal: UInt64(id.utf8.count),
+        severity: severity,
+        category: category,
+        kind: kind,
+        title: "\(kind.title) title",
+        summary: "\(category.title) summary",
+        evidenceSummary: kind == .pendingReceipt
+            ? "Write accepted; relay acknowledgement pending"
+            : nil,
+        detailFields: detailFields
+    )!
+}
+
+private func activitySnapshot(
+    revision: UInt64,
+    facts: [ActivityFact],
+    scope: ActivityExactBuildScope = activityScope
+) -> ActivitySnapshot {
+    ActivitySnapshot(
+        scope: scope,
+        revision: revision,
+        inventory: ActivityInventorySummary(
+            activeSessions: 1,
+            activeBindings: 2,
+            activeResources: 3,
+            pendingReceipts: 1
+        )!,
+        facts: facts,
+        omittedFactCount: 4
+    )!
+}
+
+@MainActor
+@Test func activityFilteringUsesRuntimeSeverityAndCategoryFacts() {
+    let facts = [
+        activityFact(
+            id: "provider",
+            severity: .information,
+            category: .provider,
+            kind: .providerCall
+        ),
+        activityFact(
+            id: "refusal",
+            severity: .warning,
+            category: .provider,
+            kind: .providerRefusal
+        ),
+        activityFact(
+            id: "receipt",
+            severity: .warning,
+            category: .receipt,
+            kind: .pendingReceipt
+        ),
+        activityFact(
+            id: "crash",
+            severity: .error,
+            category: .recovery,
+            kind: .crash
+        ),
+    ]
+    let source = FakeActivitySource(
+        initial: activitySnapshot(revision: 1, facts: facts)
+    )
+    let model = ActivityViewModel(
+        source: source,
+        scope: activityScope,
+        developerModeAvailable: false
+    )
+
+    model.start()
+    for severity in ActivitySeverity.allCases where severity != .warning {
+        model.setSeverity(severity, isIncluded: false)
+    }
+    for category in ActivityCategory.allCases where category != .receipt {
+        model.setCategory(category, isIncluded: false)
+    }
+
+    #expect(source.subscribedScopes == [activityScope])
+    #expect(model.visibleFacts.map(\.id) == ["receipt"])
+
+    model.stop()
+    #expect(source.subscription.isCancelled)
+}
+
+@Test func activityModelsRejectUnboundedOrCrossBuildProjections() {
+    let facts = (0...ActivityLimits.maximumFacts).map {
+        activityFact(
+            id: "fact-\($0)",
+            severity: .information,
+            category: .session,
+            kind: .activeSession
+        )
+    }
+    let otherScope = ActivityExactBuildScope(
+        manifestAuthor: "other-publisher",
+        dTag: "good-morning",
+        aggregateHash: "other-build"
+    )!
+    let crossBuildFact = activityFact(
+        id: "cross-build",
+        severity: .error,
+        category: .recovery,
+        kind: .crash,
+        scope: otherScope
+    )
+    let oversizedDetailValue = String(
+        repeating: "x",
+        count: ActivityLimits.maximumDetailValueUTF8Bytes + 1
+    )
+
+    #expect(
+        ActivitySnapshot(
+            scope: activityScope,
+            revision: 1,
+            inventory: .empty,
+            facts: facts
+        ) == nil
+    )
+    #expect(
+        ActivitySnapshot(
+            scope: activityScope,
+            revision: 1,
+            inventory: .empty,
+            facts: [crossBuildFact]
+        ) == nil
+    )
+    #expect(
+        ActivityDetailField(key: "detail", value: oversizedDetailValue) == nil
+    )
+    #expect(
+        ActivityInventorySummary(
+            activeSessions: ActivityInventorySummary.maximumActiveSessions + 1,
+            activeBindings: 0,
+            activeResources: 0,
+            pendingReceipts: 0
+        ) == nil
+    )
+}
+
+@MainActor
+@Test func developerDetailIsGatedAndSensitiveValuesAreNeverRetained() {
+    let bearer = "Bearer super-secret-token"
+    let privateKey = "nsec1thismustneverappear"
+    let fields = [
+        ActivityDetailField(key: "authorization", value: bearer)!,
+        ActivityDetailField(key: "relay", value: "wss://relay.example")!,
+    ]
+    let fact = ActivityFact(
+        id: "secret-fact",
+        scope: activityScope,
+        ordinal: 1,
+        severity: .debug,
+        category: .provider,
+        kind: .providerCall,
+        title: "Provider detail",
+        summary: "authorization: \(privateKey)",
+        evidenceSummary: "token=\(bearer)",
+        detailFields: fields
+    )!
+    let source = FakeActivitySource(
+        initial: activitySnapshot(revision: 1, facts: [fact])
+    )
+    let unavailableModel = ActivityViewModel(
+        source: source,
+        scope: activityScope,
+        developerModeAvailable: false
+    )
+    let developerModel = ActivityViewModel(
+        source: source,
+        scope: activityScope,
+        developerModeAvailable: true
+    )
+
+    unavailableModel.start()
+    unavailableModel.setDeveloperModeEnabled(true)
+    #expect(unavailableModel.detailFields(for: fact).isEmpty)
+
+    developerModel.start()
+    #expect(developerModel.detailFields(for: fact).isEmpty)
+    developerModel.setDeveloperModeEnabled(true)
+    #expect(
+        developerModel.detailFields(for: fact).map(\.value)
+            == ["[REDACTED]", "wss://relay.example"]
+    )
+
+    let retainedProjection = String(describing: fact)
+    #expect(!retainedProjection.contains(bearer))
+    #expect(!retainedProjection.contains(privateKey))
+    #expect(fact.summary == "[REDACTED]")
+    #expect(fact.evidenceSummary == "[REDACTED]")
+}
+
+@MainActor
+@Test func pushedRevisionGapStaysVisibleUntilExplicitRefresh() {
+    let initial = activitySnapshot(
+        revision: 10,
+        facts: [
+            activityFact(
+                id: "initial",
+                severity: .information,
+                category: .session,
+                kind: .activeSession
+            )
+        ]
+    )
+    let refreshed = activitySnapshot(
+        revision: 13,
+        facts: [
+            activityFact(
+                id: "refreshed",
+                severity: .information,
+                category: .recovery,
+                kind: .recovery
+            )
+        ]
+    )
+    let source = FakeActivitySource(initial: initial, refreshed: refreshed)
+    let model = ActivityViewModel(
+        source: source,
+        scope: activityScope,
+        developerModeAvailable: false
+    )
+
+    model.start()
+    source.push(
+        .next(
+            activitySnapshot(
+                revision: 12,
+                facts: [
+                    activityFact(
+                        id: "after-gap",
+                        severity: .warning,
+                        category: .provider,
+                        kind: .providerRefusal
+                    )
+                ]
+            ),
+            predecessorRevision: 11
+        )
+    )
+
+    #expect(
+        model.updateGap
+            == ActivityUpdateGap(
+                expectedPredecessorRevision: 10,
+                receivedPredecessorRevision: 11,
+                receivedRevision: 12
+            )
+    )
+    #expect(model.snapshot?.revision == 12)
+    #expect(source.refreshedScopes.isEmpty)
+
+    model.refresh()
+
+    #expect(source.refreshedScopes == [activityScope])
+    #expect(model.snapshot == refreshed)
+    #expect(model.updateGap == nil)
+}
+
+@MainActor
+@Test func activityDrawerBuildsWithFakeDataOnly() {
+    let source = FakeActivitySource(
+        initial: activitySnapshot(revision: 1, facts: [])
+    )
+    let view = ActivityDrawer(
+        source: source,
+        scope: activityScope,
+        developerModeAvailable: true
+    )
+
+    #expect(String(describing: type(of: view)) == "ActivityDrawer")
+}

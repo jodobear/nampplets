@@ -5,7 +5,7 @@
 //! dependencies and no canonical Nostr row or write state is persisted here.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt,
     num::NonZeroUsize,
     str::FromStr,
@@ -33,6 +33,7 @@ use nmp_native_runtime_core::{
 };
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 const EVENT_COLLECTION_FAMILY: &str = "event.collection";
 const EVENT_COLLECTION_SCHEMA: &str = "nostr.events.collection/1";
@@ -43,11 +44,66 @@ const MIN_FRAME_BYTES: usize = 1_024;
 pub struct NmpDataPlane {
     engine: Arc<Engine>,
     workers: Arc<WorkerAdmission>,
+    accounts: Mutex<AccountState>,
     identity: Arc<Mutex<IdentityState>>,
     closed: AtomicBool,
 }
 
 const MAX_IDENTITY_OBSERVERS: usize = 64;
+
+/// Public, non-secret ownership proof for one exact local-account
+/// installation. The adapter never serializes or retains a secret key; its
+/// private state associates this handle with NMP's opaque registration.
+///
+/// A handle becomes stale when it is removed, or when registering the same
+/// public key replaces its NMP signing capability. A stale handle cannot
+/// remove the replacement.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalAccountHandle {
+    pub installation_id: u64,
+    pub account: nmp_native_runtime_core::AccountRef,
+}
+
+/// Bounded account-lifecycle projection for native account UI. It contains
+/// public keys and opaque installation ids only, never signer objects or
+/// private key material.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalAccountSnapshot {
+    pub identity: PublicIdentity,
+    pub installations: Vec<LocalAccountHandle>,
+}
+
+/// Typed account-lifecycle failures. Secret material is deliberately absent
+/// from every variant and from all adapter-owned state.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum AccountLifecycleError {
+    #[error("account service is closed")]
+    Closed,
+    #[error("local account secret key is invalid")]
+    InvalidSecretKey,
+    #[error("NMP account capability registry is full at {limit} entries")]
+    Capacity { limit: usize },
+    #[error("NMP account capability instance namespace is exhausted")]
+    InstanceExhausted,
+    #[error("local account installation is stale or not owned by this profile")]
+    StaleInstallation,
+    #[error("account lifecycle failed: {reason}")]
+    Failed { reason: Arc<str> },
+}
+
+#[derive(Debug, Default)]
+struct AccountState {
+    next_installation_id: u64,
+    installations: BTreeMap<u64, InstalledAccount>,
+}
+
+#[derive(Debug)]
+struct InstalledAccount {
+    handle: LocalAccountHandle,
+    registration: nmp::AccountRegistration,
+}
 
 #[derive(Debug)]
 struct IdentityState {
@@ -102,6 +158,7 @@ impl NmpDataPlane {
                 active: AtomicUsize::new(0),
                 maximum: maximum_bridge_workers,
             }),
+            accounts: Mutex::new(AccountState::default()),
             identity: Arc::new(Mutex::new(IdentityState {
                 generation: 0,
                 current,
@@ -114,6 +171,146 @@ impl NmpDataPlane {
 
     pub fn active_bridge_workers(&self) -> usize {
         self.workers.active.load(Ordering::Acquire)
+    }
+
+    /// Register one local signer through the supported NMP facade. The secret
+    /// is consumed only by this call; the adapter retains its opaque NMP
+    /// registration and public key, never the caller's secret bytes.
+    ///
+    /// Registration deliberately does not select the new account. Native UI
+    /// must call [`Self::activate_local_account`] with the returned exact
+    /// handle, avoiding accidental identity switches during account import.
+    pub fn register_local_account(
+        &self,
+        secret_key: &str,
+    ) -> Result<LocalAccountHandle, AccountLifecycleError> {
+        self.ensure_account_service_open()?;
+        // Serialize all profile-owned account operations. NMP intentionally
+        // replaces a same-key registration, so the adapter must not let two
+        // callers race into a stale ownership record.
+        let mut accounts = self.accounts.lock();
+        let installation_id = accounts
+            .next_installation_id
+            .checked_add(1)
+            .ok_or_else(|| AccountLifecycleError::Failed {
+                reason: Arc::from("local account installation identifier space is exhausted"),
+            })?;
+        let registration = self
+            .engine
+            .add_account(secret_key)
+            .map_err(map_account_engine_error)?;
+        let account =
+            nmp_native_runtime_core::AccountRef(Arc::from(registration.public_key().to_string()));
+        // The public facade invalidates an older same-key registration. Drop
+        // the stale adapter record without trying to remove it: only the
+        // exact new registration owns the replacement capability now.
+        accounts
+            .installations
+            .retain(|_, installed| installed.handle.account != account);
+        accounts.next_installation_id = installation_id;
+        let handle = LocalAccountHandle {
+            installation_id,
+            account,
+        };
+        accounts.installations.insert(
+            handle.installation_id,
+            InstalledAccount {
+                handle: handle.clone(),
+                registration,
+            },
+        );
+        Ok(handle)
+    }
+
+    /// Select one currently-owned local account as NMP's active identity and
+    /// publish an identity change only after the facade confirms it.
+    pub fn activate_local_account(
+        &self,
+        handle: &LocalAccountHandle,
+    ) -> Result<PublicIdentity, AccountLifecycleError> {
+        self.ensure_account_service_open()?;
+        let accounts = self.accounts.lock();
+        let account = installed_account(&accounts, handle)?.handle.account.clone();
+        let public_key = parse_account_public_key(&account)?;
+        self.engine
+            .set_active_account(Some(public_key))
+            .map_err(map_account_engine_error)?;
+        drop(accounts);
+        Ok(self.update_identity(Some(account)))
+    }
+
+    /// Select NMP's read-only/signed-out identity. This does not remove any
+    /// registered local signer and therefore does not retarget accepted
+    /// writes, whose author was frozen at their approval/acceptance boundary.
+    pub fn logout_local_account(&self) -> Result<PublicIdentity, AccountLifecycleError> {
+        self.ensure_account_service_open()?;
+        let _accounts = self.accounts.lock();
+        self.engine
+            .set_active_account(None)
+            .map_err(map_account_engine_error)?;
+        drop(_accounts);
+        Ok(self.update_identity(None))
+    }
+
+    /// Remove exactly one adapter-owned local account installation. Removal
+    /// first proves ownership through NMP's opaque registration; a stale
+    /// handle cannot detach a replacement for the same public key. If this
+    /// account was active, logout follows successful removal and pushes the
+    /// signed-out identity exactly once. Accepted writes keep their frozen
+    /// author inside NMP regardless of this later lifecycle change.
+    pub fn remove_local_account(
+        &self,
+        handle: &LocalAccountHandle,
+    ) -> Result<PublicIdentity, AccountLifecycleError> {
+        self.ensure_account_service_open()?;
+        let mut accounts = self.accounts.lock();
+        let installed = installed_account(&accounts, handle)?;
+        let account = installed.handle.account.clone();
+        let registration = installed.registration.clone();
+        let removed = self
+            .engine
+            .remove_account(&registration)
+            .map_err(map_account_engine_error)?;
+        if !removed {
+            accounts.installations.remove(&handle.installation_id);
+            return Err(AccountLifecycleError::StaleInstallation);
+        }
+        accounts.installations.remove(&handle.installation_id);
+        let active = self
+            .engine
+            .active_account()
+            .map_err(map_account_engine_error)?
+            .is_some_and(|current| current.to_string() == account.0.as_ref());
+        if active {
+            self.engine
+                .set_active_account(None)
+                .map_err(map_account_engine_error)?;
+        }
+        drop(accounts);
+        if active {
+            Ok(self.update_identity(None))
+        } else {
+            self.refresh_identity().map_err(map_public_identity_error)
+        }
+    }
+
+    /// Return the finite set of locally registered account handles and the
+    /// current public identity. NMP's capability registry bounds this vector;
+    /// it is not a durable account database.
+    pub fn local_account_snapshot(&self) -> Result<LocalAccountSnapshot, AccountLifecycleError> {
+        self.ensure_account_service_open()?;
+        let installations = self
+            .accounts
+            .lock()
+            .installations
+            .values()
+            .map(|installed| installed.handle.clone())
+            .collect();
+        let identity = self.refresh_identity().map_err(map_public_identity_error)?;
+        Ok(LocalAccountSnapshot {
+            identity,
+            installations,
+        })
     }
 
     /// Close the profile. Engine shutdown is idempotent and wakes all query
@@ -143,10 +340,15 @@ impl NmpDataPlane {
             .map(|account| nmp::PublicKey::from_str(&account.0))
             .transpose()
             .map_err(|_| PublicIdentityError::InvalidSourceData)?;
+        let canonical = parsed
+            .as_ref()
+            .map(|pubkey| nmp_native_runtime_core::AccountRef(Arc::from(pubkey.to_string())));
+        let _accounts = self.accounts.lock();
         self.engine
             .set_active_account(parsed)
             .map_err(map_identity_engine_error)?;
-        Ok(self.update_identity(account))
+        drop(_accounts);
+        Ok(self.update_identity(canonical))
     }
 
     fn update_identity(
@@ -165,9 +367,11 @@ impl NmpDataPlane {
                     generation: state.generation,
                     account: state.current.clone(),
                 },
-                changed
-                    .then(|| state.observers.values().cloned().collect::<Vec<_>>())
-                    .unwrap_or_default(),
+                if changed {
+                    state.observers.values().cloned().collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                },
             )
         };
         for observer in observers {
@@ -180,17 +384,27 @@ impl NmpDataPlane {
         if self.closed.load(Ordering::Acquire) {
             return Err(PublicIdentityError::Closed);
         }
+        let _accounts = self.accounts.lock();
         let current = self
             .engine
             .active_account()
             .map_err(map_identity_engine_error)?
             .map(|pubkey| nmp_native_runtime_core::AccountRef(Arc::from(pubkey.to_string())));
+        drop(_accounts);
         Ok(self.update_identity(current))
     }
 
     fn ensure_open(&self) -> Result<(), HostDataError> {
         if self.closed.load(Ordering::Acquire) {
             Err(HostDataError::ServiceClosed)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn ensure_account_service_open(&self) -> Result<(), AccountLifecycleError> {
+        if self.closed.load(Ordering::Acquire) {
+            Err(AccountLifecycleError::Closed)
         } else {
             Ok(())
         }
@@ -427,20 +641,62 @@ impl PublicIdentityDataPlane for NmpDataPlane {
 
     fn read_public_identity(
         &self,
-        _frozen: &PublicIdentity,
+        frozen: &PublicIdentity,
         query: PublicIdentityQuery,
         cancellation: &nmp_native_runtime_core::Cancellation,
-        _limits: PublicIdentityReadLimits,
+        limits: PublicIdentityReadLimits,
     ) -> Result<PublicIdentityRead, PublicIdentityError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(PublicIdentityError::Closed);
+        }
         if cancellation.is_cancelled() {
             return Err(PublicIdentityError::Cancelled);
         }
-        // The pinned public facade exposes active-account read/selection, but
-        // no governed identity/profile/list projection. Do not fabricate
-        // those values or reach into mechanism crates.
-        Err(PublicIdentityError::QueryUnavailable {
-            query: Arc::from(public_identity_query_name(&query)),
-        })
+        validate_identity_read_limits(limits)?;
+        let kind = supported_identity_kind(&query).ok_or_else(|| {
+            PublicIdentityError::QueryUnavailable {
+                query: Arc::from(public_identity_query_name(&query)),
+            }
+        })?;
+        let Some(account) = &frozen.account else {
+            return identity_read_without_account(frozen.clone(), &query, limits);
+        };
+        let author = nmp::PublicKey::from_str(&account.0)
+            .map_err(|_| PublicIdentityError::InvalidSourceData)?;
+        let filter = Filter {
+            kinds: Some(BTreeSet::from([kind])),
+            authors: Some(Binding::Literal(BTreeSet::from([author.to_string()]))),
+            ..Filter::default()
+        };
+        let window_size =
+            NonZeroUsize::new(limits.maximum_items).ok_or(PublicIdentityError::LimitExceeded)?;
+        let subscription = self
+            .engine
+            .observe(
+                LiveQuery::from_filter(filter),
+                Some(Window::Expandable {
+                    initial: window_size,
+                    max: window_size,
+                }),
+            )
+            .map_err(map_identity_engine_error)?;
+        if cancellation.is_cancelled() {
+            subscription.cancel();
+            return Err(PublicIdentityError::Cancelled);
+        }
+        let frame = subscription.recv().map_err(|_| {
+            if self.closed.load(Ordering::Acquire) {
+                PublicIdentityError::Closed
+            } else {
+                PublicIdentityError::Failed {
+                    reason: Arc::from("NMP identity observation closed before its first frame"),
+                }
+            }
+        })?;
+        if cancellation.is_cancelled() {
+            return Err(PublicIdentityError::Cancelled);
+        }
+        project_identity_frame(frozen.clone(), &query, frame, limits)
     }
 
     fn observe_public_identity(
@@ -524,6 +780,50 @@ impl Drop for NmpIdentityObservation {
 impl Drop for NmpDataPlane {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+fn installed_account<'a>(
+    accounts: &'a AccountState,
+    handle: &LocalAccountHandle,
+) -> Result<&'a InstalledAccount, AccountLifecycleError> {
+    let Some(installed) = accounts.installations.get(&handle.installation_id) else {
+        return Err(AccountLifecycleError::StaleInstallation);
+    };
+    if installed.handle != *handle {
+        return Err(AccountLifecycleError::StaleInstallation);
+    }
+    Ok(installed)
+}
+
+fn parse_account_public_key(
+    account: &nmp_native_runtime_core::AccountRef,
+) -> Result<nmp::PublicKey, AccountLifecycleError> {
+    nmp::PublicKey::from_str(&account.0).map_err(|_| AccountLifecycleError::Failed {
+        reason: Arc::from("adapter-owned local account has an invalid public key"),
+    })
+}
+
+fn map_account_engine_error(error: EngineError) -> AccountLifecycleError {
+    match error {
+        EngineError::EngineClosed => AccountLifecycleError::Closed,
+        EngineError::InvalidSecretKey => AccountLifecycleError::InvalidSecretKey,
+        EngineError::AuthCapabilityRegistryFull { limit } => {
+            AccountLifecycleError::Capacity { limit }
+        }
+        EngineError::AuthCapabilityInstanceExhausted => AccountLifecycleError::InstanceExhausted,
+        other => AccountLifecycleError::Failed {
+            reason: Arc::from(other.to_string()),
+        },
+    }
+}
+
+fn map_public_identity_error(error: PublicIdentityError) -> AccountLifecycleError {
+    match error {
+        PublicIdentityError::Closed => AccountLifecycleError::Closed,
+        other => AccountLifecycleError::Failed {
+            reason: Arc::from(other.to_string()),
+        },
     }
 }
 
@@ -1152,6 +1452,261 @@ fn map_identity_engine_error(error: EngineError) -> PublicIdentityError {
     }
 }
 
+fn validate_identity_read_limits(
+    limits: PublicIdentityReadLimits,
+) -> Result<(), PublicIdentityError> {
+    if limits.maximum_items == 0 || limits.maximum_sources == 0 || limits.maximum_frame_bytes == 0 {
+        Err(PublicIdentityError::LimitExceeded)
+    } else {
+        Ok(())
+    }
+}
+
+fn supported_identity_kind(query: &PublicIdentityQuery) -> Option<u16> {
+    match query {
+        PublicIdentityQuery::Relays => Some(10_002),
+        PublicIdentityQuery::Profile => Some(0),
+        PublicIdentityQuery::Follows => Some(3),
+        PublicIdentityQuery::List { .. }
+        | PublicIdentityQuery::Zaps
+        | PublicIdentityQuery::Mutes
+        | PublicIdentityQuery::Blocked
+        | PublicIdentityQuery::Badges => None,
+    }
+}
+
+fn identity_read_without_account(
+    frozen_identity: PublicIdentity,
+    query: &PublicIdentityQuery,
+    limits: PublicIdentityReadLimits,
+) -> Result<PublicIdentityRead, PublicIdentityError> {
+    let value = match query {
+        PublicIdentityQuery::Relays => serde_json::json!({}),
+        PublicIdentityQuery::Profile => serde_json::Value::Null,
+        PublicIdentityQuery::Follows => serde_json::json!([]),
+        _ => {
+            return Err(PublicIdentityError::QueryUnavailable {
+                query: Arc::from(public_identity_query_name(query)),
+            });
+        }
+    };
+    bounded_identity_read(
+        frozen_identity,
+        value,
+        serde_json::json!({
+            "sources": [],
+            "shortfall": [{"kind": "no_active_account"}],
+        }),
+        limits.maximum_frame_bytes,
+    )
+}
+
+fn project_identity_frame(
+    frozen_identity: PublicIdentity,
+    query: &PublicIdentityQuery,
+    frame: nmp::Frame,
+    limits: PublicIdentityReadLimits,
+) -> Result<PublicIdentityRead, PublicIdentityError> {
+    let window = frame.window.ok_or_else(|| PublicIdentityError::Failed {
+        reason: Arc::from("NMP identity observation returned an unbounded frame"),
+    })?;
+    if window.rows.len() > limits.maximum_items
+        || frame.evidence.sources.len() > limits.maximum_sources
+    {
+        return Err(PublicIdentityError::LimitExceeded);
+    }
+    let frozen_pubkey = frozen_identity
+        .account
+        .as_ref()
+        .ok_or(PublicIdentityError::InvalidSourceData)?
+        .0
+        .as_ref();
+    if window
+        .rows
+        .iter()
+        .any(|row| row.event.pubkey.to_string() != frozen_pubkey)
+    {
+        return Err(PublicIdentityError::InvalidSourceData);
+    }
+    let value = match query {
+        PublicIdentityQuery::Relays => project_relay_list(&window.rows, limits.maximum_sources)?,
+        PublicIdentityQuery::Profile => project_profile(&window.rows)?,
+        PublicIdentityQuery::Follows => project_follows(&window.rows, limits.maximum_items)?,
+        _ => {
+            return Err(PublicIdentityError::QueryUnavailable {
+                query: Arc::from(public_identity_query_name(query)),
+            });
+        }
+    };
+    let sources = frame
+        .evidence
+        .sources
+        .iter()
+        .map(|source| {
+            serde_json::json!({
+                "relay": source.relay.to_string(),
+                "access": format!("{:?}", source.access),
+                "reconciledThrough": source.reconciled_through.map(|value| value.as_secs()),
+                "status": source_status_name(source.status),
+            })
+        })
+        .collect::<Vec<_>>();
+    let shortfall = frame
+        .evidence
+        .shortfall
+        .iter()
+        .map(shortfall_json)
+        .collect::<Vec<_>>();
+    bounded_identity_read(
+        frozen_identity,
+        value,
+        serde_json::json!({
+            "sources": sources,
+            "shortfall": shortfall,
+        }),
+        limits.maximum_frame_bytes,
+    )
+}
+
+fn project_profile(rows: &[nmp::Row]) -> Result<serde_json::Value, PublicIdentityError> {
+    let Some(row) = rows.first() else {
+        return Ok(serde_json::Value::Null);
+    };
+    if row.event.kind.as_u16() != 0 {
+        return Err(PublicIdentityError::InvalidSourceData);
+    }
+    let raw: serde_json::Value = serde_json::from_str(&row.event.content)
+        .map_err(|_| PublicIdentityError::InvalidSourceData)?;
+    let object = raw
+        .as_object()
+        .ok_or(PublicIdentityError::InvalidSourceData)?;
+    let mut profile = serde_json::Map::new();
+    for (source, target) in [
+        ("name", "name"),
+        ("display_name", "displayName"),
+        ("about", "about"),
+        ("picture", "picture"),
+        ("banner", "banner"),
+        ("nip05", "nip05"),
+        ("lud16", "lud16"),
+        ("website", "website"),
+    ] {
+        if let Some(value) = object.get(source).and_then(serde_json::Value::as_str) {
+            profile.insert(
+                target.to_owned(),
+                serde_json::Value::String(value.to_owned()),
+            );
+        }
+    }
+    Ok(serde_json::Value::Object(profile))
+}
+
+fn project_follows(
+    rows: &[nmp::Row],
+    maximum_items: usize,
+) -> Result<serde_json::Value, PublicIdentityError> {
+    let Some(row) = rows.first() else {
+        return Ok(serde_json::json!([]));
+    };
+    if row.event.kind.as_u16() != 3 {
+        return Err(PublicIdentityError::InvalidSourceData);
+    }
+    let mut follows = BTreeSet::new();
+    for tag in row
+        .event
+        .tags
+        .iter()
+        .filter(|tag| tag.as_slice().first().is_some_and(|kind| kind == "p"))
+    {
+        let Some(value) = tag.content() else {
+            continue;
+        };
+        let Ok(pubkey) = nmp::PublicKey::from_str(value) else {
+            continue;
+        };
+        follows.insert(pubkey.to_string());
+        if follows.len() > maximum_items {
+            return Err(PublicIdentityError::LimitExceeded);
+        }
+    }
+    Ok(serde_json::json!(follows.into_iter().collect::<Vec<_>>()))
+}
+
+fn project_relay_list(
+    rows: &[nmp::Row],
+    maximum_sources: usize,
+) -> Result<serde_json::Value, PublicIdentityError> {
+    let Some(row) = rows.first() else {
+        return Ok(serde_json::json!({}));
+    };
+    if row.event.kind.as_u16() != 10_002 {
+        return Err(PublicIdentityError::InvalidSourceData);
+    }
+    let mut relays = BTreeMap::<String, (bool, bool)>::new();
+    for tag in row
+        .event
+        .tags
+        .iter()
+        .filter(|tag| tag.as_slice().first().is_some_and(|kind| kind == "r"))
+    {
+        let fields = tag.as_slice();
+        let Some(raw_url) = fields.get(1) else {
+            continue;
+        };
+        let Ok(relay) = nmp::RelayUrl::parse(raw_url) else {
+            continue;
+        };
+        let permissions = match fields.get(2).map(String::as_str) {
+            None => (true, true),
+            Some("read") => (true, false),
+            Some("write") => (false, true),
+            Some(_) => continue,
+        };
+        let entry = relays.entry(relay.to_string()).or_insert((false, false));
+        entry.0 |= permissions.0;
+        entry.1 |= permissions.1;
+        if relays.len() > maximum_sources {
+            return Err(PublicIdentityError::LimitExceeded);
+        }
+    }
+    Ok(serde_json::Value::Object(
+        relays
+            .into_iter()
+            .map(|(relay, (read, write))| {
+                (
+                    relay,
+                    serde_json::json!({
+                        "read": read,
+                        "write": write,
+                    }),
+                )
+            })
+            .collect(),
+    ))
+}
+
+fn bounded_identity_read(
+    frozen_identity: PublicIdentity,
+    value: serde_json::Value,
+    scoped_evidence: serde_json::Value,
+    maximum_frame_bytes: usize,
+) -> Result<PublicIdentityRead, PublicIdentityError> {
+    let value_raw =
+        serde_json::to_string(&value).map_err(|_| PublicIdentityError::InvalidSourceData)?;
+    let evidence_raw = serde_json::to_string(&scoped_evidence)
+        .map_err(|_| PublicIdentityError::InvalidSourceData)?;
+    if value_raw.len().saturating_add(evidence_raw.len()) > maximum_frame_bytes {
+        return Err(PublicIdentityError::LimitExceeded);
+    }
+    Ok(PublicIdentityRead {
+        frozen_identity,
+        value: BoundedJson::from_raw(value_raw, maximum_frame_bytes)
+            .map_err(|_| PublicIdentityError::LimitExceeded)?,
+        scoped_evidence: BoundedJson::from_raw(evidence_raw, maximum_frame_bytes)
+            .map_err(|_| PublicIdentityError::LimitExceeded)?,
+    })
+}
+
 fn public_identity_query_name(query: &PublicIdentityQuery) -> &'static str {
     match query {
         PublicIdentityQuery::Relays => "relays",
@@ -1281,6 +1836,411 @@ mod tests {
             maximum_rows: 40,
             maximum_frame_bytes: 256 * 1024,
         }
+    }
+
+    fn identity_row(kind: u16, content: &str, tags: serde_json::Value) -> nmp::Row {
+        let event: nmp::Event = serde_json::from_value(serde_json::json!({
+            "id": "b330bfaefd2ddf268ebe4196403e6163533c54f41dabc3518bdc1a896c68f40e",
+            "pubkey": "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5",
+            "created_at": 1,
+            "kind": kind,
+            "tags": tags,
+            "content": content,
+            "sig": "78f9225eec934bbcc65c9ba3ca441ac78472a0edd567aa9df404d8a273b88cda46f2e4b3c9e94bb2e83550dff705ae76423c025319dc9b04f87f772cfa0f6ce3",
+        }))
+        .unwrap();
+        nmp::Row {
+            event,
+            sources: BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn identity_profile_projects_only_the_pinned_public_fields() {
+        let row = identity_row(
+            0,
+            r#"{"name":"Alice","display_name":"Alice A.","about":"hi","picture":"https://example.test/a.png","unknown":"ignored","website":42}"#,
+            serde_json::json!([]),
+        );
+        let profile = project_profile(&[row]).unwrap();
+        assert_eq!(profile["name"], "Alice");
+        assert_eq!(profile["displayName"], "Alice A.");
+        assert_eq!(profile["about"], "hi");
+        assert_eq!(profile["picture"], "https://example.test/a.png");
+        assert!(profile.get("unknown").is_none());
+        assert!(profile.get("website").is_none());
+    }
+
+    #[test]
+    fn identity_follows_are_validated_deduplicated_and_bounded() {
+        let followed = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+        let row = identity_row(
+            3,
+            "",
+            serde_json::json!([
+                ["p", followed],
+                ["p", followed, "wss://hint.example"],
+                ["p", "not-a-pubkey"],
+                ["e", "ignored"]
+            ]),
+        );
+        assert_eq!(
+            project_follows(std::slice::from_ref(&row), 1).unwrap(),
+            serde_json::json!([followed])
+        );
+        assert!(matches!(
+            project_follows(
+                &[identity_row(
+                    3,
+                    "",
+                    serde_json::json!([
+                        ["p", followed],
+                        [
+                            "p",
+                            "f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9"
+                        ]
+                    ]),
+                )],
+                1
+            ),
+            Err(PublicIdentityError::LimitExceeded)
+        ));
+    }
+
+    #[test]
+    fn identity_nip65_permissions_merge_without_accepting_invalid_relays() {
+        let row = identity_row(
+            10_002,
+            "",
+            serde_json::json!([
+                ["r", "wss://both.example"],
+                ["r", "wss://split.example", "read"],
+                ["r", "wss://split.example", "write"],
+                ["r", "https://not-a-relay.example"],
+                ["r", "wss://unknown.example", "other"]
+            ]),
+        );
+        let relays = project_relay_list(&[row], 2).unwrap();
+        assert_eq!(
+            relays,
+            serde_json::json!({
+                "wss://both.example": {"read": true, "write": true},
+                "wss://split.example": {"read": true, "write": true},
+            })
+        );
+    }
+
+    #[test]
+    fn signed_out_identity_reads_are_empty_with_honest_scoped_shortfall() {
+        let frozen = PublicIdentity {
+            generation: 4,
+            account: None,
+        };
+        let read = identity_read_without_account(
+            frozen.clone(),
+            &PublicIdentityQuery::Follows,
+            PublicIdentityReadLimits {
+                maximum_items: 8,
+                maximum_sources: 8,
+                maximum_frame_bytes: 4_096,
+            },
+        )
+        .unwrap();
+        assert_eq!(read.frozen_identity, frozen);
+        assert_eq!(read.value.decode().unwrap(), serde_json::json!([]));
+        assert_eq!(
+            read.scoped_evidence.decode().unwrap()["shortfall"][0]["kind"],
+            "no_active_account"
+        );
+        assert!(!read.scoped_evidence.as_str().contains("synced"));
+        assert!(!read.scoped_evidence.as_str().contains("complete"));
+    }
+
+    #[test]
+    fn identity_read_stays_frozen_across_an_active_account_retarget() {
+        let plane = NmpDataPlane::open(EngineConfig::default(), 2).unwrap();
+        let first = nmp_native_runtime_core::AccountRef(Arc::from(
+            "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5",
+        ));
+        let second = nmp_native_runtime_core::AccountRef(Arc::from(
+            "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        ));
+        let frozen = plane
+            .set_active_public_identity(Some(first.clone()))
+            .unwrap();
+        plane.set_active_public_identity(Some(second)).unwrap();
+
+        let read = plane
+            .read_public_identity(
+                &frozen,
+                PublicIdentityQuery::Follows,
+                &nmp_native_runtime_core::Cancellation::new(),
+                PublicIdentityReadLimits {
+                    maximum_items: 8,
+                    maximum_sources: 8,
+                    maximum_frame_bytes: 16 * 1024,
+                },
+            )
+            .unwrap();
+        assert_eq!(read.frozen_identity, frozen);
+        assert_eq!(read.frozen_identity.account, Some(first));
+        assert_eq!(read.value.decode().unwrap(), serde_json::json!([]));
+        assert!(!read.scoped_evidence.as_str().contains("synced"));
+        assert!(!read.scoped_evidence.as_str().contains("complete"));
+
+        assert!(matches!(
+            plane.read_public_identity(
+                &read.frozen_identity,
+                PublicIdentityQuery::Badges,
+                &nmp_native_runtime_core::Cancellation::new(),
+                PublicIdentityReadLimits {
+                    maximum_items: 8,
+                    maximum_sources: 8,
+                    maximum_frame_bytes: 16 * 1024,
+                },
+            ),
+            Err(PublicIdentityError::QueryUnavailable { .. })
+        ));
+        plane.close();
+    }
+
+    #[test]
+    fn identity_follows_read_uses_the_nmp_facade_canonical_store() {
+        let plane = NmpDataPlane::open(EngineConfig::default(), 2).unwrap();
+        // A valid public kind-3 fixture. Engine acceptance below independently
+        // verifies the id and signature before the adapter can observe it.
+        let event: nmp::Event = serde_json::from_value(serde_json::json!({
+            "id": "7260ac7aa1fcd3b71002d521a440bee500428482fd182b71c6f092083b8bdead",
+            "pubkey": "5d14b37435f05775bad136df0c51ccdcdc6f96482f0fea8404eeaf29ca5a8846",
+            "created_at": 1784850107_u64,
+            "kind": 3,
+            "tags": [
+                ["p", "5d14b37435f05775bad136df0c51ccdcdc6f96482f0fea8404eeaf29ca5a8846"],
+                ["p", "04c915daefee38317fa734444acee390a8269fe5810b2241e5e6dd343dfbecc9"],
+                ["client", "Primal Android"]
+            ],
+            "content": "",
+            "sig": "ab429ae0945f7093078c88a7ae66ed9927ceae0f5eed8451becd79b190d5459ebb44bb266b2d157037b00819707f4a89ed8bd1606cb4d3475d796bf39a33bc04",
+        }))
+        .unwrap();
+        let statuses = plane
+            .engine
+            .publish(WriteIntent {
+                payload: WritePayload::Signed(event.clone()),
+                durability: Durability::Durable,
+                routing: WriteRouting::AuthorOutbox,
+                identity_override: None,
+                correlation: None,
+            })
+            .unwrap();
+        loop {
+            match statuses.recv_timeout(Duration::from_secs(2)).unwrap() {
+                WriteStatus::Signed(id) if id == event.id => break,
+                WriteStatus::Failed(reason) => panic!("signed fixture was rejected: {reason}"),
+                _ => {}
+            }
+        }
+        let account = nmp_native_runtime_core::AccountRef(Arc::from(event.pubkey.to_string()));
+        let frozen = plane.set_active_public_identity(Some(account)).unwrap();
+        let read = plane
+            .read_public_identity(
+                &frozen,
+                PublicIdentityQuery::Follows,
+                &nmp_native_runtime_core::Cancellation::new(),
+                PublicIdentityReadLimits {
+                    maximum_items: 8,
+                    maximum_sources: 8,
+                    maximum_frame_bytes: 16 * 1024,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            read.value.decode().unwrap(),
+            serde_json::json!([
+                "04c915daefee38317fa734444acee390a8269fe5810b2241e5e6dd343dfbecc9",
+                "5d14b37435f05775bad136df0c51ccdcdc6f96482f0fea8404eeaf29ca5a8846"
+            ])
+        );
+        plane.close();
+    }
+
+    #[derive(Debug, Default)]
+    struct IdentityChanges {
+        values: Mutex<Vec<PublicIdentity>>,
+        closed: AtomicBool,
+    }
+
+    impl PublicIdentityChangeSink for IdentityChanges {
+        fn changed(&self, identity: PublicIdentity) {
+            self.values.lock().push(identity);
+        }
+
+        fn close(&self) {
+            self.closed.store(true, Ordering::Release);
+        }
+    }
+
+    #[test]
+    fn identity_observation_is_change_only_bounded_and_tears_down() {
+        let plane = NmpDataPlane::open(EngineConfig::default(), 2).unwrap();
+        let sink = Arc::new(IdentityChanges::default());
+        let sink_dyn: Arc<dyn PublicIdentityChangeSink> = sink.clone();
+        let subscription = plane.observe_public_identity(sink_dyn).unwrap();
+        assert_eq!(subscription.current.account, None);
+
+        let account = nmp_native_runtime_core::AccountRef(Arc::from(
+            "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5",
+        ));
+        plane
+            .set_active_public_identity(Some(account.clone()))
+            .unwrap();
+        plane
+            .set_active_public_identity(Some(account.clone()))
+            .unwrap();
+        plane.set_active_public_identity(None).unwrap();
+        assert_eq!(sink.values.lock().len(), 2);
+        assert_eq!(sink.values.lock()[0].account, Some(account));
+        assert_eq!(sink.values.lock()[1].account, None);
+
+        plane.close();
+        assert!(sink.closed.load(Ordering::Acquire));
+        subscription.observation.close();
+    }
+
+    #[test]
+    fn local_account_lifecycle_owns_exact_instances_and_pushes_identity() {
+        let plane = NmpDataPlane::open(EngineConfig::default(), 2).unwrap();
+        let sink = Arc::new(IdentityChanges::default());
+        let subscription = plane
+            .observe_public_identity(sink.clone() as Arc<dyn PublicIdentityChangeSink>)
+            .unwrap();
+
+        let first = plane
+            .register_local_account(&format!("{:064x}", 7_u8))
+            .unwrap();
+        assert_eq!(
+            plane.local_account_snapshot().unwrap().installations,
+            vec![first.clone()]
+        );
+        let active = plane.activate_local_account(&first).unwrap();
+        assert_eq!(active.account, Some(first.account.clone()));
+
+        // Same-key registration replaces the NMP capability. The old public
+        // handle cannot deactivate or remove the replacement.
+        let replacement = plane
+            .register_local_account(&format!("{:064x}", 7_u8))
+            .unwrap();
+        assert_ne!(first.installation_id, replacement.installation_id);
+        assert_eq!(first.account, replacement.account);
+        assert!(matches!(
+            plane.activate_local_account(&first),
+            Err(AccountLifecycleError::StaleInstallation)
+        ));
+        assert!(matches!(
+            plane.remove_local_account(&first),
+            Err(AccountLifecycleError::StaleInstallation)
+        ));
+        assert_eq!(
+            plane.local_account_snapshot().unwrap().installations,
+            vec![replacement.clone()]
+        );
+
+        let logged_out = plane.logout_local_account().unwrap();
+        assert_eq!(logged_out.account, None);
+        assert_eq!(sink.values.lock().len(), 2);
+        assert_eq!(sink.values.lock()[0].account, Some(first.account));
+        assert_eq!(sink.values.lock()[1].account, None);
+
+        assert_eq!(
+            plane.remove_local_account(&replacement).unwrap().account,
+            None
+        );
+        assert!(
+            plane
+                .local_account_snapshot()
+                .unwrap()
+                .installations
+                .is_empty()
+        );
+        subscription.observation.close();
+        plane.close();
+    }
+
+    #[derive(Debug, Default)]
+    struct DiscardReceiptSink;
+
+    impl ReceiptEventSink for DiscardReceiptSink {
+        fn push_latest(&self, _snapshot: ReceiptSnapshot) -> Result<(), ReceiptSinkError> {
+            Ok(())
+        }
+
+        fn close(&self, _reason: Option<Arc<str>>) {}
+    }
+
+    #[test]
+    fn accepted_write_keeps_its_frozen_account_after_account_switch_and_logout() {
+        let plane = NmpDataPlane::open(EngineConfig::default(), 2).unwrap();
+        let first = plane
+            .register_local_account(&format!("{:064x}", 11_u8))
+            .unwrap();
+        let second = plane
+            .register_local_account(&format!("{:064x}", 12_u8))
+            .unwrap();
+        plane.activate_local_account(&first).unwrap();
+        let author = nmp::PublicKey::from_str(&first.account.0).unwrap();
+        let draft = nmp::UnsignedEvent::new(
+            author,
+            nmp::Timestamp::from(1_u64),
+            nmp::Kind::TextNote,
+            Vec::new(),
+            "frozen author".to_owned(),
+        );
+        // The native approval has already frozen `first`; a later switch must
+        // not retarget that durable acceptance into `second`.
+        plane.activate_local_account(&second).unwrap();
+        let accepted = plane
+            .accept_write(
+                ApprovedWrite {
+                    approval_id: Arc::from("approval-frozen-author"),
+                    origin_principal: nmp_native_runtime_core::Principal::new(
+                        "a".repeat(64),
+                        "composer",
+                        "b".repeat(64),
+                    )
+                    .unwrap(),
+                    origin_session: nmp_native_runtime_core::SessionId(1),
+                    account: first.account.clone(),
+                    draft: BoundedJson::from_value(
+                        &serde_json::to_value(&draft).unwrap(),
+                        16 * 1024,
+                    )
+                    .unwrap(),
+                },
+                Arc::new(DiscardReceiptSink),
+            )
+            .unwrap();
+        assert_eq!(accepted.frozen_account, first.account);
+        assert_eq!(plane.logout_local_account().unwrap().account, None);
+        assert_eq!(accepted.frozen_account.0.as_ref(), draft.pubkey.to_string());
+        plane.close();
+    }
+
+    #[test]
+    fn local_account_lifecycle_fails_closed_after_profile_close() {
+        let plane = NmpDataPlane::open(EngineConfig::default(), 2).unwrap();
+        plane.close();
+        assert!(matches!(
+            plane.register_local_account(&format!("{:064x}", 7_u8)),
+            Err(AccountLifecycleError::Closed)
+        ));
+        assert!(matches!(
+            plane.logout_local_account(),
+            Err(AccountLifecycleError::Closed)
+        ));
+        assert!(matches!(
+            plane.local_account_snapshot(),
+            Err(AccountLifecycleError::Closed)
+        ));
     }
 
     #[test]

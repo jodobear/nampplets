@@ -120,25 +120,26 @@ jobs:
     name: Rust workspace
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    env:
-      RUSTUP_TOOLCHAIN: 1.85.0
     steps:
       - name: Check out the exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
-      - name: Install the declared Rust toolchain
-        run: rustup toolchain install 1.85.0 --profile minimal --component rustfmt,clippy
+      - name: Activate the repository-pinned Rust toolchain
+        run: |
+          rustup show active-toolchain | grep '^1.89.0-'
+          rustc --version | grep '^rustc 1.89.0 '
+          cargo --version
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Deny Clippy warnings
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Test the workspace
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: Prove the lockfile stayed immutable
         run: git diff --exit-code -- Cargo.lock
@@ -203,15 +204,48 @@ jobs:
   apple:
     name: Apple package and shared scheme
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - name: Check out the exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
+      - name: Verify the pinned Rust and Apple toolchains
+        run: |
+          rustup show active-toolchain | grep '^1.89.0-'
+          rustc --version | grep '^rustc 1.89.0 '
+          test "$(xcodebuild -version | head -n 1)" = "Xcode $(cat .xcode-version)"
+          swift --version | grep 'Apple Swift version 6.1'
+
+      - name: Install both macOS Rust standard libraries
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Test the native package build contract
+        run: scripts/tests/test-build-runtime-swift-xcframework.sh
+
+      - name: Generate checked Swift bindings and the universal XCFramework
+        run: scripts/build-runtime-swift-xcframework.sh --universal --check-bindings
+
+      - name: Prove generated source and binary tracking policy
+        run: |
+          git diff --exit-code -- Packages/NMPNativeRuntime/Sources/NMPNativeRuntime/NMPNativeRuntime.swift
+          git check-ignore -q Packages/NMPNativeRuntime/NMPNativeRuntime.xcframework/Info.plist
+          if git ls-files --error-unmatch Packages/NMPNativeRuntime/NMPNativeRuntime.xcframework >/dev/null 2>&1; then
+            echo "generated XCFramework must not be committed" >&2
+            exit 1
+          fi
+
+      - name: Test the generated Swift binding package
+        run: swift test --package-path Packages/NMPNativeRuntime --parallel
+
       - name: Test the Apple host package
         run: swift test --package-path platforms/apple --parallel
+
+      - name: Test the Workbench feature package
+        run: swift test --package-path apps/workbench-macos/RuntimeWorkbenchPackage --parallel
 
       - name: Build and test the shared RuntimeWorkbench scheme
         run: >-

@@ -233,6 +233,11 @@ def main() -> int:
     )
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--source", type=Path)
+    parser.add_argument(
+        "--dependency-store",
+        type=Path,
+        help="pnpm content-addressed store already populated from the pinned lockfile",
+    )
     arguments = parser.parse_args()
 
     with (ROOT / "compatibility.lock").open("rb") as handle:
@@ -279,15 +284,22 @@ def main() -> int:
                 corpus_tree=lock["kehto"]["corpus_tree"],
                 applications=applications,
             )
+        install_command = [
+            "corepack",
+            PACKAGE_MANAGER,
+            "install",
+            "--filter",
+            "./apps/playground/napplets/**",
+            "--offline",
+            "--frozen-lockfile",
+            "--ignore-scripts",
+        ]
+        if arguments.dependency_store is not None:
+            install_command.extend(
+                ["--store-dir", str(arguments.dependency_store.resolve())]
+            )
         install = bounded_process(
-            [
-                "corepack",
-                PACKAGE_MANAGER,
-                "install",
-                "--offline",
-                "--frozen-lockfile",
-                "--ignore-scripts",
-            ],
+            install_command,
             cwd=checkout,
             timeout=INSTALL_TIMEOUT_SECONDS,
         )
@@ -361,6 +373,11 @@ def main() -> int:
         },
         "package_manager": PACKAGE_MANAGER,
         "dependency_mode": "offline-frozen-lockfile",
+        "dependency_store": (
+            "explicit-content-addressed-store"
+            if arguments.dependency_store is not None
+            else "default-pnpm-store"
+        ),
         "limits": {
             "install_timeout_seconds": INSTALL_TIMEOUT_SECONDS,
             "build_timeout_seconds_per_application": BUILD_TIMEOUT_SECONDS,

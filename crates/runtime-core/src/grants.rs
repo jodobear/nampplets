@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fmt, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    sync::Arc,
+};
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -71,6 +75,19 @@ pub enum Sensitivity {
     Sensitive,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityRequirement {
+    Required,
+    Optional,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityRequest {
+    pub capability: Capability,
+    pub requirement: CapabilityRequirement,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GrantLimits {
     pub principals: usize,
@@ -97,6 +114,12 @@ pub struct GrantLedger {
 struct GrantRecord {
     decision: GrantDecision,
     sensitivity: Sensitivity,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum GrantBatchError<E> {
+    Grant(GrantError),
+    Commit(E),
 }
 
 impl GrantLedger {
@@ -150,6 +173,79 @@ impl GrantLedger {
             .map_or(GrantDecision::Denied, |grant| grant.decision)
     }
 
+    pub fn decision_entry(
+        &self,
+        principal: &Principal,
+        capability: &Capability,
+    ) -> Option<GrantDecision> {
+        self.entries
+            .read()
+            .get(principal)
+            .and_then(|grants| grants.get(capability))
+            .map(|grant| grant.decision)
+    }
+
+    /// Commits one finite exact-principal batch while the ledger write lock is
+    /// held. The persistence callback runs only after all ledger validation
+    /// succeeds, and memory is changed only after that callback succeeds.
+    ///
+    /// Callers must perform irreversible revocation/cancellation after this
+    /// method returns `Ok`, never from the callback.
+    pub fn commit_batch<E>(
+        &self,
+        principal: Principal,
+        changes: &[(Capability, Sensitivity, GrantDecision)],
+        persist: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), GrantBatchError<E>> {
+        if changes.is_empty() {
+            return Err(GrantBatchError::Grant(GrantError::EmptyBatch));
+        }
+        let mut unique = BTreeSet::new();
+        for (capability, _, _) in changes {
+            if !unique.insert(capability.clone()) {
+                return Err(GrantBatchError::Grant(
+                    GrantError::DuplicateBatchCapability {
+                        capability: capability.clone(),
+                    },
+                ));
+            }
+        }
+
+        let mut entries = self.entries.write();
+        if !entries.contains_key(&principal) && entries.len() >= self.limits.principals {
+            return Err(GrantBatchError::Grant(GrantError::PrincipalCapacity {
+                capacity: self.limits.principals,
+            }));
+        }
+        let current_count = entries.get(&principal).map_or(0, BTreeMap::len);
+        let additional = unique
+            .iter()
+            .filter(|capability| {
+                !entries
+                    .get(&principal)
+                    .is_some_and(|grants| grants.contains_key(*capability))
+            })
+            .count();
+        if current_count.saturating_add(additional) > self.limits.capabilities_per_principal {
+            return Err(GrantBatchError::Grant(GrantError::CapabilityCapacity {
+                capacity: self.limits.capabilities_per_principal,
+            }));
+        }
+
+        persist().map_err(GrantBatchError::Commit)?;
+        let grants = entries.entry(principal).or_default();
+        for (capability, sensitivity, decision) in changes {
+            grants.insert(
+                capability.clone(),
+                GrantRecord {
+                    decision: *decision,
+                    sensitivity: *sensitivity,
+                },
+            );
+        }
+        Ok(())
+    }
+
     pub fn revoke(
         &self,
         principal: &Principal,
@@ -195,6 +291,10 @@ pub enum GrantError {
     InvalidCapability,
     #[error("grant limits must be finite and non-zero")]
     InvalidLimits,
+    #[error("grant decision batch must not be empty")]
+    EmptyBatch,
+    #[error("grant decision batch repeats capability {capability}")]
+    DuplicateBatchCapability { capability: Capability },
     #[error("grant principal capacity {capacity} is full")]
     PrincipalCapacity { capacity: usize },
     #[error("per-principal capability capacity {capacity} is full")]
@@ -251,5 +351,76 @@ mod tests {
         assert_eq!(ledger.revoke(&principal('b'), &resource, [SessionId(1)]), 1);
         assert!(first.is_cancelled());
         assert!(!second.is_cancelled());
+    }
+
+    #[test]
+    fn batch_commit_is_all_or_nothing_across_persistence_and_memory() {
+        let resources = Arc::new(ResourceTracker::new(ResourceLimits::default()).unwrap());
+        let ledger = GrantLedger::new(GrantLimits::default(), resources).unwrap();
+        let identity = Capability::new("identity").unwrap();
+        let outbox = Capability::new("outbox").unwrap();
+        let exact = principal('b');
+        let changes = [
+            (
+                identity.clone(),
+                Sensitivity::Sensitive,
+                GrantDecision::AllowExactBuild,
+            ),
+            (
+                outbox.clone(),
+                Sensitivity::Sensitive,
+                GrantDecision::AllowExactBuild,
+            ),
+        ];
+
+        let result = ledger.commit_batch(exact.clone(), &changes, || Err::<(), _>("disk-full"));
+        assert_eq!(result, Err(GrantBatchError::Commit("disk-full")));
+        assert_eq!(ledger.decision(&exact, &identity), GrantDecision::Denied);
+        assert_eq!(ledger.decision(&exact, &outbox), GrantDecision::Denied);
+
+        ledger
+            .commit_batch(exact.clone(), &changes, || Ok::<(), &str>(()))
+            .unwrap();
+        assert_eq!(
+            ledger.decision(&exact, &identity),
+            GrantDecision::AllowExactBuild
+        );
+        assert_eq!(
+            ledger.decision(&exact, &outbox),
+            GrantDecision::AllowExactBuild
+        );
+    }
+
+    #[test]
+    fn batch_rejects_duplicates_before_persistence() {
+        let resources = Arc::new(ResourceTracker::new(ResourceLimits::default()).unwrap());
+        let ledger = GrantLedger::new(GrantLimits::default(), resources).unwrap();
+        let identity = Capability::new("identity").unwrap();
+        let changes = [
+            (
+                identity.clone(),
+                Sensitivity::Ordinary,
+                GrantDecision::Denied,
+            ),
+            (
+                identity.clone(),
+                Sensitivity::Sensitive,
+                GrantDecision::AllowExactBuild,
+            ),
+        ];
+        let persisted = std::cell::Cell::new(false);
+
+        let result = ledger.commit_batch(principal('b'), &changes, || {
+            persisted.set(true);
+            Ok::<(), ()>(())
+        });
+
+        assert!(matches!(
+            result,
+            Err(GrantBatchError::Grant(
+                GrantError::DuplicateBatchCapability { .. }
+            ))
+        ));
+        assert!(!persisted.get());
     }
 }

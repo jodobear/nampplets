@@ -2,9 +2,13 @@
 resolver = "2"
 members = [
     "crates/artifact",
+    "crates/catalog-resolver",
     "crates/nap-bridge",
     "crates/nmp-adapter",
     "crates/provider-identity",
+    "crates/provider-inc",
+    "crates/provider-link",
+    "crates/provider-resource",
     "crates/providers",
     "crates/runtime-app",
     "crates/runtime-core",
@@ -20,7 +24,9 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.85"
 
 [workspace.dependencies]
+base64 = "0.22.1"
 hex = "0.4.3"
+getrandom = "0.3.3"
 nmp = { git = "https://github.com/pablof7z/nmp.git", rev = "005dc2a5f12aa414961b313d05ebb021934e385c" }
 parking_lot = "0.12.3"
 rusqlite = { version = "0.32.1", features = ["bundled"] }
@@ -31,6 +37,7 @@ tempfile = "3.16.0"
 thiserror = "2.0.11"
 tokio = { version = "1.43.0", features = ["macros", "rt", "sync", "time"] }
 uniffi = "0.29"
+url = "2.5.4"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

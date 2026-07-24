@@ -11,9 +11,9 @@ use std::{
 };
 
 use nmp_native_nap_bridge::{
-    Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderPushError,
-    ProviderPushSender, ProviderRequest, ProviderSession, ProviderSessionContext,
-    ProviderSessionEnd,
+    Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderPlatformAvailability,
+    ProviderPushError, ProviderPushSender, ProviderRequest, ProviderSession,
+    ProviderSessionContext, ProviderSessionEnd,
 };
 use nmp_native_runtime_core::{BoundedJson, Capability, Principal, SessionId};
 pub use nmp_native_runtime_core::{
@@ -212,9 +212,14 @@ impl IdentityProvider {
                 .map(Arc::from)
                 .collect(),
                 sensitive: true,
+                dependencies: BTreeSet::new(),
+                platform_availability: ProviderPlatformAvailability::Available,
             },
             state: Mutex::new(IdentityState {
-                current: FrozenIdentity::signed_out(0),
+                current: FrozenIdentity {
+                    generation: 0,
+                    account: None,
+                },
                 sessions: BTreeMap::new(),
                 closed: false,
             }),
@@ -224,13 +229,13 @@ impl IdentityProvider {
             provider: Arc::downgrade(&provider),
         });
         let observation = source
-            .observe_account_changes(listener)
+            .observe_public_identity(listener)
             .map_err(IdentityProviderBuildError::Observation)?;
         validate_identity(&observation.current).map_err(|_| {
             IdentityProviderBuildError::Observation(IdentityDataError::InvalidSourceData)
         })?;
         provider.state.lock().current = observation.current;
-        *provider.observation.lock() = Some(observation.handle);
+        *provider.observation.lock() = Some(observation.observation);
         Ok(provider)
     }
 
@@ -262,7 +267,7 @@ impl IdentityProvider {
             if state.closed || identity.generation <= state.current.generation {
                 return;
             }
-            let changed = identity.pubkey != state.current.pubkey;
+            let changed = identity.account != state.current.account;
             state.current = identity.clone();
             if !changed {
                 return;
@@ -294,7 +299,7 @@ impl IdentityProvider {
         let message = BoundedJson::from_value(
             &json!({
                 "type": "identity.changed",
-                "pubkey": identity.wire_pubkey(),
+                "pubkey": wire_pubkey(identity),
             }),
             self.limits.maximum_response_bytes,
         )
@@ -311,10 +316,11 @@ impl IdentityProvider {
         // source truthfully projects as no connected signer.
         let pubkey = self
             .source
-            .freeze_account()
+            .freeze_public_identity()
             .ok()
             .filter(|identity| validate_identity(identity).is_ok())
-            .and_then(|identity| identity.pubkey)
+            .and_then(|identity| identity.account)
+            .map(|account| account.0)
             .unwrap_or_else(|| Arc::from(""));
         response(
             json!({
@@ -334,7 +340,7 @@ impl IdentityProvider {
     ) -> Result<ProviderCall, ProviderError> {
         let id = correlation_id(&request, self.limits)?;
         let action = Arc::clone(&request.action);
-        let frozen = match self.source.freeze_account() {
+        let frozen = match self.source.freeze_public_identity() {
             Ok(identity) if validate_identity(&identity).is_ok() => identity,
             Ok(_) => {
                 return error_response(
@@ -358,13 +364,13 @@ impl IdentityProvider {
                 &request,
             );
         }
-        let read = match self.source.read(
+        let read = match self.source.read_public_identity(
             &frozen,
             query.clone(),
             request.work.cancellation(),
             IdentityReadLimits {
                 maximum_items: self.limits.maximum_items,
-                maximum_relays: self.limits.maximum_relays,
+                maximum_sources: self.limits.maximum_relays,
                 maximum_frame_bytes: self.limits.maximum_evidence_bytes,
             },
         ) {
@@ -373,9 +379,21 @@ impl IdentityProvider {
                 return error_response(action.as_ref(), id, error, self.limits, &request);
             }
         };
+        let value = match decode_identity_value(&query, &read.value) {
+            Ok(value) => value,
+            Err(()) => {
+                return error_response(
+                    action.as_ref(),
+                    id,
+                    IdentityDataError::InvalidSourceData,
+                    self.limits,
+                    &request,
+                );
+            }
+        };
         if read.frozen_identity != frozen
             || validate_evidence(&read.scoped_evidence, self.limits).is_err()
-            || validate_value(&query, &read.value, self.limits).is_err()
+            || validate_value(&query, &value, self.limits).is_err()
         {
             return error_response(
                 action.as_ref(),
@@ -389,10 +407,10 @@ impl IdentityProvider {
             principal: request.principal.clone(),
             session: request.session,
             action,
-            frozen_pubkey: frozen.pubkey,
+            frozen_pubkey: frozen.account.map(|account| account.0),
             scoped_evidence: read.scoped_evidence,
         });
-        success_response(id, read.value, self.limits, &request)
+        success_response(id, value, self.limits, &request)
     }
 }
 
@@ -575,7 +593,7 @@ impl IdentityChangeListener for ChangeListener {
         }
     }
 
-    fn closed(&self) {
+    fn close(&self) {
         if let Some(provider) = self.provider.upgrade() {
             provider
                 .diagnostics
@@ -590,27 +608,6 @@ pub enum IdentityProviderBuildError {
     InvalidLimits,
     #[error("identity account observation could not start: {0}")]
     Observation(IdentityDataError),
-}
-
-/// Typed reason this crate cannot be wired into the current runtime merely by
-/// constructing an object. It intentionally does not implement `Provider`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NonRegisterableIdentityGap {
-    pub missing: BTreeSet<IdentityIntegrationSeam>,
-}
-
-impl NonRegisterableIdentityGap {
-    pub fn current_runtime() -> Self {
-        Self {
-            missing: BTreeSet::from([IdentityIntegrationSeam::NmpIdentityReadPort]),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum IdentityIntegrationSeam {
-    /// Runtime-core port, implemented by the sole nmp-adapter Engine owner.
-    NmpIdentityReadPort,
 }
 
 fn remove_exact_session(state: &mut IdentityState, context: &ProviderSessionContext) {
@@ -789,8 +786,64 @@ fn error_response(
     response(value, limits, request)
 }
 
+fn decode_identity_value(query: &IdentityQuery, value: &BoundedJson) -> Result<IdentityValue, ()> {
+    let value = value.decode().map_err(|_| ())?;
+    match query {
+        IdentityQuery::Relays => serde_json::from_value(value)
+            .map(IdentityValue::Relays)
+            .map_err(|_| ()),
+        IdentityQuery::Profile => serde_json::from_value(value)
+            .map(IdentityValue::Profile)
+            .map_err(|_| ()),
+        IdentityQuery::Follows => serde_json::from_value(value)
+            .map(IdentityValue::Follows)
+            .map_err(|_| ()),
+        IdentityQuery::List { .. } => serde_json::from_value(value)
+            .map(IdentityValue::List)
+            .map_err(|_| ()),
+        IdentityQuery::Zaps => serde_json::from_value(value)
+            .map(IdentityValue::Zaps)
+            .map_err(|_| ()),
+        IdentityQuery::Mutes => serde_json::from_value(value)
+            .map(IdentityValue::Mutes)
+            .map_err(|_| ()),
+        IdentityQuery::Blocked => serde_json::from_value(value)
+            .map(IdentityValue::Blocked)
+            .map_err(|_| ()),
+        IdentityQuery::Badges => serde_json::from_value(value)
+            .map(IdentityValue::Badges)
+            .map_err(|_| ()),
+    }
+}
+
+#[cfg(test)]
+fn encode_identity_value(value: &IdentityValue, maximum_bytes: usize) -> BoundedJson {
+    let value = match value {
+        IdentityValue::Relays(value) => serde_json::to_value(value),
+        IdentityValue::Profile(value) => serde_json::to_value(value),
+        IdentityValue::Follows(value)
+        | IdentityValue::List(value)
+        | IdentityValue::Mutes(value)
+        | IdentityValue::Blocked(value) => serde_json::to_value(value),
+        IdentityValue::Zaps(value) => serde_json::to_value(value),
+        IdentityValue::Badges(value) => serde_json::to_value(value),
+    }
+    .expect("identity test value must serialize");
+    BoundedJson::from_value(&value, maximum_bytes).expect("identity test value must fit")
+}
+
+fn wire_pubkey(identity: &FrozenIdentity) -> &str {
+    identity
+        .account
+        .as_ref()
+        .map_or("", |account| account.0.as_ref())
+}
+
 fn validate_identity(identity: &FrozenIdentity) -> Result<(), ()> {
-    identity.pubkey.as_deref().map_or(Ok(()), validate_pubkey)
+    identity
+        .account
+        .as_ref()
+        .map_or(Ok(()), |account| validate_pubkey(&account.0))
 }
 
 fn validate_pubkey(pubkey: &str) -> Result<(), ()> {
@@ -934,8 +987,8 @@ mod tests {
         SourceWindowId,
     };
     use nmp_native_runtime_core::{
-        ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, ResourceClass, ResourceLimits,
-        ResourceTracker, Sensitivity,
+        Cancellation, ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, ResourceClass,
+        ResourceLimits, ResourceTracker, Sensitivity,
     };
 
     use super::*;
@@ -982,11 +1035,11 @@ mod tests {
     }
 
     impl IdentityDataPlane for FakeSource {
-        fn freeze_account(&self) -> Result<FrozenIdentity, IdentityDataError> {
+        fn freeze_public_identity(&self) -> Result<FrozenIdentity, IdentityDataError> {
             Ok(self.identity.lock().clone())
         }
 
-        fn read(
+        fn read_public_identity(
             &self,
             frozen_identity: &FrozenIdentity,
             query: IdentityQuery,
@@ -1031,17 +1084,13 @@ mod tests {
                 }]),
             };
             let returned_identity = if self.retarget.load(Ordering::Acquire) {
-                FrozenIdentity::connected(
-                    frozen_identity.generation.saturating_add(1),
-                    "9".repeat(64),
-                )
-                .unwrap()
+                connected_identity(frozen_identity.generation.saturating_add(1), "9".repeat(64))
             } else {
                 frozen_identity.clone()
             };
             Ok(IdentityRead {
                 frozen_identity: returned_identity,
-                value,
+                value: encode_identity_value(&value, 64 * 1024),
                 scoped_evidence: BoundedJson::from_value(
                     &json!({
                         "sources": [{"relay": "wss://relay.example", "status": "requesting"}],
@@ -1053,14 +1102,14 @@ mod tests {
             })
         }
 
-        fn observe_account_changes(
+        fn observe_public_identity(
             &self,
             listener: Arc<dyn IdentityChangeListener>,
         ) -> Result<AccountObservation, IdentityDataError> {
             *self.listener.lock() = Some(listener);
             Ok(AccountObservation {
                 current: self.identity.lock().clone(),
-                handle: self.observation.clone(),
+                observation: self.observation.clone(),
             })
         }
     }
@@ -1080,8 +1129,22 @@ mod tests {
         Principal::new("1".repeat(64), "profile", "2".repeat(64)).unwrap()
     }
 
+    fn connected_identity(generation: u64, pubkey: String) -> FrozenIdentity {
+        FrozenIdentity {
+            generation,
+            account: Some(nmp_native_runtime_core::AccountRef(Arc::from(pubkey))),
+        }
+    }
+
+    fn signed_out_identity(generation: u64) -> FrozenIdentity {
+        FrozenIdentity {
+            generation,
+            account: None,
+        }
+    }
+
     fn provider() -> (Arc<IdentityProvider>, Arc<FakeSource>, Arc<FakeDiagnostics>) {
-        let source = FakeSource::new(FrozenIdentity::connected(1, "a".repeat(64)).unwrap());
+        let source = FakeSource::new(connected_identity(1, "a".repeat(64)));
         let diagnostics = Arc::new(FakeDiagnostics::default());
         let source_dyn: Arc<dyn IdentityDataPlane> = source.clone();
         let diagnostics_dyn: Arc<dyn IdentityDiagnosticsSink> = diagnostics.clone();
@@ -1301,9 +1364,9 @@ mod tests {
         let (provider, source, _) = provider();
         let (_registry, observer) = opened_session(Arc::clone(&provider));
         let initial = drain(&observer);
-        source.change(FrozenIdentity::connected(2, "b".repeat(64)).unwrap());
+        source.change(connected_identity(2, "b".repeat(64)));
         let changed = drain(&observer);
-        source.change(FrozenIdentity::signed_out(3));
+        source.change(signed_out_identity(3));
         let signed_out = drain(&observer);
         let messages = [initial, changed, signed_out].concat();
         assert_eq!(
@@ -1326,12 +1389,12 @@ mod tests {
         let (provider, source, _) = provider();
         let (registry, observer) = opened_session(Arc::clone(&provider));
         assert_eq!(drain(&observer).len(), 1);
-        source.change(FrozenIdentity::connected(1, "c".repeat(64)).unwrap());
+        source.change(connected_identity(1, "c".repeat(64)));
         assert!(drain(&observer).is_empty());
         registry.close_session(SessionId(7));
         assert_eq!(provider.active_sessions(), 0);
         assert!(observer.drain(16).unwrap().closed);
-        source.change(FrozenIdentity::connected(2, "d".repeat(64)).unwrap());
+        source.change(connected_identity(2, "d".repeat(64)));
         assert!(observer.drain(16).unwrap().pushes.is_empty());
     }
 
@@ -1348,7 +1411,7 @@ mod tests {
     #[test]
     fn unsafe_source_values_are_bounded_before_crossing_the_bridge() {
         let (provider, source, _) = provider();
-        *source.identity.lock() = FrozenIdentity::connected(1, "a".repeat(64)).unwrap();
+        *source.identity.lock() = connected_identity(1, "a".repeat(64));
         let limits = IdentityProviderLimits {
             maximum_items: 1,
             ..IdentityProviderLimits::default()
@@ -1369,15 +1432,6 @@ mod tests {
             BoundedJson::from_value(&json!({"sources": [], "synced": true}), 1024).unwrap();
         assert!(validate_evidence(&global_claim, limits).is_err());
         drop(provider);
-    }
-
-    #[test]
-    fn current_runtime_gap_cannot_be_registered_as_a_provider() {
-        let gap = NonRegisterableIdentityGap::current_runtime();
-        assert_eq!(
-            gap.missing,
-            BTreeSet::from([IdentityIntegrationSeam::NmpIdentityReadPort])
-        );
     }
 
     #[test]

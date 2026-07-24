@@ -24,7 +24,10 @@ let package = Package(
                 )
             ],
             exclude: ["Resources/README.md"],
-            resources: [.copy("Resources/TrustedShell")]
+            resources: [.copy("Resources/TrustedShell")],
+            linkerSettings: [
+                .linkedFramework("Security", .when(platforms: [.macOS]))
+            ]
         ),
         .testTarget(
             name: "NMPNativeRuntimeAppleTests",

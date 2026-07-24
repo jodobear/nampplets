@@ -5,8 +5,9 @@ use std::{
 };
 
 use nmp_native_nap_bridge::{
-    Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderPushSender, ProviderRequest,
-    ProviderSession, ProviderSessionContext, ProviderSessionEnd,
+    Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderPlatformAvailability,
+    ProviderPushSender, ProviderRequest, ProviderSession, ProviderSessionContext,
+    ProviderSessionEnd,
 };
 use nmp_native_runtime_core::{BoundedJson, Capability, Principal, SessionId};
 use parking_lot::Mutex;
@@ -95,6 +96,8 @@ impl ThemeProvider {
                 protocol_versions: BTreeSet::from([Arc::from(PINNED_NAP_PROTOCOL)]),
                 actions: BTreeSet::from([Arc::from("get")]),
                 sensitive: false,
+                dependencies: BTreeSet::new(),
+                platform_availability: ProviderPlatformAvailability::Available,
             },
         })
     }

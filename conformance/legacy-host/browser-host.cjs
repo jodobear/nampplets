@@ -279,7 +279,19 @@ async function runFixture(browser, origin, request, engine) {
     }
   }
 
-  const packageRecords = emitted.map((envelope, index) => ({
+  // @napplet/conformance validates package NAP traffic. The registry-only
+  // NAP-SHELL handshake and deliberate host-boundary probes are separate
+  // authorities and must not be relabelled as package-domain envelopes.
+  const packageEmitted = emitted.filter((envelope) => {
+    if (!envelope || typeof envelope.type !== "string") return false;
+    const separator = envelope.type.indexOf(".");
+    if (separator <= 0) return false;
+    return request.packageActiveDomains.includes(envelope.type.slice(0, separator));
+  });
+  const hostControlOrProbeEmitted = emitted.filter(
+    (envelope) => !packageEmitted.includes(envelope),
+  );
+  const packageRecords = packageEmitted.map((envelope, index) => ({
     envelope,
     verdict: engine.validateEnvelope(envelope),
     timestamp: index,
@@ -385,6 +397,8 @@ async function runFixture(browser, origin, request, engine) {
     assertions,
     observed_domains: nappletState.domains,
     emitted,
+    package_emitted: packageEmitted,
+    host_control_or_probe_emitted: hostControlOrProbeEmitted,
     page_errors: pageErrors,
     conformance: {
       status: packageRun.ok ? "pass" : "fail",

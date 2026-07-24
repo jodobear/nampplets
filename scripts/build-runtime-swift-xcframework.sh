@@ -12,10 +12,13 @@ Build the generated NMPNativeRuntime Swift bindings and macOS XCFramework.
 Options:
   --arm64-only  build only the native Apple Silicon macOS slice
   --universal   build arm64 + x86_64 and combine them (default)
+  --check-bindings
+                 refuse to replace a stale checked-in Swift binding
   -h, --help    show this help without building
 
 CARGO_TARGET_DIR is honored. The deployment target defaults to macOS 13.0 and
-may be overridden with MACOSX_DEPLOYMENT_TARGET.
+may be overridden with MACOSX_DEPLOYMENT_TARGET. CI uses --check-bindings so
+the generated Swift API must byte-match the checked-in package source.
 USAGE
 }
 
@@ -26,6 +29,7 @@ fail_usage() {
 }
 
 mode=universal
+check_bindings=false
 for argument in "$@"; do
   case "$argument" in
     --arm64-only)
@@ -35,6 +39,9 @@ for argument in "$@"; do
       ;;
     --universal)
       [[ "$mode" == universal ]] || fail_usage "conflicting architecture options"
+      ;;
+    --check-bindings)
+      check_bindings=true
       ;;
     -h|--help)
       usage
@@ -46,8 +53,8 @@ for argument in "$@"; do
   esac
 done
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 cd "$repo_root"
 
 crate=nmp-native-runtime-ffi
@@ -67,6 +74,7 @@ headers=$staging/headers
 package_dir=$repo_root/Packages/NMPNativeRuntime
 xcframework=$package_dir/NMPNativeRuntime.xcframework
 swift_sources=$package_dir/Sources/NMPNativeRuntime
+packaged_swift=$swift_sources/NMPNativeRuntime.swift
 
 export LC_ALL=C
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0}
@@ -76,7 +84,7 @@ echo "== build arm64 macOS Rust library =="
 MACOSX_DEPLOYMENT_TARGET=$deployment_target \
   CFLAGS="${CFLAGS:+$CFLAGS }$common_cflags" \
   CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }$common_cflags" \
-  cargo build -p "$crate" --release --target "$arm_target"
+  cargo build -p "$crate" --locked --release --target "$arm_target"
 arm_library=$target_dir/$arm_target/release/$library
 
 packaged_library=$arm_library
@@ -86,7 +94,7 @@ if [[ "$mode" == universal ]]; then
   MACOSX_DEPLOYMENT_TARGET=$deployment_target \
     CFLAGS="${CFLAGS:+$CFLAGS }$common_cflags" \
     CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }$common_cflags" \
-    cargo build -p "$crate" --release --target "$x86_target"
+    cargo build -p "$crate" --locked --release --target "$x86_target"
   x86_library=$target_dir/$x86_target/release/$library
   mkdir -p "$staging"
   packaged_library=$staging/$library
@@ -97,14 +105,29 @@ fi
 echo "== generate UniFFI Swift source and C module =="
 rm -rf "$generated" "$headers"
 mkdir -p "$generated" "$headers" "$swift_sources"
-cargo run -p "$crate" --features bindgen --bin uniffi-bindgen -- generate \
+cargo run -p "$crate" --locked --features bindgen --bin uniffi-bindgen -- generate \
   --library "$arm_library" \
   --language swift \
   --out-dir "$generated"
+# UniFFI 0.29 emits trailing blanks on otherwise empty/generated lines. Strip
+# only horizontal end-of-line whitespace so checked-in bindings remain
+# deterministic and pass the repository diff gate without changing semantics.
+perl -pi -e 's/[ \t]+$//' "$generated/nmp_native_runtime_ffi.swift"
+if [[ "$check_bindings" == true ]]; then
+  if [[ ! -f "$packaged_swift" ]]; then
+    echo "error: checked-in Swift binding is missing: $packaged_swift" >&2
+    exit 1
+  fi
+  if ! cmp -s "$generated/nmp_native_runtime_ffi.swift" "$packaged_swift"; then
+    echo "error: generated Swift binding is stale" >&2
+    echo "run scripts/build-runtime-swift-xcframework.sh --universal and commit the Swift source" >&2
+    exit 1
+  fi
+fi
 cp "$generated/nmp_native_runtime_ffiFFI.h" "$headers/"
 cp "$generated/nmp_native_runtime_ffiFFI.modulemap" "$headers/module.modulemap"
 cp "$generated/nmp_native_runtime_ffi.swift" \
-  "$swift_sources/NMPNativeRuntime.swift"
+  "$packaged_swift"
 
 echo "== create macOS XCFramework ($architectures) =="
 rm -rf "$xcframework"
@@ -114,9 +137,24 @@ xcodebuild -create-xcframework \
   -output "$xcframework"
 
 echo "== validate packaged architectures and generated binding =="
-lipo -archs "$packaged_library"
-test -s "$swift_sources/NMPNativeRuntime.swift"
+read -r -a packaged_architectures <<<"$(lipo -archs "$packaged_library")"
+expected_architectures=(arm64)
+if [[ "$mode" == universal ]]; then
+  expected_architectures+=(x86_64)
+fi
+for expected in "${expected_architectures[@]}"; do
+  if [[ ! " ${packaged_architectures[*]} " =~ [[:space:]]${expected}[[:space:]] ]]; then
+    echo "error: packaged library is missing architecture $expected" >&2
+    exit 1
+  fi
+done
+if [[ "${#packaged_architectures[@]}" -ne "${#expected_architectures[@]}" ]]; then
+  echo "error: packaged library has unexpected architectures: ${packaged_architectures[*]}" >&2
+  exit 1
+fi
+printf '%s\n' "${packaged_architectures[*]}"
+test -s "$packaged_swift"
 test -s "$xcframework/Info.plist"
 
 echo "XCFramework: $xcframework"
-echo "Swift source: $swift_sources/NMPNativeRuntime.swift"
+echo "Swift source: $packaged_swift"

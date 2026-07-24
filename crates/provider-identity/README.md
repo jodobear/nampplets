@@ -27,12 +27,14 @@ observation is installed atomically with its initial snapshot, pushes have no
 correlation id, sign-out pushes an empty `pubkey`, and a bounded push refusal
 terminates the affected session instead of silently losing the transition.
 
-The runtime still needs an identity read/observation port implemented by the
-sole NMP engine owner before advertising this domain. Mapped provider
-open/ready/close/revoke lifecycle and the bounded, conflating outbound push
-channel are consumed directly from `nmp-native-nap-bridge`.
+The sole NMP engine owner implements the provider's read/observation port using
+the supported `nmp::Engine` facade. Public key, kind-0 profile, kind-3 follows,
+and kind-10002 NIP-65 relay metadata are supported. Operations that cannot yet
+be composed honestly from the pinned facade return their typed default plus an
+error; they are never fabricated.
 
-`NonRegisterableIdentityGap::current_runtime()` records those missing seams.
-The data port exposes public identity values and scoped evidence only. Secret
-keys, signer capabilities, raw signer objects, and NMP mechanism types are not
-part of this crate's API.
+Mapped provider open/ready/close/revoke lifecycle and the bounded, conflating
+outbound push channel are consumed directly from `nmp-native-nap-bridge`. The
+data port exposes public identity values and scoped evidence only. Secret keys,
+signer capabilities, raw signer objects, and NMP mechanism types are not part
+of this crate's API.

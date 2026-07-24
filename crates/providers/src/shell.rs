@@ -5,7 +5,8 @@ use std::{
 };
 
 use nmp_native_nap_bridge::{
-    Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderRequest,
+    Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderPlatformAvailability,
+    ProviderRequest,
 };
 use nmp_native_runtime_core::{BoundedJson, Capability, Principal, SessionId};
 use parking_lot::Mutex;
@@ -164,6 +165,8 @@ impl ShellProvider {
                 protocol_versions: BTreeSet::from([Arc::from(PINNED_SHELL_PROTOCOL)]),
                 actions: BTreeSet::from([Arc::from("ready")]),
                 sensitive: false,
+                dependencies: BTreeSet::new(),
+                platform_availability: ProviderPlatformAvailability::Available,
             },
         })
     }

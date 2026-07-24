@@ -59,13 +59,21 @@ installation and workspace facts, never a second authoritative Nostr cache.
 
 ## Verification
 
+The clean-checkout gate, pinned toolchains, generated-binding check, and
+universal native package procedure are documented in
+[`docs/build-from-clean-checkout.md`](docs/build-from-clean-checkout.md).
+
 ```sh
-cargo test --workspace
+python3 -m unittest discover -s conformance/tests -p 'test_*.py'
 python3 conformance/scripts/verify_baseline.py
-node --test web/trusted-shell/tests/trusted-shell.test.js
-xcodebuildmcp swift-package test --package-path Packages/NMPNativeRuntime
-xcodebuildmcp swift-package test --package-path platforms/apple
-xcodebuildmcp swift-package test --package-path apps/workbench-macos/RuntimeWorkbenchPackage
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace
+node --test --test-timeout=10000 web/trusted-shell/tests/trusted-shell.test.js
+scripts/build-runtime-swift-xcframework.sh --universal --check-bindings
+swift test --package-path Packages/NMPNativeRuntime --parallel
+swift test --package-path platforms/apple --parallel
+swift test --package-path apps/workbench-macos/RuntimeWorkbenchPackage --parallel
 ```
 
 Use the concrete Xcode project and scheme arguments documented by

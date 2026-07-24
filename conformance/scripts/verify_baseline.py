@@ -11,6 +11,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import generate_digests
+
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFORMANCE = ROOT / "conformance"
@@ -114,12 +116,19 @@ def verify_lock(lock: dict[str, Any]) -> None:
 
 def verify_digest_manifest() -> int:
     manifest = CONFORMANCE / "digests.sha256"
+    expected_paths = {
+        relative.as_posix() for relative in generate_digests.tracked_inputs()
+    }
+    observed_paths: set[str] = set()
     count = 0
     for line_number, line in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
         match = re.fullmatch(r"([0-9a-f]{64})  (.+)", line)
         if not match:
             raise BaselineError(f"invalid digest line {line_number}")
         expected, relative = match.groups()
+        if relative in observed_paths:
+            raise BaselineError(f"duplicate digest target: {relative}")
+        observed_paths.add(relative)
         file = ROOT / relative
         if not file.is_file():
             raise BaselineError(f"digest target missing: {relative}")
@@ -129,6 +138,15 @@ def verify_digest_manifest() -> int:
                 f"digest mismatch for {relative}: expected {expected}, found {actual}"
             )
         count += 1
+    missing = expected_paths - observed_paths
+    unexpected = observed_paths - expected_paths
+    if missing or unexpected:
+        raise BaselineError(
+            "digest target set drifted: "
+            f"missing={sorted(missing)}, unexpected={sorted(unexpected)}"
+        )
+    if manifest.read_bytes() != generate_digests.manifest_bytes():
+        raise BaselineError("digest manifest is not in canonical order or encoding")
     if count < 20:
         raise BaselineError("digest manifest is unexpectedly small")
     return count

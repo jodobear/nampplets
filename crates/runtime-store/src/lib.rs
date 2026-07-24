@@ -9,24 +9,28 @@ use std::{
     sync::Arc,
 };
 
-use nmp_native_runtime_core::{BoundedJson, Capability, GrantDecision, Principal, WriteReceiptId};
+use nmp_native_runtime_core::{
+    BoundedJson, Capability, CapabilityRequest, GrantDecision, Principal, WriteReceiptId,
+};
 use parking_lot::Mutex;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StoreLimits {
     pub maximum_installs: usize,
     pub maximum_install_title_bytes: usize,
+    pub maximum_install_search_query_bytes: usize,
     pub maximum_grants_per_principal: usize,
     pub maximum_kv_keys_per_scope: usize,
     pub maximum_kv_bytes_per_scope: usize,
     pub maximum_value_bytes: usize,
     pub maximum_workspaces: usize,
     pub maximum_workspace_bytes: usize,
+    pub maximum_workspace_assignments: usize,
     pub maximum_retained_receipts_per_workspace: usize,
     pub maximum_retained_receipt_bytes_per_workspace: usize,
     pub maximum_activity_facts: usize,
@@ -40,12 +44,14 @@ impl Default for StoreLimits {
         Self {
             maximum_installs: 512,
             maximum_install_title_bytes: 512,
+            maximum_install_search_query_bytes: 256,
             maximum_grants_per_principal: 64,
             maximum_kv_keys_per_scope: 1_024,
             maximum_kv_bytes_per_scope: 8 * 1024 * 1024,
             maximum_value_bytes: 512 * 1024,
             maximum_workspaces: 64,
             maximum_workspace_bytes: 512 * 1024,
+            maximum_workspace_assignments: 512,
             maximum_retained_receipts_per_workspace: 256,
             maximum_retained_receipt_bytes_per_workspace: 64 * 1024,
             maximum_activity_facts: 10_000,
@@ -68,6 +74,28 @@ pub struct InstalledBuild {
     pub principal: Principal,
     pub title: Arc<str>,
     pub manifest_metadata: BoundedJson,
+    pub capability_requests: Vec<CapabilityRequest>,
+}
+
+/// The exact runtime-owned state removed when one installed build is
+/// uninstalled.
+///
+/// This policy deliberately excludes activity evidence, workspace definitions
+/// and retained NMP receipt identifiers. It also cannot delete sealed artifact
+/// bytes: those belong to the artifact resolver/cache, which must expose its
+/// own exact-build deletion API before the application kernel can coordinate
+/// that cleanup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UninstallCleanupPolicy {
+    RuntimeOwnedExactBuildState,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UninstallReport {
+    pub installation_removed: bool,
+    pub grants_removed: usize,
+    pub component_values_removed: usize,
+    pub workspace_assignments_removed: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +135,10 @@ impl RuntimeStore {
 
     pub fn install(&self, build: &InstalledBuild) -> Result<(), StoreError> {
         validate_install_title(&build.title, self.limits.maximum_install_title_bytes)?;
+        let capability_requests = encode_capability_requests(
+            &build.capability_requests,
+            self.limits.maximum_grants_per_principal,
+        )?;
         if build.manifest_metadata.byte_len() > self.limits.maximum_value_bytes {
             return Err(StoreError::ManifestMetadataTooLarge {
                 actual: build.manifest_metadata.byte_len(),
@@ -133,17 +165,19 @@ impl RuntimeStore {
         }
         connection.execute(
             "INSERT INTO installations
-                (author, d_tag, aggregate_hash, title, manifest_metadata)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+                (author, d_tag, aggregate_hash, title, manifest_metadata, capability_requests)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(author, d_tag, aggregate_hash) DO UPDATE SET
                 title = excluded.title,
-                manifest_metadata = excluded.manifest_metadata",
+                manifest_metadata = excluded.manifest_metadata,
+                capability_requests = excluded.capability_requests",
             params![
                 build.principal.manifest_author(),
                 build.principal.d_tag(),
                 build.principal.aggregate_hash(),
                 build.title.as_ref(),
                 build.manifest_metadata.as_str(),
+                capability_requests,
             ],
         )?;
         Ok(())
@@ -152,7 +186,7 @@ impl RuntimeStore {
     pub fn installed_builds(&self) -> Result<Vec<InstalledBuild>, StoreError> {
         let connection = self.connection.lock();
         let mut statement = connection.prepare(
-            "SELECT author, d_tag, aggregate_hash, title, manifest_metadata
+            "SELECT author, d_tag, aggregate_hash, title, manifest_metadata, capability_requests
              FROM installations ORDER BY author, d_tag, aggregate_hash
              LIMIT ?1",
         )?;
@@ -164,11 +198,12 @@ impl RuntimeStore {
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
                 ))
             })?;
         let builds = rows
             .map(|row| {
-                let (author, d_tag, aggregate_hash, title, metadata) = row?;
+                let (author, d_tag, aggregate_hash, title, metadata, capability_requests) = row?;
                 validate_install_title(&title, self.limits.maximum_install_title_bytes)
                     .map_err(|error| StoreError::Corrupt(error.to_string()))?;
                 Ok(InstalledBuild {
@@ -178,6 +213,11 @@ impl RuntimeStore {
                     manifest_metadata: BoundedJson::from_raw(
                         metadata,
                         self.limits.maximum_value_bytes,
+                    )
+                    .map_err(|error| StoreError::Corrupt(error.to_string()))?,
+                    capability_requests: decode_capability_requests(
+                        &capability_requests,
+                        self.limits.maximum_grants_per_principal,
                     )
                     .map_err(|error| StoreError::Corrupt(error.to_string()))?,
                 })
@@ -190,6 +230,93 @@ impl RuntimeStore {
             )));
         }
         Ok(builds)
+    }
+
+    /// Search verified installed-build metadata with explicit input and output
+    /// bounds.
+    ///
+    /// Search covers the exact coordinate and the verified display title. The
+    /// opaque manifest JSON remains available in each result, but is not
+    /// interpreted as another metadata schema.
+    pub fn search_installed_builds(
+        &self,
+        query: &str,
+        maximum: usize,
+    ) -> Result<Vec<InstalledBuild>, StoreError> {
+        validate_install_search_query(query, self.limits.maximum_install_search_query_bytes)?;
+        if maximum == 0 || maximum > self.limits.maximum_installs {
+            return Err(StoreError::InvalidInstallSearchLimit {
+                requested: maximum,
+                maximum: self.limits.maximum_installs,
+            });
+        }
+        let mut matches = self
+            .installed_builds()?
+            .into_iter()
+            .filter(|build| {
+                query.is_empty()
+                    || [
+                        build.title.as_ref(),
+                        build.principal.manifest_author(),
+                        build.principal.d_tag(),
+                        build.principal.aggregate_hash(),
+                    ]
+                    .iter()
+                    .any(|value| contains_search(value, query))
+            })
+            .take(maximum.saturating_add(1))
+            .collect::<Vec<_>>();
+        if matches.len() > maximum {
+            return Err(StoreError::InstallSearchCapacity {
+                actual_at_least: matches.len(),
+                maximum,
+            });
+        }
+        matches.shrink_to_fit();
+        Ok(matches)
+    }
+
+    /// Atomically remove one exact build's runtime-owned persistent state.
+    ///
+    /// No NMP store is reachable from this type, so canonical events, pending
+    /// writes and receipts cannot be deleted by this operation.
+    pub fn uninstall_exact_build(
+        &self,
+        principal: &Principal,
+        policy: UninstallCleanupPolicy,
+    ) -> Result<UninstallReport, StoreError> {
+        match policy {
+            UninstallCleanupPolicy::RuntimeOwnedExactBuildState => {}
+        }
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let grants_removed = transaction.execute(
+            "DELETE FROM grants WHERE
+             author = ?1 AND d_tag = ?2 AND aggregate_hash = ?3",
+            principal_params(principal),
+        )?;
+        let component_values_removed = transaction.execute(
+            "DELETE FROM component_kv WHERE
+             author = ?1 AND d_tag = ?2 AND aggregate_hash = ?3",
+            principal_params(principal),
+        )?;
+        let workspace_assignments_removed = transaction.execute(
+            "DELETE FROM workspace_assignments WHERE
+             author = ?1 AND d_tag = ?2 AND aggregate_hash = ?3",
+            principal_params(principal),
+        )?;
+        let installation_removed = transaction.execute(
+            "DELETE FROM installations WHERE
+             author = ?1 AND d_tag = ?2 AND aggregate_hash = ?3",
+            principal_params(principal),
+        )? == 1;
+        transaction.commit()?;
+        Ok(UninstallReport {
+            installation_removed,
+            grants_removed,
+            component_values_removed,
+            workspace_assignments_removed,
+        })
     }
 
     pub fn set_grant(
@@ -239,6 +366,97 @@ impl RuntimeStore {
                 grant_decision_text(decision),
             ],
         )?;
+        Ok(())
+    }
+
+    /// Atomically replaces the named persistent grant rows for one exact
+    /// principal. Session-only grants deliberately delete a durable row so a
+    /// prior exact-build allowance cannot reappear after restart.
+    pub fn set_grants_atomic(
+        &self,
+        principal: &Principal,
+        decisions: &[(Capability, GrantDecision)],
+    ) -> Result<(), StoreError> {
+        if decisions.is_empty() {
+            return Err(StoreError::EmptyGrantBatch);
+        }
+        let unique = decisions
+            .iter()
+            .map(|(capability, _)| capability)
+            .collect::<std::collections::BTreeSet<_>>();
+        if unique.len() != decisions.len() {
+            return Err(StoreError::DuplicateGrantBatchCapability);
+        }
+        if decisions.len() > self.limits.maximum_grants_per_principal {
+            return Err(StoreError::GrantCapacity {
+                capacity: self.limits.maximum_grants_per_principal,
+            });
+        }
+
+        let mut connection = self.connection.lock();
+        let transaction = connection.transaction()?;
+        let installed: bool = transaction.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM installations
+                WHERE author = ?1 AND d_tag = ?2 AND aggregate_hash = ?3
+            )",
+            principal_params(principal),
+            |row| row.get(0),
+        )?;
+        if !installed {
+            return Err(StoreError::InstallationNotFound);
+        }
+        let mut statement = transaction.prepare(
+            "SELECT capability FROM grants WHERE
+             author = ?1 AND d_tag = ?2 AND aggregate_hash = ?3",
+        )?;
+        let rows =
+            statement.query_map(principal_params(principal), |row| row.get::<_, String>(0))?;
+        let mut persistent = rows.collect::<Result<std::collections::BTreeSet<_>, _>>()?;
+        drop(statement);
+        for (capability, decision) in decisions {
+            if *decision == GrantDecision::AllowSession {
+                persistent.remove(capability.as_str());
+            } else {
+                persistent.insert(capability.as_str().to_owned());
+            }
+        }
+        if persistent.len() > self.limits.maximum_grants_per_principal {
+            return Err(StoreError::GrantCapacity {
+                capacity: self.limits.maximum_grants_per_principal,
+            });
+        }
+
+        for (capability, decision) in decisions {
+            if *decision == GrantDecision::AllowSession {
+                transaction.execute(
+                    "DELETE FROM grants WHERE
+                     author = ?1 AND d_tag = ?2 AND aggregate_hash = ?3 AND capability = ?4",
+                    params![
+                        principal.manifest_author(),
+                        principal.d_tag(),
+                        principal.aggregate_hash(),
+                        capability.as_str(),
+                    ],
+                )?;
+            } else {
+                transaction.execute(
+                    "INSERT INTO grants
+                        (author, d_tag, aggregate_hash, capability, decision)
+                     VALUES (?1, ?2, ?3, ?4, ?5)
+                     ON CONFLICT(author, d_tag, aggregate_hash, capability) DO UPDATE SET
+                        decision = excluded.decision",
+                    params![
+                        principal.manifest_author(),
+                        principal.d_tag(),
+                        principal.aggregate_hash(),
+                        capability.as_str(),
+                        grant_decision_text(*decision),
+                    ],
+                )?;
+            }
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -526,6 +744,130 @@ impl RuntimeStore {
         Ok(workspaces)
     }
 
+    pub fn assign_build_to_workspace(
+        &self,
+        workspace_id: &str,
+        principal: &Principal,
+    ) -> Result<(), StoreError> {
+        validate_scope_name("workspace id", workspace_id)?;
+        let connection = self.connection.lock();
+        let workspace_exists: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = ?1)",
+            [workspace_id],
+            |row| row.get(0),
+        )?;
+        if !workspace_exists {
+            return Err(StoreError::WorkspaceNotFound);
+        }
+        let installation_exists: bool = connection.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM installations
+                WHERE author = ?1 AND d_tag = ?2 AND aggregate_hash = ?3
+            )",
+            principal_params(principal),
+            |row| row.get(0),
+        )?;
+        if !installation_exists {
+            return Err(StoreError::InstallationNotFound);
+        }
+        let exists: bool = connection.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM workspace_assignments
+                WHERE workspace_id = ?1
+                  AND author = ?2 AND d_tag = ?3 AND aggregate_hash = ?4
+            )",
+            params![
+                workspace_id,
+                principal.manifest_author(),
+                principal.d_tag(),
+                principal.aggregate_hash(),
+            ],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            let count: usize = connection.query_row(
+                "SELECT COUNT(*) FROM workspace_assignments WHERE workspace_id = ?1",
+                [workspace_id],
+                |row| row.get(0),
+            )?;
+            if count >= self.limits.maximum_workspace_assignments {
+                return Err(StoreError::WorkspaceAssignmentCapacity {
+                    capacity: self.limits.maximum_workspace_assignments,
+                });
+            }
+        }
+        connection.execute(
+            "INSERT OR IGNORE INTO workspace_assignments
+                (workspace_id, author, d_tag, aggregate_hash)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                workspace_id,
+                principal.manifest_author(),
+                principal.d_tag(),
+                principal.aggregate_hash(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_build_from_workspace(
+        &self,
+        workspace_id: &str,
+        principal: &Principal,
+    ) -> Result<bool, StoreError> {
+        validate_scope_name("workspace id", workspace_id)?;
+        Ok(self.connection.lock().execute(
+            "DELETE FROM workspace_assignments
+             WHERE workspace_id = ?1
+               AND author = ?2 AND d_tag = ?3 AND aggregate_hash = ?4",
+            params![
+                workspace_id,
+                principal.manifest_author(),
+                principal.d_tag(),
+                principal.aggregate_hash(),
+            ],
+        )? == 1)
+    }
+
+    pub fn workspace_assignments(&self, workspace_id: &str) -> Result<Vec<Principal>, StoreError> {
+        validate_scope_name("workspace id", workspace_id)?;
+        let connection = self.connection.lock();
+        let mut statement = connection.prepare(
+            "SELECT author, d_tag, aggregate_hash
+             FROM workspace_assignments
+             WHERE workspace_id = ?1
+             ORDER BY author, d_tag, aggregate_hash
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(
+            params![
+                workspace_id,
+                self.limits.maximum_workspace_assignments.saturating_add(1)
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )?;
+        let assignments = rows
+            .map(|row| {
+                let (author, d_tag, aggregate_hash) = row?;
+                Principal::new(author, d_tag, aggregate_hash)
+                    .map_err(|error| StoreError::Corrupt(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if assignments.len() > self.limits.maximum_workspace_assignments {
+            return Err(StoreError::Corrupt(format!(
+                "workspace assignment count exceeds {}",
+                self.limits.maximum_workspace_assignments
+            )));
+        }
+        Ok(assignments)
+    }
+
     pub fn append_activity(&self, record: &ActivityRecord) -> Result<(), StoreError> {
         let record_bytes = validate_activity(record, self.limits)?;
         let mut connection = self.connection.lock();
@@ -637,6 +979,7 @@ fn migrate(connection: &Connection) -> Result<(), StoreError> {
             aggregate_hash TEXT NOT NULL,
             title TEXT NOT NULL,
             manifest_metadata TEXT NOT NULL,
+            capability_requests TEXT NOT NULL DEFAULT '[]',
             PRIMARY KEY(author, d_tag, aggregate_hash)
         );
         CREATE TABLE IF NOT EXISTS grants (
@@ -679,10 +1022,21 @@ fn migrate(connection: &Connection) -> Result<(), StoreError> {
         .optional()?;
     match existing {
         None => {
+            create_workspace_assignments(connection)?;
+            add_capability_requests_column(connection)?;
             connection.execute(
                 "INSERT INTO runtime_schema(version) VALUES (?1)",
                 [SCHEMA_VERSION],
             )?;
+        }
+        Some(1) => {
+            create_workspace_assignments(connection)?;
+            add_capability_requests_column(connection)?;
+            connection.execute("UPDATE runtime_schema SET version = ?1", [SCHEMA_VERSION])?;
+        }
+        Some(2) => {
+            add_capability_requests_column(connection)?;
+            connection.execute("UPDATE runtime_schema SET version = ?1", [SCHEMA_VERSION])?;
         }
         Some(SCHEMA_VERSION) => {}
         Some(version) => return Err(StoreError::UnsupportedSchema(version)),
@@ -690,16 +1044,53 @@ fn migrate(connection: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+fn add_capability_requests_column(connection: &Connection) -> Result<(), StoreError> {
+    let present: bool = connection.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM pragma_table_info('installations')
+            WHERE name = 'capability_requests'
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    if !present {
+        connection.execute(
+            "ALTER TABLE installations
+             ADD COLUMN capability_requests TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn create_workspace_assignments(connection: &Connection) -> Result<(), StoreError> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS workspace_assignments (
+            workspace_id TEXT NOT NULL,
+            author TEXT NOT NULL,
+            d_tag TEXT NOT NULL,
+            aggregate_hash TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, author, d_tag, aggregate_hash),
+            FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+            FOREIGN KEY(author, d_tag, aggregate_hash)
+                REFERENCES installations(author, d_tag, aggregate_hash) ON DELETE CASCADE
+        );",
+    )?;
+    Ok(())
+}
+
 fn validate_limits(limits: StoreLimits) -> Result<(), StoreError> {
     if [
         limits.maximum_installs,
         limits.maximum_install_title_bytes,
+        limits.maximum_install_search_query_bytes,
         limits.maximum_grants_per_principal,
         limits.maximum_kv_keys_per_scope,
         limits.maximum_kv_bytes_per_scope,
         limits.maximum_value_bytes,
         limits.maximum_workspaces,
         limits.maximum_workspace_bytes,
+        limits.maximum_workspace_assignments,
         limits.maximum_retained_receipts_per_workspace,
         limits.maximum_retained_receipt_bytes_per_workspace,
         limits.maximum_activity_facts,
@@ -730,6 +1121,68 @@ fn validate_install_title(title: &str, maximum: usize) -> Result<(), StoreError>
         });
     }
     Ok(())
+}
+
+fn validate_install_search_query(query: &str, maximum: usize) -> Result<(), StoreError> {
+    if query
+        .bytes()
+        .any(|byte| byte == 0 || byte.is_ascii_control())
+    {
+        return Err(StoreError::InvalidInstallSearchQuery);
+    }
+    if query.len() > maximum {
+        return Err(StoreError::InstallSearchQueryTooLarge {
+            actual: query.len(),
+            maximum,
+        });
+    }
+    Ok(())
+}
+
+fn encode_capability_requests(
+    requests: &[CapabilityRequest],
+    maximum: usize,
+) -> Result<String, StoreError> {
+    validate_capability_requests(requests, maximum)?;
+    serde_json::to_string(requests).map_err(|error| StoreError::Corrupt(error.to_string()))
+}
+
+fn decode_capability_requests(
+    encoded: &str,
+    maximum: usize,
+) -> Result<Vec<CapabilityRequest>, StoreError> {
+    let requests: Vec<CapabilityRequest> =
+        serde_json::from_str(encoded).map_err(|error| StoreError::Corrupt(error.to_string()))?;
+    validate_capability_requests(&requests, maximum)?;
+    Ok(requests)
+}
+
+fn validate_capability_requests(
+    requests: &[CapabilityRequest],
+    maximum: usize,
+) -> Result<(), StoreError> {
+    if requests.len() > maximum {
+        return Err(StoreError::CapabilityRequestCapacity {
+            actual: requests.len(),
+            maximum,
+        });
+    }
+    let unique = requests
+        .iter()
+        .map(|request| &request.capability)
+        .collect::<std::collections::BTreeSet<_>>();
+    if unique.len() != requests.len() {
+        return Err(StoreError::DuplicateCapabilityRequest);
+    }
+    Ok(())
+}
+
+fn contains_search(value: &str, query: &str) -> bool {
+    query.is_empty()
+        || value
+            .as_bytes()
+            .windows(query.len())
+            .any(|window| window.eq_ignore_ascii_case(query.as_bytes()))
 }
 
 fn encode_retained_receipts(
@@ -864,10 +1317,33 @@ pub enum StoreError {
     InvalidInstallTitle,
     #[error("installation title is {actual} bytes; the maximum is {maximum}")]
     InstallTitleTooLarge { actual: usize, maximum: usize },
+    #[error("installation search query contains a control character")]
+    InvalidInstallSearchQuery,
+    #[error("installation search query is {actual} bytes; the maximum is {maximum}")]
+    InstallSearchQueryTooLarge { actual: usize, maximum: usize },
+    #[error("installation search limit {requested} is invalid; it must be between 1 and {maximum}")]
+    InvalidInstallSearchLimit { requested: usize, maximum: usize },
+    #[error(
+        "installation search has at least {actual_at_least} results; the response maximum is {maximum}"
+    )]
+    InstallSearchCapacity {
+        actual_at_least: usize,
+        maximum: usize,
+    },
     #[error("manifest metadata is {actual} bytes; the maximum is {maximum}")]
     ManifestMetadataTooLarge { actual: usize, maximum: usize },
+    #[error("installation was not found")]
+    InstallationNotFound,
+    #[error("capability request count {actual} exceeds the maximum {maximum}")]
+    CapabilityRequestCapacity { actual: usize, maximum: usize },
+    #[error("installed capability requests repeat a domain")]
+    DuplicateCapabilityRequest,
     #[error("grant capacity {capacity} is full for this exact principal")]
     GrantCapacity { capacity: usize },
+    #[error("grant decision batch must not be empty")]
+    EmptyGrantBatch,
+    #[error("grant decision batch repeats a capability")]
+    DuplicateGrantBatchCapability,
     #[error("component value is {actual} bytes; the maximum is {maximum}")]
     ValueTooLarge { actual: usize, maximum: usize },
     #[error("component key capacity {capacity} is full for this exact scope")]
@@ -885,6 +1361,10 @@ pub enum StoreError {
     ScopeBytes { actual: usize, maximum: usize },
     #[error("workspace capacity {capacity} is full")]
     WorkspaceCapacity { capacity: usize },
+    #[error("workspace was not found")]
+    WorkspaceNotFound,
+    #[error("workspace assignment capacity {capacity} is full")]
+    WorkspaceAssignmentCapacity { capacity: usize },
     #[error("workspace is {actual} bytes; the maximum is {maximum}")]
     WorkspaceTooLarge { actual: usize, maximum: usize },
     #[error("workspace retains {actual} receipts; the maximum is {maximum}")]
@@ -939,6 +1419,21 @@ mod tests {
             outcome: Arc::from(outcome),
             occurred_at_millis: 1,
         }
+    }
+
+    fn install(store: &RuntimeStore, principal: Principal, title: &str) {
+        store
+            .install(&InstalledBuild {
+                principal,
+                title: Arc::from(title),
+                manifest_metadata: BoundedJson::from_value(
+                    &serde_json::json!({"kind": 35129}),
+                    1024,
+                )
+                .unwrap(),
+                capability_requests: Vec::new(),
+            })
+            .unwrap();
     }
 
     #[test]
@@ -1018,6 +1513,95 @@ mod tests {
     }
 
     #[test]
+    fn capability_requests_and_atomic_grant_batch_survive_restart_without_partial_rows() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("runtime.db");
+        let exact = principal('b');
+        let identity = Capability::new("identity").unwrap();
+        let outbox = Capability::new("outbox").unwrap();
+        let store = RuntimeStore::open(&path, StoreLimits::default()).unwrap();
+        store
+            .install(&InstalledBuild {
+                principal: exact.clone(),
+                title: Arc::from("Good Morning"),
+                manifest_metadata: BoundedJson::from_value(
+                    &serde_json::json!({"kind": 35129}),
+                    1024,
+                )
+                .unwrap(),
+                capability_requests: vec![
+                    CapabilityRequest {
+                        capability: identity.clone(),
+                        requirement: nmp_native_runtime_core::CapabilityRequirement::Required,
+                    },
+                    CapabilityRequest {
+                        capability: outbox.clone(),
+                        requirement: nmp_native_runtime_core::CapabilityRequirement::Optional,
+                    },
+                ],
+            })
+            .unwrap();
+
+        let trigger = Connection::open(&path).unwrap();
+        trigger
+            .execute_batch(
+                "CREATE TRIGGER refuse_outbox_grant
+                 BEFORE INSERT ON grants
+                 WHEN NEW.capability = 'outbox'
+                 BEGIN
+                   SELECT RAISE(ABORT, 'injected grant write failure');
+                 END;",
+            )
+            .unwrap();
+        assert!(matches!(
+            store.set_grants_atomic(
+                &exact,
+                &[
+                    (identity.clone(), GrantDecision::AllowExactBuild),
+                    (outbox.clone(), GrantDecision::AllowExactBuild),
+                ],
+            ),
+            Err(StoreError::Sqlite(_))
+        ));
+        assert_eq!(
+            store.grant(&exact, &identity).unwrap(),
+            GrantDecision::Denied
+        );
+        assert_eq!(store.grant(&exact, &outbox).unwrap(), GrantDecision::Denied);
+
+        trigger
+            .execute("DROP TRIGGER refuse_outbox_grant", [])
+            .unwrap();
+        store
+            .set_grants_atomic(
+                &exact,
+                &[
+                    (identity.clone(), GrantDecision::AllowExactBuild),
+                    (outbox.clone(), GrantDecision::AllowExactBuild),
+                ],
+            )
+            .unwrap();
+        store
+            .set_grants_atomic(&exact, &[(identity.clone(), GrantDecision::AllowSession)])
+            .unwrap();
+        drop(trigger);
+        drop(store);
+
+        let reopened = RuntimeStore::open(&path, StoreLimits::default()).unwrap();
+        let installed = reopened.installed_builds().unwrap();
+        assert_eq!(installed[0].capability_requests.len(), 2);
+        assert_eq!(
+            reopened.grant(&exact, &identity).unwrap(),
+            GrantDecision::Denied,
+            "session-only allowance must not resurrect a prior durable grant"
+        );
+        assert_eq!(
+            reopened.grant(&exact, &outbox).unwrap(),
+            GrantDecision::AllowExactBuild
+        );
+    }
+
+    #[test]
     fn restart_restores_workspace_and_receipt_reference() {
         let directory = TempDir::new().unwrap();
         let path = directory.path().join("runtime.db");
@@ -1049,6 +1633,7 @@ mod tests {
                 principal: principal('b'),
                 title: Arc::from("large"),
                 manifest_metadata: metadata.clone(),
+                capability_requests: Vec::new(),
             }),
             Err(StoreError::InstallTitleTooLarge {
                 actual: 5,
@@ -1062,6 +1647,7 @@ mod tests {
                 principal: principal('b'),
                 title: Arc::from("four"),
                 manifest_metadata: metadata,
+                capability_requests: Vec::new(),
             })
             .unwrap();
         drop(store);
@@ -1069,6 +1655,117 @@ mod tests {
         assert_eq!(
             reopened.installed_builds().unwrap()[0].title.as_ref(),
             "four"
+        );
+    }
+
+    #[test]
+    fn installed_search_is_deterministic_bounded_and_survives_restart() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("runtime.db");
+        {
+            let store = RuntimeStore::open(&path, StoreLimits::default()).unwrap();
+            install(&store, principal('b'), "Good Morning");
+            install(&store, principal('c'), "Weather");
+            assert_eq!(
+                store.search_installed_builds("MORNING", 2).unwrap()[0]
+                    .title
+                    .as_ref(),
+                "Good Morning"
+            );
+            assert!(matches!(
+                store.search_installed_builds("", 1),
+                Err(StoreError::InstallSearchCapacity {
+                    actual_at_least: 2,
+                    maximum: 1
+                })
+            ));
+            assert!(matches!(
+                store.search_installed_builds("bad\nquery", 2),
+                Err(StoreError::InvalidInstallSearchQuery)
+            ));
+        }
+        let reopened = RuntimeStore::open(&path, StoreLimits::default()).unwrap();
+        assert_eq!(
+            reopened
+                .search_installed_builds("weather", 2)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn uninstall_removes_only_exact_build_runtime_state() {
+        let (_directory, store) = store();
+        let build = principal('b');
+        let receipt = WriteReceiptId(Arc::from("nmp-receipt"));
+        install(&store, build.clone(), "Good Morning");
+        store
+            .set_grant(
+                &build,
+                &Capability::new("identity").unwrap(),
+                GrantDecision::AllowExactBuild,
+            )
+            .unwrap();
+        store
+            .put_component_value(&build, "storage", "draft", b"gm")
+            .unwrap();
+        store
+            .save_workspace(&workspace(vec![receipt.clone()]))
+            .unwrap();
+        store.assign_build_to_workspace("main", &build).unwrap();
+        store.append_activity(&activity("launch", "ok")).unwrap();
+
+        let report = store
+            .uninstall_exact_build(&build, UninstallCleanupPolicy::RuntimeOwnedExactBuildState)
+            .unwrap();
+        assert_eq!(
+            report,
+            UninstallReport {
+                installation_removed: true,
+                grants_removed: 1,
+                component_values_removed: 1,
+                workspace_assignments_removed: 1,
+            }
+        );
+        assert!(store.installed_builds().unwrap().is_empty());
+        assert_eq!(
+            store
+                .grant(&build, &Capability::new("identity").unwrap())
+                .unwrap(),
+            GrantDecision::Denied
+        );
+        assert_eq!(
+            store.component_value(&build, "storage", "draft").unwrap(),
+            None
+        );
+        assert!(store.workspace_assignments("main").unwrap().is_empty());
+        assert_eq!(
+            store.load_workspaces().unwrap()[0].retained_receipts,
+            [receipt]
+        );
+        assert_eq!(store.activity_records().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn schema_one_migrates_to_explicit_workspace_assignments() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("runtime.db");
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE runtime_schema (version INTEGER NOT NULL);
+                     INSERT INTO runtime_schema(version) VALUES (1);",
+                )
+                .unwrap();
+        }
+        let store = RuntimeStore::open(&path, StoreLimits::default()).unwrap();
+        assert!(
+            store
+                .table_names()
+                .unwrap()
+                .contains(&"workspace_assignments".to_owned())
         );
     }
 

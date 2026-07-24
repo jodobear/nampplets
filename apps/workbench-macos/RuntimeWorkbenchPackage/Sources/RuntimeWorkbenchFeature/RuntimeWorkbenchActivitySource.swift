@@ -1,0 +1,331 @@
+import Foundation
+import NMPNativeRuntimeApple
+
+public enum RuntimeWorkbenchActivitySourceRefusal:
+    Error,
+    LocalizedError,
+    Equatable
+{
+    case subscriberCapacity(maximum: Int)
+    case scopeMismatch
+
+    public var errorDescription: String? {
+        switch self {
+        case let .subscriberCapacity(maximum):
+            "The Workbench activity subscriber limit of \(maximum) was reached."
+        case .scopeMismatch:
+            "This activity source is bound to a different exact build."
+        }
+    }
+}
+
+/// A real Workbench adapter over the profile's single Rust-owned observation.
+///
+/// The adapter retains only the latest bounded replacement. Delivery into the
+/// main actor is coalesced, so native presentation cannot create an unbounded
+/// queue when the runtime produces updates faster than the UI renders them.
+@MainActor
+public final class RuntimeWorkbenchActivitySource: ActivitySource {
+    private struct Subscriber {
+        let scope: ActivityExactBuildScope
+        let receive: @MainActor (ActivityUpdate) -> Void
+    }
+
+    private static let maximumSubscribers = 16
+
+    private let profile: WorkbenchRuntimeProfile
+    private let scope: ActivityExactBuildScope
+    private let nativeScope: NativeRuntimeActivityScope
+    private let mailbox: RuntimeActivityUpdateMailbox
+    private var nativeObservation: NativeRuntimeActivityObservation?
+    private var projection: NativeRuntimeActivityProjection
+    private var subscribers: [UUID: Subscriber] = [:]
+
+    public private(set) var latestAdmissionRefusal:
+        RuntimeWorkbenchActivitySourceRefusal?
+
+    public init(
+        profile: WorkbenchRuntimeProfile,
+        scope: ActivityExactBuildScope
+    ) throws {
+        self.profile = profile
+        self.scope = scope
+        let nativeScope = NativeRuntimeActivityScope(
+            manifestAuthor: scope.manifestAuthor,
+            dTag: scope.dTag,
+            aggregateHash: scope.aggregateHash
+        )
+        self.nativeScope = nativeScope
+        projection = profile.native.activityProjection(for: nativeScope)
+        let mailbox = RuntimeActivityUpdateMailbox()
+        self.mailbox = mailbox
+        mailbox.bind { [weak self] update in
+            self?.receive(update)
+        }
+        nativeObservation = try profile.native.observeActivity(
+            scope: nativeScope
+        ) {
+            [mailbox] update in
+            mailbox.offer(update)
+        }
+    }
+
+    public func subscribe(
+        to requestedScope: ActivityExactBuildScope,
+        receive: @escaping @MainActor (ActivityUpdate) -> Void
+    ) -> any ActivitySubscription {
+        guard requestedScope == scope else {
+            latestAdmissionRefusal = .scopeMismatch
+            receive(
+                .authoritative(
+                    Self.emptySnapshot(
+                        revision: projection.revision,
+                        scope: requestedScope
+                    )
+                )
+            )
+            return RuntimeWorkbenchActivitySubscription(cancellation: {})
+        }
+        guard subscribers.count < Self.maximumSubscribers else {
+            latestAdmissionRefusal = .subscriberCapacity(
+                maximum: Self.maximumSubscribers
+            )
+            receive(.authoritative(Self.snapshot(from: projection, for: scope)))
+            return RuntimeWorkbenchActivitySubscription(cancellation: {})
+        }
+
+        let identifier = UUID()
+        subscribers[identifier] = Subscriber(
+            scope: requestedScope,
+            receive: receive
+        )
+        receive(
+            .authoritative(
+                Self.snapshot(from: projection, for: requestedScope)
+            )
+        )
+        return RuntimeWorkbenchActivitySubscription { [weak self] in
+            self?.subscribers.removeValue(forKey: identifier)
+        }
+    }
+
+    public func refresh(
+        scope requestedScope: ActivityExactBuildScope
+    ) -> ActivitySnapshot {
+        guard requestedScope == scope else {
+            latestAdmissionRefusal = .scopeMismatch
+            return Self.emptySnapshot(
+                revision: projection.revision,
+                scope: requestedScope
+            )
+        }
+        let latest = profile.native.activityProjection(for: nativeScope)
+        projection = latest
+        return Self.snapshot(from: latest, for: requestedScope)
+    }
+
+    private func receive(_ update: NativeRuntimeActivityUpdate) {
+        switch update {
+        case let .authoritative(nextProjection):
+            projection = nextProjection
+            for subscriber in subscribers.values {
+                subscriber.receive(
+                    .authoritative(
+                        Self.snapshot(
+                            from: nextProjection,
+                            for: subscriber.scope
+                        )
+                    )
+                )
+            }
+
+        case let .next(
+            nextProjection,
+            predecessorRevision,
+            eventCursorWasStale
+        ):
+            projection = nextProjection
+            let deliveredPredecessor = eventCursorWasStale
+                ? predecessorRevision ^ 1
+                : predecessorRevision
+            for subscriber in subscribers.values {
+                subscriber.receive(
+                    .next(
+                        Self.snapshot(
+                            from: nextProjection,
+                            for: subscriber.scope
+                        ),
+                        predecessorRevision: deliveredPredecessor
+                    )
+                )
+            }
+        }
+    }
+
+    static func snapshot(
+        from projection: NativeRuntimeActivityProjection,
+        for scope: ActivityExactBuildScope
+    ) -> ActivitySnapshot {
+        let activeSessions = projection.sessions.filter {
+            $0.scope.manifestAuthor == scope.manifestAuthor
+                && $0.scope.dTag == scope.dTag
+                && $0.scope.aggregateHash == scope.aggregateHash
+        }.count
+        let inventory = ActivityInventorySummary(
+            activeSessions: min(
+                activeSessions,
+                ActivityInventorySummary.maximumActiveSessions
+            ),
+            activeBindings: 0,
+            activeResources: 0,
+            pendingReceipts: 0
+        )!
+
+        // The current Rust FFI has no typed activity severity/kind and no
+        // exact-build ownership for bindings, resources, or receipts. Keep
+        // those presentation fields empty instead of deriving policy in Swift
+        // or exposing profile-global facts. `omittedFactCount` makes the
+        // unsupported scoped records explicit until Rust supplies the typed
+        // screen-shaped projection.
+        return ActivitySnapshot(
+            scope: scope,
+            revision: projection.revision,
+            inventory: inventory,
+            facts: [],
+            omittedFactCount: UInt64(
+                projection.records.count + projection.errors.count
+            )
+        )!
+    }
+
+    private static func emptySnapshot(
+        revision: UInt64,
+        scope: ActivityExactBuildScope
+    ) -> ActivitySnapshot {
+        ActivitySnapshot(
+            scope: scope,
+            revision: revision,
+            inventory: .empty,
+            facts: [],
+            omittedFactCount: 0
+        )!
+    }
+}
+
+@MainActor
+private final class RuntimeWorkbenchActivitySubscription:
+    ActivitySubscription
+{
+    private var cancellation: (@MainActor @Sendable () -> Void)?
+
+    init(cancellation: @escaping @MainActor @Sendable () -> Void) {
+        self.cancellation = cancellation
+    }
+
+    func cancel() {
+        let cancellation = cancellation
+        self.cancellation = nil
+        cancellation?()
+    }
+
+    deinit {
+        let cancellation = cancellation
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                cancellation?()
+            }
+        }
+    }
+}
+
+/// One-slot replacement mailbox. At most one main-queue work item is pending;
+/// newer runtime updates replace the pending value and retain predecessor
+/// evidence so the presentation can make a delivery gap visible.
+private final class RuntimeActivityUpdateMailbox: @unchecked Sendable {
+    typealias Handler =
+        @MainActor @Sendable (NativeRuntimeActivityUpdate) -> Void
+
+    private let lock = NSLock()
+    private var handler: Handler?
+    private var pending: NativeRuntimeActivityUpdate?
+    private var isScheduled = false
+    private var isClosed = false
+
+    @MainActor
+    func bind(_ handler: @escaping Handler) {
+        lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            return
+        }
+        self.handler = handler
+        let shouldSchedule = pending != nil && !isScheduled
+        if shouldSchedule {
+            isScheduled = true
+        }
+        lock.unlock()
+        if shouldSchedule {
+            scheduleDrain()
+        }
+    }
+
+    func offer(_ update: NativeRuntimeActivityUpdate) {
+        lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            return
+        }
+        pending = update
+        let shouldSchedule = handler != nil && !isScheduled
+        if shouldSchedule {
+            isScheduled = true
+        }
+        lock.unlock()
+        if shouldSchedule {
+            scheduleDrain()
+        }
+    }
+
+    func close() {
+        lock.lock()
+        isClosed = true
+        pending = nil
+        handler = nil
+        lock.unlock()
+    }
+
+    private func scheduleDrain() {
+        DispatchQueue.main.async { [weak self] in
+            self?.drainOnMainQueue()
+        }
+    }
+
+    private func drainOnMainQueue() {
+        lock.lock()
+        guard !isClosed, let update = pending, let handler else {
+            isScheduled = false
+            lock.unlock()
+            return
+        }
+        pending = nil
+        lock.unlock()
+
+        MainActor.assumeIsolated {
+            handler(update)
+        }
+
+        lock.lock()
+        let shouldSchedule = !isClosed && pending != nil && self.handler != nil
+        if !shouldSchedule {
+            isScheduled = false
+        }
+        lock.unlock()
+        if shouldSchedule {
+            scheduleDrain()
+        }
+    }
+
+    deinit {
+        close()
+    }
+}
