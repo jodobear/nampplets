@@ -64,6 +64,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
 mod catalog;
+mod diagnostics;
 
 pub use catalog::{
     RuntimeCatalogCancellationResult, RuntimeCatalogCapability, RuntimeCatalogConfirmation,
@@ -74,6 +75,13 @@ pub use catalog::{
     RuntimeCatalogSourceAccess, RuntimeCatalogSourceState, RuntimeCatalogWindowState,
 };
 use catalog::{RuntimeCatalogService, project_catalog_error};
+use diagnostics::RuntimeDiagnosticsService;
+pub use diagnostics::{
+    RuntimeRelayAccess, RuntimeRelayCoverage, RuntimeRelayDiagnostics,
+    RuntimeRelayDiagnosticsObservation, RuntimeRelayDiagnosticsObservationStart,
+    RuntimeRelayDiagnosticsObserver, RuntimeRelayDiagnosticsSnapshot, RuntimeRelayKindCount,
+    RuntimeRelayLane, RuntimeRelayLaneCount, RuntimeRelaySubscription,
+};
 
 const DEFAULT_MAXIMUM_CONFIG_STRING_BYTES: u64 = 16 * 1_024;
 const DEFAULT_MAXIMUM_CONFIG_ITEMS: u64 = 64;
@@ -1067,6 +1075,7 @@ pub struct RuntimeController {
     runtime_store: Arc<RuntimeStore>,
     artifact_cache: Arc<FileArtifactCache>,
     catalog: Arc<RuntimeCatalogService>,
+    diagnostics: Arc<RuntimeDiagnosticsService>,
     artifact_source: CallbackArtifactSource,
     artifact_limits: ArtifactLimits,
     maximum_manifest_bytes: usize,
@@ -1316,6 +1325,7 @@ fn open_runtime_controller(
             detail: format!("catalog: {error}"),
         })?,
     );
+    let diagnostics = Arc::new(RuntimeDiagnosticsService::new(&data_plane));
     let shell_provider = Arc::new(
         ShellProvider::new(
             Arc::new(RuntimeShellEnvironment),
@@ -1442,6 +1452,7 @@ fn open_runtime_controller(
         runtime_store,
         artifact_cache,
         catalog,
+        diagnostics,
         artifact_source: CallbackArtifactSource {
             callback: Arc::from(artifact_source),
         },
@@ -2784,6 +2795,30 @@ impl RuntimeController {
         self.project_snapshot(&self.app.snapshot())
     }
 
+    /// The latest NMP-owned relay and wire-subscription read-out. It is only
+    /// refreshed while an observation is open; check `observing`.
+    pub fn relay_diagnostics(&self) -> RuntimeRelayDiagnosticsSnapshot {
+        self.diagnostics.snapshot()
+    }
+
+    /// Open the NMP diagnostics observation for as long as the returned handle
+    /// lives. The current read-out is delivered synchronously on registration.
+    pub fn observe_relay_diagnostics(
+        &self,
+        observer: Box<dyn RuntimeRelayDiagnosticsObserver>,
+    ) -> RuntimeRelayDiagnosticsObservationStart {
+        match self.diagnostics.observe(Arc::from(observer)) {
+            Ok(observation) => RuntimeRelayDiagnosticsObservationStart {
+                observation: Some(observation),
+                refusal: None,
+            },
+            Err(error) => RuntimeRelayDiagnosticsObservationStart {
+                observation: None,
+                refusal: Some(self.refusal("relay-diagnostics-observe", error.to_string())),
+            },
+        }
+    }
+
     pub fn observe(self: Arc<Self>, observer: Box<dyn RuntimeObserver>) -> ObservationStart {
         let admitted = self
             .observers
@@ -2881,6 +2916,7 @@ impl RuntimeController {
     pub fn close(&self) {
         if !self.closed.swap(true, Ordering::AcqRel) {
             self.catalog.close();
+            self.diagnostics.close();
             self.app.dispatch(PlatformCommand::Close);
             self.data_plane.close();
             bump_signal(&self.signal);
