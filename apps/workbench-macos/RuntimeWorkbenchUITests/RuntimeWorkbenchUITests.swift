@@ -22,6 +22,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
     @MainActor
     func testWorkbenchReviewsPermissionsThenLaunchesSignedGoodMorning() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
         app.launchEnvironment["NMP_WORKBENCH_UI_TEST_SCENARIO"] =
             "good-morning-permission-launch"
         app.launch()
@@ -91,6 +92,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         )
 
         let app = XCUIApplication()
+        app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
         app.launch()
 
         let addNapplet = app.descendants(matching: .any)["add-napplet"]
