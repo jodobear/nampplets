@@ -154,7 +154,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
 
             if waitForNonexistence(
                 of: installExactBuild,
-                timeout: 60
+                timeout: 20
             ) {
                 installedExactBuild = true
                 break
