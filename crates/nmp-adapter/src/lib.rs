@@ -1266,29 +1266,33 @@ fn shortfall_json(shortfall: &ShortfallFact) -> serde_json::Value {
 }
 
 fn approved_write_intent(approved: &ApprovedWrite) -> Result<WriteIntent, HostDataError> {
-    let unsigned: nmp::UnsignedEvent =
-        serde_json::from_str(approved.draft.as_str()).map_err(|error| {
-            HostDataError::WriteRefused {
-                reason: Arc::from(format!("invalid approved unsigned event: {error}")),
-            }
-        })?;
     let account =
         nmp::PublicKey::from_str(&approved.account.0).map_err(|_| HostDataError::WriteRefused {
             reason: Arc::from("approved account is not a valid Nostr public key"),
         })?;
-    if unsigned.pubkey != account {
-        return Err(HostDataError::WriteRefused {
-            reason: Arc::from("approved draft author does not match the frozen account"),
-        });
-    }
     let correlation =
         nmp::CorrelationToken::try_from(approved.approval_id.as_ref()).map_err(|error| {
             HostDataError::WriteRefused {
                 reason: Arc::from(format!("invalid approval correlation token: {error}")),
             }
         })?;
+    let (payload, author) =
+        if let Ok(signed) = serde_json::from_str::<nmp::Event>(approved.draft.as_str()) {
+            (WritePayload::Signed(signed.clone()), signed.pubkey)
+        } else {
+            let unsigned: nmp::UnsignedEvent = serde_json::from_str(approved.draft.as_str())
+                .map_err(|error| HostDataError::WriteRefused {
+                    reason: Arc::from(format!("invalid approved event: {error}")),
+                })?;
+            (WritePayload::Unsigned(unsigned.clone()), unsigned.pubkey)
+        };
+    if author != account {
+        return Err(HostDataError::WriteRefused {
+            reason: Arc::from("approved draft author does not match the frozen account"),
+        });
+    }
     Ok(WriteIntent {
-        payload: WritePayload::Unsigned(unsigned),
+        payload,
         durability: Durability::Durable,
         routing: WriteRouting::AuthorOutbox,
         identity_override: Some(account),
