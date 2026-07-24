@@ -269,7 +269,7 @@ public struct ContentView: View {
                 accountSnapshot = accountManager.snapshot()
             }
         }
-        .onChange(of: receipts.revision) { _, _ in
+        .onChange(of: receipts.receiptIDs) { _, _ in
             scheduleLayoutSave()
         }
         .onChange(of: isCatalogSheetPresented) { _, isPresented in
@@ -1072,7 +1072,7 @@ public struct ContentView: View {
                 try layoutStore.saveLayout(
                     layout.snapshot,
                     workspaceID: Self.workspaceID,
-                    retainedReceiptIDs: receipts.receipts.map(\.id)
+                    retainedReceiptIDs: receipts.receiptIDs
                 )
                 layoutPersistenceError = nil
             } catch {
@@ -1089,7 +1089,7 @@ public struct ContentView: View {
             try layoutStore.saveLayout(
                 layout.snapshot,
                 workspaceID: Self.workspaceID,
-                retainedReceiptIDs: receipts.receipts.map(\.id)
+                retainedReceiptIDs: receipts.receiptIDs
             )
             layoutPersistenceError = nil
         } catch {
