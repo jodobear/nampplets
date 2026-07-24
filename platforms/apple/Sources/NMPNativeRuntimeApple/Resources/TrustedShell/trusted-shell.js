@@ -1047,7 +1047,7 @@
       return typeof value === "string" &&
         value.length > 0 &&
         value.length <= MAX_RESOURCE_MIME_BYTES &&
-        !/[\u0000-\u001f\u007f]/.test(value);
+        !/[\\u0000-\\u001f\\u007f]/.test(value);
     }
     function projectResourceInfo(message) {
       var info = message.info;

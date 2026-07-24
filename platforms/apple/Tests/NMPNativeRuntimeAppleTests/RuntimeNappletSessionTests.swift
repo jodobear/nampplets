@@ -252,6 +252,331 @@ final class RuntimeNappletSessionTests: XCTestCase {
         wait(for: [themeReceived, configReceived], timeout: 2)
     }
 
+    func testInstalledLibraryObserverStartsWithAuthoritativeReplacementAndPushesNextRevision() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "runtime-apple-library-observer-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profile = try NativeRuntimeProfile.open(
+            configuration: NativeRuntimeProfileConfiguration(storageRoot: root)
+        )
+        defer { profile.close() }
+
+        let receivedNext = expectation(
+            description: "library observer receives the next replacement"
+        )
+        let updates = LockedLibraryUpdates()
+        let observation = try profile.observeInstalledLibrary { update in
+            updates.append(update)
+            if case .next = update {
+                receivedNext.fulfill()
+            }
+        }
+        defer { observation.cancel() }
+
+        let initial = try XCTUnwrap(updates.values.first)
+        guard case let .authoritative(initialProjection) = initial else {
+            return XCTFail("The first update must be authoritative")
+        }
+        let initialSnapshot = try librarySnapshot(initialProjection)
+        XCTAssertEqual(initialSnapshot.filterQuery, "")
+        XCTAssertEqual(initialSnapshot.totalInstalled, 0)
+        XCTAssertTrue(initialSnapshot.builds.isEmpty)
+
+        profile.setInstalledLibraryFilter("morning")
+        wait(for: [receivedNext], timeout: 2)
+
+        let next = try XCTUnwrap(
+            updates.values.first(where: {
+                if case .next = $0 {
+                    return true
+                }
+                return false
+            })
+        )
+        guard case let .next(
+            nextProjection,
+            predecessorRevision,
+            eventCursorWasStale
+        ) = next else {
+            return XCTFail("Expected a next library replacement")
+        }
+        let nextSnapshot = try librarySnapshot(nextProjection)
+        XCTAssertEqual(predecessorRevision, initialSnapshot.revision)
+        XCTAssertGreaterThan(nextSnapshot.revision, initialSnapshot.revision)
+        XCTAssertFalse(eventCursorWasStale)
+        XCTAssertEqual(nextSnapshot.filterQuery, "morning")
+        XCTAssertEqual(profile.installedLibraryProjection(), nextProjection)
+    }
+
+    func testInstalledLibraryObserverQueuesLatestUpdateUntilAuthoritativeDeliveryCompletes() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "runtime-apple-library-ordering-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profile = try NativeRuntimeProfile.open(
+            configuration: NativeRuntimeProfileConfiguration(storageRoot: root)
+        )
+        defer { profile.close() }
+
+        let initialSnapshot = profile.snapshotForTesting
+        let authoritativeStarted = expectation(
+            description: "authoritative delivery started"
+        )
+        let registrationFinished = expectation(
+            description: "observer registration drained pending replacement"
+        )
+        let allowAuthoritativeToFinish = DispatchSemaphore(value: 0)
+        let updates = LockedLibraryUpdates()
+        let observation = LockedLibraryObservation()
+
+        DispatchQueue.global().async {
+            let registered = try? profile.observeInstalledLibrary { update in
+                if case .authoritative = update {
+                    authoritativeStarted.fulfill()
+                    _ = allowAuthoritativeToFinish.wait(
+                        timeout: .now() + 5
+                    )
+                }
+                updates.append(update)
+            }
+            observation.set(registered)
+            registrationFinished.fulfill()
+        }
+
+        wait(for: [authoritativeStarted], timeout: 2)
+
+        var intermediate = initialSnapshot
+        intermediate.revision += 1
+        intermediate.installedLibrary.query = "intermediate"
+        profile.update(
+            frame: RuntimeObservationFrame(
+                snapshot: intermediate,
+                events: [],
+                oldestAvailableEvent: 0,
+                newestAvailableEvent: 0,
+                eventCursorWasStale: false
+            )
+        )
+        var latest = intermediate
+        latest.revision += 1
+        latest.installedLibrary.query = "latest"
+        profile.update(
+            frame: RuntimeObservationFrame(
+                snapshot: latest,
+                events: [],
+                oldestAvailableEvent: 0,
+                newestAvailableEvent: 0,
+                eventCursorWasStale: true
+            )
+        )
+
+        allowAuthoritativeToFinish.signal()
+        wait(for: [registrationFinished], timeout: 2)
+        defer { observation.value?.cancel() }
+
+        let delivered = updates.values
+        XCTAssertEqual(delivered.count, 2)
+        guard case let .authoritative(authoritative) = delivered.first else {
+            return XCTFail("Authoritative replacement must be delivered first")
+        }
+        XCTAssertEqual(authoritative.revision, initialSnapshot.revision)
+        guard case let .next(
+            nextProjection,
+            predecessorRevision,
+            eventCursorWasStale
+        ) = delivered.last else {
+            return XCTFail("The newest pending replacement must drain second")
+        }
+        let nextSnapshot = try librarySnapshot(nextProjection)
+        XCTAssertEqual(nextSnapshot.revision, latest.revision)
+        XCTAssertEqual(nextSnapshot.filterQuery, "latest")
+        XCTAssertEqual(predecessorRevision, intermediate.revision)
+        XCTAssertTrue(eventCursorWasStale)
+    }
+
+    func testInstalledLibraryObserverCapacityCancellationAndClosedRefusal() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "runtime-apple-library-capacity-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profile = try NativeRuntimeProfile.open(
+            configuration: NativeRuntimeProfileConfiguration(storageRoot: root)
+        )
+        var observations: [NativeRuntimeLibraryObservation] = []
+        for _ in 0 ..< 8 {
+            let updates = LockedLibraryUpdates()
+            let observation = try profile.observeInstalledLibrary(updates.append)
+            observations.append(observation)
+            guard case .authoritative = try XCTUnwrap(updates.values.first) else {
+                return XCTFail("Every admitted observer needs an immediate replacement")
+            }
+        }
+
+        XCTAssertThrowsError(
+            try profile.observeInstalledLibrary { _ in }
+        ) { error in
+            XCTAssertEqual(
+                error as? NativeRuntimeLibraryObservationError,
+                .observerCapacity(maximum: 8)
+            )
+        }
+
+        observations.removeLast().cancel()
+        let replacementUpdates = LockedLibraryUpdates()
+        let replacement = try profile.observeInstalledLibrary(
+            replacementUpdates.append
+        )
+        guard case .authoritative =
+            try XCTUnwrap(replacementUpdates.values.first)
+        else {
+            return XCTFail("Cancellation must release observer capacity")
+        }
+        replacement.cancel()
+        observations.forEach { $0.cancel() }
+
+        profile.close()
+        XCTAssertThrowsError(
+            try profile.observeInstalledLibrary { _ in }
+        ) { error in
+            XCTAssertEqual(
+                error as? NativeRuntimeLibraryObservationError,
+                .profileClosed
+            )
+        }
+        XCTAssertTrue(
+            try librarySnapshot(profile.installedLibraryProjection())
+                .profileClosed
+        )
+    }
+
+    func testInstalledLibraryCommandsMapToRustOwnedProfileState() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "runtime-apple-library-commands-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = repositoryRoot().appendingPathComponent(
+            "conformance/napplet-corpus/published/good-morning",
+            isDirectory: true
+        )
+        let event = try Data(
+            contentsOf: fixture.appendingPathComponent("event.json")
+        )
+        let index = try Data(
+            contentsOf: fixture.appendingPathComponent("index.html")
+        )
+        let profile = try NativeRuntimeProfile.open(
+            configuration: NativeRuntimeProfileConfiguration(storageRoot: root)
+        )
+        defer { profile.close() }
+        let artifact = try profile.openSignedNamed(
+            title: "Good Morning Library Commands",
+            eventJSON: event,
+            author: author,
+            dTag: "good-morning",
+            blobsBySHA256: [indexDigest: index],
+            grantDomains: []
+        )
+        let runtime = try XCTUnwrap(artifact.runtimeSession)
+        defer { runtime.stop() }
+
+        var snapshot = try librarySnapshot(
+            profile.installedLibraryProjection()
+        )
+        XCTAssertEqual(snapshot.totalInstalled, 1)
+        let build = try XCTUnwrap(snapshot.builds.first)
+        XCTAssertEqual(build.availability, .sealedExactBytesReady)
+        XCTAssertEqual(
+            build.sessions,
+            [
+                NativeRuntimeLibrarySession(
+                    id: runtime.sessionID,
+                    state: .running
+                ),
+            ]
+        )
+
+        let workspaceID = "library-commands"
+        let workspaceUpdate = profile.saveWorkspace(
+            NativeRuntimeWorkspaceDefinition(
+                schemaVersion: 1,
+                workspaceId: workspaceID,
+                axis: .horizontal,
+                slots: [
+                    NativeRuntimeWorkspaceSlot(
+                        slotId: "library",
+                        role: .toolWindow,
+                        renderer: .native,
+                        handlerId: "installed-library",
+                        manifestAuthor: nil,
+                        dTag: nil,
+                        aggregateHash: nil,
+                        bindingParametersJson: "{}",
+                        navigationJson: "{}",
+                        visible: true,
+                        order: 0,
+                        sizePoints: 640,
+                        minimumPoints: 320,
+                        maximumPoints: 1_200
+                    ),
+                ],
+                focusedSlotId: "library",
+                activityDrawerVisible: false,
+                preferencesJson: "{}",
+                retainedReceiptIds: []
+            )
+        )
+        XCTAssertTrue(workspaceUpdate.accepted)
+        profile.assignInstalledBuild(
+            build.exactBuild,
+            toWorkspaceID: workspaceID
+        )
+        snapshot = try librarySnapshot(profile.installedLibraryProjection())
+        XCTAssertEqual(snapshot.builds.first?.assignedWorkspaceIDs, [workspaceID])
+        XCTAssertEqual(snapshot.workspaces.map(\.id), [workspaceID])
+
+        profile.setInstalledLibraryFilter("no-match")
+        snapshot = try librarySnapshot(profile.installedLibraryProjection())
+        XCTAssertEqual(snapshot.filterQuery, "no-match")
+        XCTAssertEqual(snapshot.totalInstalled, 1)
+        XCTAssertTrue(snapshot.builds.isEmpty)
+
+        profile.setInstalledLibraryFilter("GOOD-MORNING")
+        snapshot = try librarySnapshot(profile.installedLibraryProjection())
+        XCTAssertEqual(snapshot.builds.count, 1)
+
+        profile.suspendInstalledSession(runtime.sessionID)
+        snapshot = try librarySnapshot(profile.installedLibraryProjection())
+        XCTAssertEqual(snapshot.builds.first?.sessions.first?.state, .suspended)
+
+        profile.resumeInstalledSession(runtime.sessionID)
+        snapshot = try librarySnapshot(profile.installedLibraryProjection())
+        XCTAssertEqual(snapshot.builds.first?.sessions.first?.state, .running)
+
+        profile.clearInstalledBuildAssignment(
+            build.exactBuild,
+            fromWorkspaceID: workspaceID
+        )
+        snapshot = try librarySnapshot(profile.installedLibraryProjection())
+        XCTAssertTrue(
+            try XCTUnwrap(snapshot.builds.first).assignedWorkspaceIDs.isEmpty
+        )
+
+        profile.uninstallInstalledBuild(build.exactBuild)
+        snapshot = try librarySnapshot(profile.installedLibraryProjection())
+        XCTAssertEqual(snapshot.totalInstalled, 0)
+        XCTAssertTrue(snapshot.builds.isEmpty)
+        XCTAssertEqual(snapshot.workspaces.map(\.id), [workspaceID])
+    }
+
     func testNativeSettingsDocumentFailsClosedForInvalidOrOversizedJSON() {
         let request = NativeSettingsRequest(
             manifestAuthor: String(repeating: "a", count: 64),
@@ -279,6 +604,20 @@ final class RuntimeNappletSessionTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
     }
+
+    private func librarySnapshot(
+        _ projection: NativeRuntimeLibraryProjection
+    ) throws -> NativeRuntimeLibrarySnapshot {
+        guard case let .snapshot(snapshot) = projection else {
+            XCTFail("Expected a complete installed-library snapshot")
+            throw RuntimeNappletSessionTestError.expectedLibrarySnapshot
+        }
+        return snapshot
+    }
+}
+
+private enum RuntimeNappletSessionTestError: Error {
+    case expectedLibrarySnapshot
 }
 
 private final class LockedData: @unchecked Sendable {
@@ -294,6 +633,40 @@ private final class LockedData: @unchecked Sendable {
     func set(_ value: Data) {
         lock.lock()
         storage = value
+        lock.unlock()
+    }
+}
+
+private final class LockedLibraryUpdates: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [NativeRuntimeLibraryUpdate] = []
+
+    var values: [NativeRuntimeLibraryUpdate] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ update: NativeRuntimeLibraryUpdate) {
+        lock.lock()
+        storage.append(update)
+        lock.unlock()
+    }
+}
+
+private final class LockedLibraryObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: NativeRuntimeLibraryObservation?
+
+    var value: NativeRuntimeLibraryObservation? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func set(_ observation: NativeRuntimeLibraryObservation?) {
+        lock.lock()
+        storage = observation
         lock.unlock()
     }
 }

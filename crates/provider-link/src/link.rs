@@ -14,7 +14,7 @@ use nmp_native_runtime_core::{
     BoundedJson, Cancellation, Capability, Principal, SessionId, WorkLease,
 };
 use parking_lot::Mutex;
-use serde_json::{Value, json};
+use serde_json::Value;
 use thiserror::Error;
 use url::{Host, Url};
 
@@ -28,6 +28,7 @@ pub struct LinkProviderLimits {
     pub maximum_pending_per_session: usize,
     pub maximum_pending_total: usize,
     pub maximum_url_bytes: usize,
+    pub maximum_label_bytes: usize,
     pub maximum_correlation_id_bytes: usize,
     pub maximum_native_handle_bytes: usize,
     pub maximum_response_bytes: usize,
@@ -40,6 +41,7 @@ impl Default for LinkProviderLimits {
             maximum_pending_per_session: 8,
             maximum_pending_total: 128,
             maximum_url_bytes: 8 * 1024,
+            maximum_label_bytes: 4 * 1024,
             maximum_correlation_id_bytes: 1_024,
             maximum_native_handle_bytes: 256,
             maximum_response_bytes: 16 * 1024,
@@ -80,6 +82,9 @@ pub struct NativeLinkOpenRequest {
     pub principal: Principal,
     pub session: SessionId,
     pub normalized_url: Arc<str>,
+    /// Untrusted display text supplied by the napplet. Native code may render
+    /// it as plain text but must never use it as policy or navigation input.
+    pub label: Option<Arc<str>>,
     /// External link opens always require shell-owned user confirmation.
     pub confirmation_required: bool,
     pub cancellation: Cancellation,
@@ -251,23 +256,18 @@ impl LinkProvider {
         let Some(outbound) = outbound else {
             return Ok(());
         };
-        let status = match outcome {
-            NativeLinkOutcome::Opened => "opened",
-            NativeLinkOutcome::Cancelled => "cancelled",
-            NativeLinkOutcome::Failed => "failed",
+        let terminal = match outcome {
+            NativeLinkOutcome::Opened => LinkTerminal::Opened,
+            NativeLinkOutcome::Cancelled => LinkTerminal::Denied {
+                error: "user-denied",
+            },
+            NativeLinkOutcome::Failed => LinkTerminal::Rejected {
+                error: "native-open-failed",
+            },
         };
+        let fields = terminal_fields(&pending.correlation_id, terminal);
         outbound
-            .push(
-                "link.open.result",
-                serde_json::Map::from_iter([
-                    (
-                        "id".to_owned(),
-                        Value::String(pending.correlation_id.to_string()),
-                    ),
-                    ("status".to_owned(), Value::String(status.to_owned())),
-                ]),
-                None,
-            )
+            .push("link.open.result", fields, None)
             .map(|_| ())
             .map_err(|error| {
                 self.activity.record(LinkActivity {
@@ -286,15 +286,40 @@ impl LinkProvider {
             .payload
             .as_object()
             .ok_or_else(|| invalid(&request, "payload must be an object"))?;
-        if object.len() != 1 || !object.contains_key("url") {
-            return Err(invalid(&request, "only `url` is allowed"));
+        if !object.contains_key("url")
+            || object
+                .keys()
+                .any(|key| !matches!(key.as_str(), "url" | "options"))
+        {
+            return Err(invalid(
+                &request,
+                "only `url` and optional `options` are allowed",
+            ));
         }
         let url = object
             .get("url")
             .and_then(Value::as_str)
             .ok_or_else(|| invalid(&request, "`url` must be a string"))?;
-        let normalized_url = validate_external_url(url, self.limits.maximum_url_bytes)
+        let label = parse_label(object.get("options"), self.limits.maximum_label_bytes)
             .map_err(|reason| invalid(&request, reason))?;
+        let normalized_url = match validate_external_url(url, self.limits.maximum_url_bytes) {
+            Ok(url) => url,
+            Err(refusal) => {
+                self.activity.record(LinkActivity {
+                    principal: request.principal.clone(),
+                    session: request.session,
+                    outcome: LinkActivityOutcome::Denied,
+                });
+                return terminal_response(
+                    &id,
+                    LinkTerminal::Denied {
+                        error: refusal.code(),
+                    },
+                    self.limits.maximum_response_bytes,
+                    &request_action,
+                );
+            }
+        };
         let policy_request = LinkPolicyRequest {
             principal: request.principal.clone(),
             session: request.session,
@@ -306,10 +331,13 @@ impl LinkProvider {
                 session: request.session,
                 outcome: LinkActivityOutcome::Denied,
             });
-            return response(
-                json!({"type":"link.open.result","id":id,"status":"denied"}),
+            return terminal_response(
+                &id,
+                LinkTerminal::Denied {
+                    error: "blocked-by-policy",
+                },
                 self.limits.maximum_response_bytes,
-                &request,
+                &request_action,
             );
         }
 
@@ -331,17 +359,37 @@ impl LinkProvider {
                         session: request.session,
                         outcome: LinkActivityOutcome::Refused,
                     });
-                    return Err(denied(&request, "link operation capacity is full"));
+                    return terminal_response(
+                        &id,
+                        LinkTerminal::Rejected {
+                            error: "link operation capacity is full",
+                        },
+                        self.limits.maximum_response_bytes,
+                        &request_action,
+                    );
                 }
                 if state.pending.values().any(|pending| {
                     pending.session == request.session && pending.correlation_id == id
                 }) {
-                    return Err(invalid(&request, "duplicate outstanding correlation id"));
+                    return terminal_response(
+                        &id,
+                        LinkTerminal::Rejected {
+                            error: "duplicate outstanding correlation id",
+                        },
+                        self.limits.maximum_response_bytes,
+                        &request_action,
+                    );
                 }
-                let next = state
-                    .next_token
-                    .checked_add(1)
-                    .ok_or_else(|| denied(&request, "link operation id space is exhausted"))?;
+                let Some(next) = state.next_token.checked_add(1) else {
+                    return terminal_response(
+                        &id,
+                        LinkTerminal::Rejected {
+                            error: "link operation id space is exhausted",
+                        },
+                        self.limits.maximum_response_bytes,
+                        &request_action,
+                    );
+                };
                 state.next_token = next;
                 let token = LinkOperationToken(next);
                 state.pending.insert(
@@ -361,6 +409,7 @@ impl LinkProvider {
             principal: request.principal.clone(),
             session: request.session,
             normalized_url,
+            label,
             confirmation_required: true,
             cancellation,
         };
@@ -372,11 +421,19 @@ impl LinkProvider {
                         drop(pending.work);
                     }
                     self.opener.cancel(&handle);
-                    return Err(ProviderError::Failed {
-                        domain: Arc::from(LINK_DOMAIN),
-                        action: request_action,
-                        reason: Arc::from("native opener returned an invalid handle"),
+                    self.activity.record(LinkActivity {
+                        principal: request.principal,
+                        session: request.session,
+                        outcome: LinkActivityOutcome::Refused,
                     });
+                    return terminal_response(
+                        &id,
+                        LinkTerminal::Rejected {
+                            error: "native opener returned an invalid handle",
+                        },
+                        self.limits.maximum_response_bytes,
+                        &request_action,
+                    );
                 }
                 let retained = {
                     let mut state = self.state.lock();
@@ -405,21 +462,13 @@ impl LinkProvider {
                     session: request.session,
                     outcome: LinkActivityOutcome::Refused,
                 });
-                BoundedJson::from_value(
-                    &json!({
-                        "type":"link.open.result",
-                        "id":id,
-                        "status":"failed",
-                        "error":error.to_string()
-                    }),
+                let error = error.to_string();
+                terminal_response(
+                    &id,
+                    LinkTerminal::Rejected { error: &error },
                     self.limits.maximum_response_bytes,
+                    &request_action,
                 )
-                .map(|response| ProviderCall::completed(Some(response)))
-                .map_err(|_| ProviderError::Failed {
-                    domain: Arc::from(LINK_DOMAIN),
-                    action: request_action,
-                    reason: Arc::from("response exceeds the configured byte limit"),
-                })
             }
         }
     }
@@ -528,6 +577,7 @@ fn validate_limits(limits: LinkProviderLimits) -> Result<(), LinkProviderBuildEr
         limits.maximum_pending_per_session,
         limits.maximum_pending_total,
         limits.maximum_url_bytes,
+        limits.maximum_label_bytes,
         limits.maximum_correlation_id_bytes,
         limits.maximum_native_handle_bytes,
         limits.maximum_response_bytes,
@@ -540,18 +590,35 @@ fn validate_limits(limits: LinkProviderLimits) -> Result<(), LinkProviderBuildEr
     Ok(())
 }
 
-fn validate_external_url(value: &str, maximum_bytes: usize) -> Result<Arc<str>, &'static str> {
-    if !valid_text(value, maximum_bytes) {
-        return Err("`url` is empty, invalid, or too large");
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LinkUrlRefusal {
+    InvalidUrl,
+    UnsupportedScheme,
+    BlockedByPolicy,
+}
+
+impl LinkUrlRefusal {
+    fn code(self) -> &'static str {
+        match self {
+            Self::InvalidUrl => "invalid-url",
+            Self::UnsupportedScheme => "unsupported-scheme",
+            Self::BlockedByPolicy => "blocked-by-policy",
+        }
     }
-    let parsed = Url::parse(value).map_err(|_| "`url` must be an absolute URL")?;
+}
+
+fn validate_external_url(value: &str, maximum_bytes: usize) -> Result<Arc<str>, LinkUrlRefusal> {
+    if !valid_text(value, maximum_bytes) {
+        return Err(LinkUrlRefusal::InvalidUrl);
+    }
+    let parsed = Url::parse(value).map_err(|_| LinkUrlRefusal::InvalidUrl)?;
     if !matches!(parsed.scheme(), "https" | "http") {
-        return Err("only http and https URLs may be opened");
+        return Err(LinkUrlRefusal::UnsupportedScheme);
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err("credentialed URLs are not allowed");
+        return Err(LinkUrlRefusal::BlockedByPolicy);
     }
-    let host = parsed.host().ok_or("URL host is required")?;
+    let host = parsed.host().ok_or(LinkUrlRefusal::InvalidUrl)?;
     match host {
         Host::Domain(domain) => {
             let domain = domain.trim_end_matches('.').to_ascii_lowercase();
@@ -560,22 +627,45 @@ fn validate_external_url(value: &str, maximum_bytes: usize) -> Result<Arc<str>, 
                 || domain.ends_with(".local")
                 || !domain.contains('.')
             {
-                return Err("local or single-label hosts are not allowed");
+                return Err(LinkUrlRefusal::BlockedByPolicy);
             }
         }
         Host::Ipv4(address) if !public_ipv4(address) => {
-            return Err("non-public IP addresses are not allowed");
+            return Err(LinkUrlRefusal::BlockedByPolicy);
         }
         Host::Ipv6(address) if !public_ipv6(address) => {
-            return Err("non-public IP addresses are not allowed");
+            return Err(LinkUrlRefusal::BlockedByPolicy);
         }
         Host::Ipv4(_) | Host::Ipv6(_) => {}
     }
     let normalized = parsed.to_string();
     if normalized.len() > maximum_bytes {
-        return Err("normalized URL is too large");
+        return Err(LinkUrlRefusal::InvalidUrl);
     }
     Ok(Arc::from(normalized))
+}
+
+fn parse_label(
+    options: Option<&Value>,
+    maximum_label_bytes: usize,
+) -> Result<Option<Arc<str>>, &'static str> {
+    let Some(options) = options else {
+        return Ok(None);
+    };
+    let object = options
+        .as_object()
+        .ok_or("`options` must be an object when present")?;
+    if object.keys().any(|key| key != "label") {
+        return Err("`options` may contain only `label`");
+    }
+    let Some(label) = object.get("label") else {
+        return Ok(None);
+    };
+    let label = label.as_str().ok_or("`options.label` must be a string")?;
+    if label.len() > maximum_label_bytes {
+        return Err("`options.label` exceeds the configured byte limit");
+    }
+    Ok(Some(Arc::from(label)))
 }
 
 fn public_ipv4(address: Ipv4Addr) -> bool {
@@ -632,14 +722,59 @@ fn valid_text(value: &str, maximum_bytes: usize) -> bool {
             .any(|byte| byte == 0 || byte.is_ascii_control())
 }
 
-fn response(
-    value: Value,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LinkTerminal<'a> {
+    Opened,
+    Denied {
+        error: &'a str,
+    },
+    /// The pinned shim rejects this terminal because it deliberately omits a
+    /// public status rather than manufacturing `failed` or `cancelled`.
+    Rejected {
+        error: &'a str,
+    },
+}
+
+fn terminal_fields(
+    correlation_id: &str,
+    terminal: LinkTerminal<'_>,
+) -> serde_json::Map<String, Value> {
+    let mut fields =
+        serde_json::Map::from_iter([("id".to_owned(), Value::String(correlation_id.to_owned()))]);
+    match terminal {
+        LinkTerminal::Opened => {
+            fields.insert("status".to_owned(), Value::String("opened".to_owned()));
+        }
+        LinkTerminal::Denied { error } => {
+            fields.insert("status".to_owned(), Value::String("denied".to_owned()));
+            fields.insert("error".to_owned(), Value::String(error.to_owned()));
+        }
+        LinkTerminal::Rejected { error } => {
+            fields.insert("error".to_owned(), Value::String(error.to_owned()));
+        }
+    }
+    fields
+}
+
+fn terminal_response(
+    correlation_id: &str,
+    terminal: LinkTerminal<'_>,
     maximum_bytes: usize,
-    request: &ProviderRequest,
+    action: &Arc<str>,
 ) -> Result<ProviderCall, ProviderError> {
+    let mut fields = terminal_fields(correlation_id, terminal);
+    fields.insert(
+        "type".to_owned(),
+        Value::String("link.open.result".to_owned()),
+    );
+    let value = Value::Object(fields);
     BoundedJson::from_value(&value, maximum_bytes)
         .map(|value| ProviderCall::completed(Some(value)))
-        .map_err(|_| failed(request, "response exceeds the configured byte limit"))
+        .map_err(|_| ProviderError::Failed {
+            domain: Arc::from(LINK_DOMAIN),
+            action: Arc::clone(action),
+            reason: Arc::from("response exceeds the configured byte limit"),
+        })
 }
 
 fn invalid(request: &ProviderRequest, reason: impl Into<Arc<str>>) -> ProviderError {
@@ -652,14 +787,6 @@ fn invalid(request: &ProviderRequest, reason: impl Into<Arc<str>>) -> ProviderEr
 
 fn denied(request: &ProviderRequest, reason: impl Into<Arc<str>>) -> ProviderError {
     ProviderError::Denied {
-        domain: Arc::from(LINK_DOMAIN),
-        action: Arc::clone(&request.action),
-        reason: reason.into(),
-    }
-}
-
-fn failed(request: &ProviderRequest, reason: impl Into<Arc<str>>) -> ProviderError {
-    ProviderError::Failed {
         domain: Arc::from(LINK_DOMAIN),
         action: Arc::clone(&request.action),
         reason: reason.into(),
@@ -684,6 +811,7 @@ mod tests {
         ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, ResourceLimits, ResourceTracker,
         Sensitivity,
     };
+    use serde_json::json;
 
     use super::*;
 
@@ -691,6 +819,7 @@ mod tests {
     struct FakeOpener {
         requests: Mutex<Vec<NativeLinkOpenRequest>>,
         cancelled: Mutex<Vec<Arc<str>>>,
+        start_error: Mutex<Option<NativeLinkStartError>>,
     }
 
     impl NativeLinkOpener for FakeOpener {
@@ -700,6 +829,9 @@ mod tests {
         ) -> Result<Arc<str>, NativeLinkStartError> {
             let handle: Arc<str> = Arc::from(format!("link-{}", request.token.0));
             self.requests.lock().push(request);
+            if let Some(error) = self.start_error.lock().take() {
+                return Err(error);
+            }
             Ok(handle)
         }
 
@@ -715,6 +847,15 @@ mod tests {
         fn record(&self, _fact: ProviderActivity) {}
     }
 
+    #[derive(Debug)]
+    struct DenyAllLinks;
+
+    impl LinkPolicy for DenyAllLinks {
+        fn evaluate(&self, _request: &LinkPolicyRequest) -> LinkPolicyDecision {
+            LinkPolicyDecision::Deny
+        }
+    }
+
     struct Rig {
         provider: Arc<LinkProvider>,
         opener: Arc<FakeOpener>,
@@ -726,10 +867,14 @@ mod tests {
 
     impl Rig {
         fn new() -> Self {
+            Self::with_policy(Arc::new(AllowExternalWebLinks))
+        }
+
+        fn with_policy(policy: Arc<dyn LinkPolicy>) -> Self {
             let opener = Arc::new(FakeOpener::default());
             let provider = Arc::new(
                 LinkProvider::new(
-                    Arc::new(AllowExternalWebLinks),
+                    policy,
                     opener.clone(),
                     Arc::new(NoopLinkActivity),
                     LinkProviderLimits::default(),
@@ -812,7 +957,8 @@ mod tests {
             rig.dispatch(json!({
                 "type":"link.open",
                 "id":"open-1",
-                "url":"https://example.com/path"
+                "url":"https://example.com/path",
+                "options":{"label":"Read post"}
             }))
             .unwrap(),
             None
@@ -824,6 +970,7 @@ mod tests {
             requests[0].normalized_url.as_ref(),
             "https://example.com/path"
         );
+        assert_eq!(requests[0].label.as_deref(), Some("Read post"));
         let token = requests[0].token;
         drop(requests);
 
@@ -840,31 +987,176 @@ mod tests {
     }
 
     #[test]
-    fn unsafe_schemes_credentials_and_private_hosts_execute_nothing() {
+    fn unsafe_schemes_credentials_and_private_hosts_are_denied_without_execution() {
         let rig = Rig::new();
-        for (index, url) in [
-            "javascript:alert(1)",
-            "file:///etc/passwd",
-            "https://user:pass@example.com/",
-            "http://localhost:8080/",
-            "http://127.0.0.1/",
-            "http://192.168.1.2/",
-            "https://printer.local/",
-            "https://intranet/",
+        for (index, (url, error)) in [
+            ("javascript:alert(1)", "unsupported-scheme"),
+            ("file:///etc/passwd", "unsupported-scheme"),
+            ("not an absolute url", "invalid-url"),
+            ("https://user:pass@example.com/", "blocked-by-policy"),
+            ("http://localhost:8080/", "blocked-by-policy"),
+            ("http://127.0.0.1/", "blocked-by-policy"),
+            ("http://192.168.1.2/", "blocked-by-policy"),
+            ("https://printer.local/", "blocked-by-policy"),
+            ("https://intranet/", "blocked-by-policy"),
         ]
         .into_iter()
         .enumerate()
         {
-            let error = rig
+            let result = rig
                 .dispatch(json!({
                     "type":"link.open",
                     "id":format!("bad-{index}"),
                     "url":url
                 }))
-                .unwrap_err();
-            assert!(error.contains("invalid link.open payload"), "{error}");
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                result,
+                json!({
+                    "type":"link.open.result",
+                    "id":format!("bad-{index}"),
+                    "status":"denied",
+                    "error":error
+                })
+            );
         }
         assert!(rig.opener.requests.lock().is_empty());
+    }
+
+    #[test]
+    fn product_policy_denial_returns_the_pinned_denied_result_without_native_work() {
+        let rig = Rig::with_policy(Arc::new(DenyAllLinks));
+        assert_eq!(
+            rig.dispatch(json!({
+                "type":"link.open",
+                "id":"policy-denied",
+                "url":"https://example.com/"
+            }))
+            .unwrap()
+            .unwrap(),
+            json!({
+                "type":"link.open.result",
+                "id":"policy-denied",
+                "status":"denied",
+                "error":"blocked-by-policy"
+            })
+        );
+        assert!(rig.opener.requests.lock().is_empty());
+    }
+
+    #[test]
+    fn label_matches_the_pinned_optional_bounded_display_hint() {
+        let rig = Rig::new();
+        let maximum = "🙂".repeat(1_024);
+        assert_eq!(maximum.len(), 4 * 1_024);
+        assert_eq!(
+            rig.dispatch(json!({
+                "type":"link.open",
+                "id":"label-maximum",
+                "url":"https://example.com/",
+                "options":{"label":maximum}
+            }))
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            rig.opener.requests.lock()[0].label.as_deref(),
+            Some(maximum.as_str())
+        );
+
+        let error = rig
+            .dispatch(json!({
+                "type":"link.open",
+                "id":"label-over-maximum",
+                "url":"https://example.com/",
+                "options":{"label":"🙂".repeat(1_025)}
+            }))
+            .unwrap_err();
+        assert!(
+            error.contains("`options.label` exceeds the configured byte limit"),
+            "{error}"
+        );
+        let error = rig
+            .dispatch(json!({
+                "type":"link.open",
+                "id":"unknown-option",
+                "url":"https://example.com/",
+                "options":{"target":"_blank"}
+            }))
+            .unwrap_err();
+        assert!(
+            error.contains("`options` may contain only `label`"),
+            "{error}"
+        );
+        assert_eq!(rig.opener.requests.lock().len(), 1);
+    }
+
+    #[test]
+    fn native_cancellation_denies_and_native_failure_rejects_without_new_statuses() {
+        let rig = Rig::new();
+        rig.dispatch(json!({
+            "type":"link.open",
+            "id":"cancelled",
+            "url":"https://example.com/cancelled"
+        }))
+        .unwrap();
+        let cancelled = rig.opener.requests.lock()[0].token;
+        rig.provider
+            .complete(cancelled, NativeLinkOutcome::Cancelled)
+            .unwrap();
+
+        rig.dispatch(json!({
+            "type":"link.open",
+            "id":"failed",
+            "url":"https://example.com/failed"
+        }))
+        .unwrap();
+        let failed = rig.opener.requests.lock()[1].token;
+        rig.provider
+            .complete(failed, NativeLinkOutcome::Failed)
+            .unwrap();
+
+        let pushes = rig.observer.drain(8).unwrap().pushes;
+        assert_eq!(pushes.len(), 2);
+        assert_eq!(
+            pushes[0].envelope.decode().unwrap(),
+            json!({
+                "type":"link.open.result",
+                "id":"cancelled",
+                "status":"denied",
+                "error":"user-denied"
+            })
+        );
+        assert_eq!(
+            pushes[1].envelope.decode().unwrap(),
+            json!({
+                "type":"link.open.result",
+                "id":"failed",
+                "error":"native-open-failed"
+            })
+        );
+    }
+
+    #[test]
+    fn native_start_failure_rejects_without_an_invented_terminal_status() {
+        let rig = Rig::new();
+        *rig.opener.start_error.lock() = Some(NativeLinkStartError::Unavailable);
+        assert_eq!(
+            rig.dispatch(json!({
+                "type":"link.open",
+                "id":"unavailable",
+                "url":"https://example.com/"
+            }))
+            .unwrap()
+            .unwrap(),
+            json!({
+                "type":"link.open.result",
+                "id":"unavailable",
+                "error":"native link opener is unavailable"
+            })
+        );
+        assert_eq!(rig.provider.pending_count(), 0);
     }
 
     #[test]

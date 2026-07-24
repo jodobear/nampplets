@@ -197,7 +197,17 @@ impl ResourceProvider {
 
     fn info(&self, request: ProviderRequest) -> Result<ProviderCall, ProviderError> {
         let id = correlation_id(&request, self.shared.limits)?;
-        exact_payload(&request, &[])?;
+        if exact_payload(&request, &[]).is_err() {
+            return self.completed_error(
+                &request,
+                "resource.info.error",
+                ResourceActivityAction::Info,
+                ResourceFailure::new(
+                    ResourceErrorCode::InvalidRequest,
+                    "resource.info accepts no payload fields",
+                ),
+            );
+        }
         let schemes = supported_schemes()
             .into_iter()
             .map(|scheme| {
@@ -232,18 +242,62 @@ impl ResourceProvider {
     }
 
     fn bytes(&self, request: ProviderRequest) -> Result<ProviderCall, ProviderError> {
-        let payload = exact_payload(&request, &["url"])?;
-        let url = required_string(payload, "url", &request)?;
+        correlation_id(&request, self.shared.limits)?;
+        let payload = match exact_payload(&request, &["url"]) {
+            Ok(payload) => payload,
+            Err(_) => {
+                return self.top_level_error(
+                    &request,
+                    RequestKind::Bytes,
+                    ResourceFailure::new(
+                        ResourceErrorCode::InvalidRequest,
+                        "resource.bytes requires exactly one url field",
+                    ),
+                );
+            }
+        };
+        let url = match required_string(payload, "url", &request) {
+            Ok(url) => url,
+            Err(_) => {
+                return self.top_level_error(
+                    &request,
+                    RequestKind::Bytes,
+                    ResourceFailure::new(
+                        ResourceErrorCode::InvalidRequest,
+                        "resource.bytes url must be a string",
+                    ),
+                );
+            }
+        };
         let url: Arc<str> = Arc::from(url);
         self.start(request, RequestKind::Bytes, vec![url])
     }
 
     fn bytes_many(&self, request: ProviderRequest) -> Result<ProviderCall, ProviderError> {
-        let payload = exact_payload(&request, &["urls"])?;
-        let values = payload
-            .get("urls")
-            .and_then(Value::as_array)
-            .ok_or_else(|| invalid(&request, "urls must be an array"))?;
+        correlation_id(&request, self.shared.limits)?;
+        let payload = match exact_payload(&request, &["urls"]) {
+            Ok(payload) => payload,
+            Err(_) => {
+                return self.top_level_error(
+                    &request,
+                    RequestKind::BytesMany,
+                    ResourceFailure::new(
+                        ResourceErrorCode::InvalidRequest,
+                        "resource.bytesMany requires exactly one urls field",
+                    ),
+                );
+            }
+        };
+        let Some(values) = payload.get("urls").and_then(Value::as_array) else {
+            return self.top_level_error(
+                &request,
+                RequestKind::BytesMany,
+                ResourceFailure::new(
+                    ResourceErrorCode::InvalidRequest,
+                    "resource.bytesMany urls must be an array",
+                ),
+            );
+        };
         if values.is_empty() {
             return self.top_level_error(
                 &request,
@@ -263,9 +317,16 @@ impl ResourceProvider {
         }
         let mut urls = Vec::with_capacity(values.len());
         for value in values {
-            let url = value
-                .as_str()
-                .ok_or_else(|| invalid(&request, "every urls item must be a string"))?;
+            let Some(url) = value.as_str() else {
+                return self.top_level_error(
+                    &request,
+                    RequestKind::BytesMany,
+                    ResourceFailure::new(
+                        ResourceErrorCode::InvalidRequest,
+                        "every resource.bytesMany urls item must be a string",
+                    ),
+                );
+            };
             urls.push(Arc::from(url));
         }
         self.start(request, RequestKind::BytesMany, urls)
@@ -368,13 +429,23 @@ impl ResourceProvider {
         kind: RequestKind,
         failure: ResourceFailure,
     ) -> Result<ProviderCall, ProviderError> {
+        self.completed_error(request, kind.error_type(), kind.action(), failure)
+    }
+
+    fn completed_error(
+        &self,
+        request: &ProviderRequest,
+        error_type: &str,
+        action: ResourceActivityAction,
+        failure: ResourceFailure,
+    ) -> Result<ProviderCall, ProviderError> {
         let id = correlation_id(request, self.shared.limits)?;
-        let response = error_envelope(kind.error_type(), &id, &failure);
+        let response = error_envelope(error_type, &id, &failure);
         let response = bounded_response(&response, self.shared.wire_limit(), request)?;
         self.shared.activity.record(ResourceActivity {
             principal: request.principal.clone(),
             session: request.session,
-            action: kind.action(),
+            action,
             outcome: ResourceActivityOutcome::Refused(failure.code),
             url_count: 0,
             delivered_bytes: 0,
@@ -546,7 +617,7 @@ impl ResourceShared {
                 > self.limits.maximum_in_flight_urls_per_napplet
         {
             return Err(ResourceFailure::new(
-                ResourceErrorCode::QuotaExceeded,
+                ResourceErrorCode::BlockedByPolicy,
                 "resource in-flight capacity is full",
             ));
         }
@@ -558,7 +629,7 @@ impl ResourceShared {
             self.limits.maximum_requests_per_napplet_per_minute,
         ) {
             return Err(ResourceFailure::new(
-                ResourceErrorCode::QuotaExceeded,
+                ResourceErrorCode::BlockedByPolicy,
                 "resource per-napplet rate limit was exceeded",
             ));
         }
@@ -629,6 +700,10 @@ impl ResourceShared {
             },
             RequestKind::BytesMany => {
                 let mut items = Vec::with_capacity(urls.len());
+                let maximum_bulk_bytes = self
+                    .limits
+                    .maximum_bulk_response_bytes
+                    .min(self.limits.maximum_blob_bytes_per_request);
                 for url in &urls {
                     if cancellation.is_cancelled() {
                         break;
@@ -636,7 +711,7 @@ impl ResourceShared {
                     match context.acquire(url) {
                         Ok(resource)
                             if delivered_bytes.saturating_add(resource.bytes.len())
-                                <= self.limits.maximum_blob_bytes_per_request =>
+                                <= maximum_bulk_bytes =>
                         {
                             delivered_bytes += resource.bytes.len();
                             items.push(json!({

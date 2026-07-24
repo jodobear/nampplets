@@ -30,7 +30,7 @@ round trip. It is not a provider API and is not evidence of NAP provider
 compatibility.
 
 The compatibility prelude has callable projections for `shell`, `storage`,
-`identity`, `inc`, `theme`, `config`, and `resource`. A projection is installed
+`identity`, `inc`, `theme`, `config`, `resource`, and `link`. A projection is installed
 only when that exact domain is present in the Rust-negotiated launch plan;
 having JavaScript support here does not advertise a provider. NAP-RESOURCE
 remains unusable until the one accepted `shell.init` advertises `resource`.

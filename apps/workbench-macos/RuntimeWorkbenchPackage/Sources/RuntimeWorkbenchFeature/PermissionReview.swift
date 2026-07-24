@@ -26,8 +26,11 @@ final class PermissionReviewSheetModel {
         let snapshot = manager.snapshot()
         self.snapshot = snapshot
         selections = Dictionary(
-            uniqueKeysWithValues: snapshot.review.capabilities.map {
-                ($0.domain, $0.requestedDecision)
+            uniqueKeysWithValues: snapshot.review.capabilities.compactMap {
+                capability in
+                capability.requestedDecision.map {
+                    (capability.domain, $0)
+                }
             }
         )
     }
@@ -73,7 +76,7 @@ final class PermissionReviewSheetModel {
 
     func selection(
         for capability: PermissionCapabilityReview
-    ) -> PermissionRequestedDecision {
+    ) -> PermissionRequestedDecision? {
         selections[capability.domain] ?? capability.requestedDecision
     }
 
@@ -103,8 +106,11 @@ final class PermissionReviewSheetModel {
     /// Discards only transient native form state. It never calls the manager.
     func cancel() {
         selections = Dictionary(
-            uniqueKeysWithValues: review.capabilities.map {
-                ($0.domain, $0.requestedDecision)
+            uniqueKeysWithValues: review.capabilities.compactMap {
+                capability in
+                capability.requestedDecision.map {
+                    (capability.domain, $0)
+                }
             }
         )
         transientIssue = nil
@@ -153,8 +159,10 @@ final class PermissionReviewSheetModel {
 
     private var invalidSelections: [String] {
         review.capabilities.compactMap { capability in
-            let selected = selection(for: capability)
-            guard capability.option(for: selected)?.isValid == true else {
+            guard
+                let selected = selection(for: capability),
+                capability.option(for: selected)?.isValid == true
+            else {
                 return capability.domain
             }
             return nil
@@ -330,10 +338,14 @@ public struct PermissionReviewSheet: View {
                 value: capability.existingDecision.title
             )
 
-            HStack {
-                Text("New decision")
-                Spacer()
-                decisionMenu(capability)
+            if capability.requestedDecision == nil {
+                lockedManagedDecision(capability)
+            } else {
+                HStack {
+                    Text("New decision")
+                    Spacer()
+                    decisionMenu(capability)
+                }
             }
         }
         .padding(16)
@@ -366,30 +378,23 @@ public struct PermissionReviewSheet: View {
     ) -> some View {
         Label(
             sensitivity.title,
-            systemImage: sensitivity == .sensitive
-                ? "exclamationmark.shield"
-                : "shield"
+            systemImage: sensitivitySystemImage(sensitivity)
         )
         .font(.caption.weight(.semibold))
-        .foregroundStyle(
-            sensitivity == .sensitive ? Color.orange : Color.secondary
-        )
+        .foregroundStyle(sensitivityColor(sensitivity))
         .accessibilityLabel("\(sensitivity.title) sensitivity")
     }
 
     private func availabilityRow(
         _ availability: PermissionPlatformAvailability
     ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        let presentation = availabilityPresentation(availability)
+        return VStack(alignment: .leading, spacing: 3) {
             Label(
                 availability.title,
-                systemImage: availability.detail == nil
-                    ? "checkmark.circle"
-                    : "xmark.circle"
+                systemImage: presentation.systemImage
             )
-            .foregroundStyle(
-                availability.detail == nil ? Color.green : Color.red
-            )
+            .foregroundStyle(presentation.color)
             if let detail = availability.detail {
                 Text(detail)
                     .font(.caption)
@@ -423,13 +428,73 @@ public struct PermissionReviewSheet: View {
                 )
             }
         } label: {
-            Text(model.selection(for: capability).title)
+            Text(selectionTitle(for: capability))
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
         .accessibilityLabel("New decision for \(capability.title)")
-        .accessibilityValue(model.selection(for: capability).title)
+        .accessibilityValue(selectionTitle(for: capability))
         .accessibilityHint("Shows the decisions permitted by the runtime")
+    }
+
+    private func selectionTitle(
+        for capability: PermissionCapabilityReview
+    ) -> String {
+        model.selection(for: capability)?.title ?? "Managed by host"
+    }
+
+    private func lockedManagedDecision(
+        _ capability: PermissionCapabilityReview
+    ) -> some View {
+        let reason = capability.decisionOptions
+            .compactMap(\.invalidReason)
+            .first
+            ?? "This capability is managed by host policy."
+        return VStack(alignment: .leading, spacing: 5) {
+            Label("Managed by host policy", systemImage: "lock.shield")
+                .font(.callout.weight(.semibold))
+            Text(reason)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func sensitivitySystemImage(
+        _ sensitivity: PermissionCapabilitySensitivity
+    ) -> String {
+        switch sensitivity {
+        case .ordinary:
+            "shield"
+        case .sensitive:
+            "exclamationmark.shield"
+        case .unknown:
+            "questionmark.diamond"
+        }
+    }
+
+    private func sensitivityColor(
+        _ sensitivity: PermissionCapabilitySensitivity
+    ) -> Color {
+        switch sensitivity {
+        case .ordinary:
+            .secondary
+        case .sensitive, .unknown:
+            .orange
+        }
+    }
+
+    private func availabilityPresentation(
+        _ availability: PermissionPlatformAvailability
+    ) -> (systemImage: String, color: Color) {
+        switch availability {
+        case .available:
+            ("checkmark.circle", .green)
+        case .unknown:
+            ("questionmark.circle", .orange)
+        case .unavailable:
+            ("xmark.circle", .red)
+        }
     }
 
     private func issueView(_ issue: PermissionReviewIssue) -> some View {

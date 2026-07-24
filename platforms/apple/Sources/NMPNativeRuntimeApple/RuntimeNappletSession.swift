@@ -372,10 +372,19 @@ public final class NativeRuntimeActivityObservation: @unchecked Sendable {
 public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private typealias ActivityReceiver =
         @Sendable (NativeRuntimeActivityUpdate) -> Void
+    private typealias LibraryReceiver =
+        @Sendable (NativeRuntimeLibraryUpdate) -> Void
 
     private struct ActivityObserverEntry {
         let scope: NativeRuntimeActivityScope
         let receive: ActivityReceiver
+    }
+
+    private struct LibraryObserverEntry {
+        let receive: LibraryReceiver
+        var lastDeliveredRevision: UInt64
+        var isReadyForNext = false
+        var pendingUpdate: NativeRuntimeLibraryUpdate?
     }
 
     private final class WeakSession {
@@ -388,6 +397,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
 
     private static let maximumReadBytes: UInt64 = 8 * 1_024 * 1_024
     private static let maximumApplicationActivityObservers = 8
+    private static let maximumApplicationLibraryObservers = 8
     private static let maximumLocalAccounts = 32
 
     private let controller: RuntimeController
@@ -401,7 +411,9 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private var observation: RuntimeObservation?
     private var sessions: [UInt64: WeakSession] = [:]
     private var activityObservers: [UUID: ActivityObserverEntry] = [:]
+    private var libraryObservers: [UUID: LibraryObserverEntry] = [:]
     private var lastActivityRevision: UInt64
+    private var lastLibraryRevision: UInt64
     private var accountPersistenceProblem:
         NativeRuntimeAccountPersistenceIssue?
     private var isClosed = false
@@ -513,7 +525,9 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         self.settingsExecutor = settingsExecutor
         self.incActionExecutor = incActionExecutor
         self.accountVault = accountVault
-        lastActivityRevision = controller.snapshot().revision
+        let revision = controller.snapshot().revision
+        lastActivityRevision = revision
+        lastLibraryRevision = revision
         accountPersistenceProblem = nil
     }
 
@@ -632,6 +646,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         let activeSessions = sessions.values.compactMap(\.value)
         sessions.removeAll()
         activityObservers.removeAll()
+        libraryObservers.removeAll()
         lock.unlock()
 
         observation?.stop()
@@ -798,7 +813,9 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         if let activePublicKey = stored.activePublicKey {
             guard let activeHandle = restoredHandles[activePublicKey] else {
                 accountPersistenceProblem = .restoreFailed
-                lastActivityRevision = controller.snapshot().revision
+                let revision = controller.snapshot().revision
+                lastActivityRevision = revision
+                lastLibraryRevision = revision
                 return
             }
             let activation = controller.activateLocalAccount(
@@ -812,7 +829,9 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
             }
         }
         accountPersistenceProblem = restoreFailed ? .restoreFailed : nil
-        lastActivityRevision = controller.snapshot().revision
+        let revision = controller.snapshot().revision
+        lastActivityRevision = revision
+        lastLibraryRevision = revision
     }
 
     public func saveWorkspace(
@@ -823,6 +842,69 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
 
     public func restoreWorkspaces() -> NativeRuntimeWorkspaceRestore {
         controller.restoreWorkspaces()
+    }
+
+    /// Returns one bounded Rust-owned review for an installed exact build.
+    /// This operation never grants or launches the napplet.
+    public func permissionReview(
+        for coordinate: NativeRuntimePermissionCoordinate
+    ) -> NativeRuntimePermissionReviewResult {
+        controller.permissionReview(coordinate: coordinate)
+    }
+
+    /// Applies one complete exact-build decision set atomically in Rust.
+    /// Success never launches the napplet; launch remains a separate operation.
+    public func applyPermissionDecisions(
+        _ batch: NativeRuntimePermissionDecisionBatch
+    ) -> NativeRuntimePermissionBatchUpdate {
+        controller.applyPermissionDecisions(batch: batch)
+    }
+
+    /// Returns the latest complete installed-library replacement from the
+    /// Rust-owned profile snapshot.
+    public func installedLibraryProjection()
+        -> NativeRuntimeLibraryProjection
+    {
+        NativeRuntimeLibraryProjection(controller.snapshot())
+    }
+
+    /// Applies the Rust-owned finite installed-library filter.
+    public func setInstalledLibraryFilter(_ query: String) {
+        controller.setLibraryFilter(query: query)
+    }
+
+    public func suspendInstalledSession(_ sessionID: UInt64) {
+        controller.suspend(sessionId: sessionID)
+    }
+
+    public func resumeInstalledSession(_ sessionID: UInt64) {
+        controller.resume(sessionId: sessionID)
+    }
+
+    public func assignInstalledBuild(
+        _ exactBuild: NativeRuntimeLibraryExactBuild,
+        toWorkspaceID workspaceID: String
+    ) {
+        controller.assignBuildToWorkspace(
+            workspaceId: workspaceID,
+            coordinate: runtimeCoordinate(exactBuild)
+        )
+    }
+
+    public func clearInstalledBuildAssignment(
+        _ exactBuild: NativeRuntimeLibraryExactBuild,
+        fromWorkspaceID workspaceID: String
+    ) {
+        controller.clearBuildFromWorkspace(
+            workspaceId: workspaceID,
+            coordinate: runtimeCoordinate(exactBuild)
+        )
+    }
+
+    public func uninstallInstalledBuild(
+        _ exactBuild: NativeRuntimeLibraryExactBuild
+    ) {
+        controller.uninstallBuild(coordinate: runtimeCoordinate(exactBuild))
     }
 
     /// Returns the latest complete, bounded runtime activity replacement.
@@ -874,6 +956,42 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         return observation
     }
 
+    /// Adds one bounded application observer to the installed-library view on
+    /// the profile's existing Rust observation stream.
+    public func observeInstalledLibrary(
+        _ receive: @escaping @Sendable (NativeRuntimeLibraryUpdate) -> Void
+    ) throws -> NativeRuntimeLibraryObservation {
+        lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            throw NativeRuntimeLibraryObservationError.profileClosed
+        }
+        guard libraryObservers.count
+            < Self.maximumApplicationLibraryObservers
+        else {
+            lock.unlock()
+            throw NativeRuntimeLibraryObservationError.observerCapacity(
+                maximum: Self.maximumApplicationLibraryObservers
+            )
+        }
+        let identifier = UUID()
+        let authoritative = NativeRuntimeLibraryProjection(
+            controller.snapshot()
+        )
+        libraryObservers[identifier] = LibraryObserverEntry(
+            receive: receive,
+            lastDeliveredRevision: authoritative.revision
+        )
+        lock.unlock()
+
+        let observation = NativeRuntimeLibraryObservation { [weak self] in
+            self?.removeLibraryObserver(identifier)
+        }
+        receive(.authoritative(authoritative))
+        drainPendingLibraryUpdates(for: identifier)
+        return observation
+    }
+
     public func update(frame: RuntimeObservationFrame) {
         lock.lock()
         if isClosed {
@@ -882,9 +1000,50 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         }
         sessions = sessions.filter { $0.value.value != nil }
         let activeSessions = sessions.values.compactMap(\.value)
-        let previousRevision = lastActivityRevision
+        let previousActivityRevision = lastActivityRevision
+        let previousLibraryRevision = lastLibraryRevision
         lastActivityRevision = frame.snapshot.revision
+        lastLibraryRevision = frame.snapshot.revision
         let activityObservers = Array(activityObservers.values)
+        var libraryDeliveries: [
+            (receive: LibraryReceiver, update: NativeRuntimeLibraryUpdate)
+        ] = []
+        if frame.snapshot.revision > previousLibraryRevision
+            || frame.eventCursorWasStale
+        {
+            let projection = NativeRuntimeLibraryProjection(frame.snapshot)
+            let update = NativeRuntimeLibraryUpdate.next(
+                projection,
+                predecessorRevision: previousLibraryRevision,
+                eventCursorWasStale: frame.eventCursorWasStale
+            )
+            for identifier in Array(libraryObservers.keys) {
+                guard var observer = libraryObservers[identifier] else {
+                    continue
+                }
+                let isNewer = projection.revision
+                    > observer.lastDeliveredRevision
+                let isCurrentStaleReplacement = frame.eventCursorWasStale
+                    && projection.revision
+                        == observer.lastDeliveredRevision
+                guard isNewer || isCurrentStaleReplacement else {
+                    continue
+                }
+                if observer.isReadyForNext {
+                    observer.lastDeliveredRevision = projection.revision
+                    libraryObservers[identifier] = observer
+                    libraryDeliveries.append((observer.receive, update))
+                    continue
+                }
+                if let pendingUpdate = observer.pendingUpdate,
+                   projection.revision < libraryRevision(of: pendingUpdate)
+                {
+                    continue
+                }
+                observer.pendingUpdate = update
+                libraryObservers[identifier] = observer
+            }
+        }
         lock.unlock()
         settingsExecutor.retainRunningSessions(
             Set(frame.snapshot.sessions.filter { $0.state == "running" }.map(\.id))
@@ -892,22 +1051,24 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         for session in activeSessions {
             session.deliver(frame: frame)
         }
-        guard frame.snapshot.revision > previousRevision
-                || frame.eventCursorWasStale
-        else {
-            return
-        }
-        for observer in activityObservers {
-            observer.receive(
-                .next(
-                    NativeRuntimeActivityProjection(
-                        frame.snapshot,
-                        scope: observer.scope
-                    ),
-                    predecessorRevision: previousRevision,
-                    eventCursorWasStale: frame.eventCursorWasStale
+        if frame.snapshot.revision > previousActivityRevision
+            || frame.eventCursorWasStale
+        {
+            for observer in activityObservers {
+                observer.receive(
+                    .next(
+                        NativeRuntimeActivityProjection(
+                            frame.snapshot,
+                            scope: observer.scope
+                        ),
+                        predecessorRevision: previousActivityRevision,
+                        eventCursorWasStale: frame.eventCursorWasStale
+                    )
                 )
-            )
+            }
+        }
+        for delivery in libraryDeliveries {
+            delivery.receive(delivery.update)
         }
     }
 
@@ -915,6 +1076,57 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         lock.lock()
         activityObservers.removeValue(forKey: identifier)
         lock.unlock()
+    }
+
+    private func removeLibraryObserver(_ identifier: UUID) {
+        lock.lock()
+        libraryObservers.removeValue(forKey: identifier)
+        lock.unlock()
+    }
+
+    private func drainPendingLibraryUpdates(for identifier: UUID) {
+        while true {
+            lock.lock()
+            guard !isClosed, var observer = libraryObservers[identifier] else {
+                lock.unlock()
+                return
+            }
+            guard let pendingUpdate = observer.pendingUpdate else {
+                observer.isReadyForNext = true
+                libraryObservers[identifier] = observer
+                lock.unlock()
+                return
+            }
+            observer.pendingUpdate = nil
+            observer.lastDeliveredRevision = max(
+                observer.lastDeliveredRevision,
+                libraryRevision(of: pendingUpdate)
+            )
+            libraryObservers[identifier] = observer
+            let receive = observer.receive
+            lock.unlock()
+            receive(pendingUpdate)
+        }
+    }
+
+    private func libraryRevision(
+        of update: NativeRuntimeLibraryUpdate
+    ) -> UInt64 {
+        switch update {
+        case let .authoritative(projection),
+             let .next(projection, _, _):
+            projection.revision
+        }
+    }
+
+    private func runtimeCoordinate(
+        _ exactBuild: NativeRuntimeLibraryExactBuild
+    ) -> RuntimeExactBuildCoordinate {
+        RuntimeExactBuildCoordinate(
+            manifestAuthor: exactBuild.manifestAuthor,
+            dTag: exactBuild.dTag,
+            aggregateHash: exactBuild.aggregateHash
+        )
     }
 
     fileprivate func readVerified(

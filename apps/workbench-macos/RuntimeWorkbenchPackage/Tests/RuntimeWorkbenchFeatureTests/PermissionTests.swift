@@ -101,6 +101,15 @@ import Testing
 }
 
 @MainActor
+@Test func workbenchAcceptsAnInjectedPermissionManager() {
+    let manager = RecordingPermissionManager(snapshot: permissionSnapshot())
+    let view = ContentView(permissionManager: manager)
+
+    #expect(String(describing: type(of: view)) == "ContentView")
+    #expect(manager.submissions.isEmpty)
+}
+
+@MainActor
 private final class RecordingPermissionManager: PermissionReviewManaging {
     enum Action: Equatable {
         case submit

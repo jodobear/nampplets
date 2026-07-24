@@ -5,7 +5,14 @@ This crate owns the Rust policy kernels for the pinned
 
 - `LinkProvider` accepts only absolute public `http`/`https` URLs, rejects
   credentials and local/private hosts, applies injected product policy, and
-  always marks the native open as confirmation-required.
+  always marks the native open as confirmation-required. It forwards the
+  pinned optional `options.label` as a bounded, untrusted display hint to the
+  native confirmation surface; the label is never URL or policy input.
+- NAP-LINK terminals preserve the pinned public status set exactly:
+  `opened` means the native handoff succeeded and a user cancellation becomes
+  `denied`/`user-denied`. Native execution failures reject the pending shim
+  request through an error terminal without manufacturing `failed` or
+  `cancelled` public statuses.
 - `IntentProvider` maintains a finite trusted registry of verified
   exact-build handlers and user-owned defaults. It validates archetypes,
   actions, conventions, behavior, payload size, explicit targeting, and every

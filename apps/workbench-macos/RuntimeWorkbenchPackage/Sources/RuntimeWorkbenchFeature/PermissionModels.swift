@@ -55,6 +55,7 @@ public enum PermissionCapabilityRequirement: String, Equatable, Sendable {
 public enum PermissionCapabilitySensitivity: String, Equatable, Sendable {
     case ordinary
     case sensitive
+    case unknown
 
     public var title: String {
         rawValue.capitalized
@@ -95,12 +96,15 @@ public struct PermissionCapabilityDependency: Identifiable, Equatable, Sendable 
 
 public enum PermissionPlatformAvailability: Equatable, Sendable {
     case available
+    case unknown(reason: String)
     case unavailable(reason: String)
 
     public var title: String {
         switch self {
         case .available:
             "Available on this Mac"
+        case .unknown:
+            "Availability unknown"
         case .unavailable:
             "Unavailable on this Mac"
         }
@@ -110,6 +114,8 @@ public enum PermissionPlatformAvailability: Equatable, Sendable {
         switch self {
         case .available:
             nil
+        case let .unknown(reason):
+            reason
         case let .unavailable(reason):
             reason
         }
@@ -208,7 +214,9 @@ public struct PermissionCapabilityReview: Identifiable, Equatable, Sendable {
     public let dependencies: [PermissionCapabilityDependency]
     public let platformAvailability: PermissionPlatformAvailability
     public let existingDecision: PermissionExistingDecision
-    public let requestedDecision: PermissionRequestedDecision
+    /// The Rust-owned requested default, absent when host policy manages the
+    /// capability and therefore offers no user-selectable decision.
+    public let requestedDecision: PermissionRequestedDecision?
     public let decisionOptions: [PermissionDecisionOption]
 
     public var id: String {
@@ -224,12 +232,23 @@ public struct PermissionCapabilityReview: Identifiable, Equatable, Sendable {
         dependencies: [PermissionCapabilityDependency],
         platformAvailability: PermissionPlatformAvailability,
         existingDecision: PermissionExistingDecision,
-        requestedDecision: PermissionRequestedDecision,
+        requestedDecision: PermissionRequestedDecision?,
         decisionOptions: [PermissionDecisionOption]
     ) {
-        let validRequestedOption = decisionOptions.contains {
-            $0.decision == requestedDecision && $0.isValid
-        }
+        let validRequestedOption = requestedDecision.map { requested in
+            decisionOptions.contains {
+                $0.decision == requested && $0.isValid
+            }
+        } ?? (
+            existingDecision == .managed
+                && decisionOptions.allSatisfy { !$0.isValid }
+        )
+        let managedStateIsConsistent =
+            (existingDecision == .managed) == (requestedDecision == nil)
+        let lockedOptionsExplainWhy = requestedDecision != nil
+            || decisionOptions.allSatisfy {
+                !($0.invalidReason?.isEmpty ?? true)
+            }
         let uniqueOptions = Set(decisionOptions.map(\.decision)).count
             == decisionOptions.count
         let uniqueDependencies = Set(dependencies.map(\.domain)).count
@@ -245,6 +264,8 @@ public struct PermissionCapabilityReview: Identifiable, Equatable, Sendable {
                 == PermissionRequestedDecision.allCases.count,
             uniqueOptions,
             validRequestedOption,
+            managedStateIsConsistent,
+            lockedOptionsExplainWhy,
             (platformAvailability.detail?.utf8.count ?? 0)
                 <= PermissionLimits.maximumDisplayTextUTF8Bytes
         else {

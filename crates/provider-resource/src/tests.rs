@@ -34,11 +34,24 @@ impl ResourceClock for FakeClock {
 }
 
 #[derive(Debug, Default)]
-struct FakeActivity(Mutex<Vec<ResourceActivity>>);
+struct FakeActivity(Mutex<Vec<ResourceActivity>>, Condvar);
+
+impl FakeActivity {
+    fn wait_for(&self, action: ResourceActivityAction, outcome: ResourceActivityOutcome) {
+        let mut facts = self.0.lock();
+        while !facts
+            .iter()
+            .any(|fact| fact.action == action && fact.outcome == outcome)
+        {
+            self.1.wait(&mut facts);
+        }
+    }
+}
 
 impl ResourceActivitySink for FakeActivity {
     fn record(&self, fact: ResourceActivity) {
         self.0.lock().push(fact);
+        self.1.notify_all();
     }
 }
 
@@ -349,13 +362,50 @@ async fn data_url_is_decoded_sniffed_and_projected_as_base64_bstr() {
 }
 
 #[tokio::test]
+async fn data_url_scheme_and_base64_follow_the_pinned_web_semantics() {
+    let mut rig = rig();
+    let bytes = [PNG, b"x"].concat();
+    let encoded = STANDARD.encode(&bytes);
+    let encoded = encoded.replacen("", "%0A", 1).replace('=', "%3D");
+    let outcome = dispatch(
+        &rig,
+        json!({
+            "type": "resource.bytes",
+            "id": "data-normalized",
+            "url": format!("DATA:image/png;BASE64,{encoded}"),
+        }),
+    );
+    let value = terminal(&mut rig, outcome).await;
+    assert_eq!(value["type"], "resource.bytes.result");
+    assert_eq!(
+        STANDARD.decode(value["blob"].as_str().unwrap()).unwrap(),
+        bytes
+    );
+
+    let unpadded = STANDARD.encode(&bytes).trim_end_matches('=').to_owned();
+    let outcome = dispatch(
+        &rig,
+        json!({
+            "type": "resource.bytes",
+            "id": "data-unpadded",
+            "url": format!("data:image/png;base64,{unpadded}"),
+        }),
+    );
+    assert_eq!(
+        terminal(&mut rig, outcome).await["type"],
+        "resource.bytes.result"
+    );
+    assert!(rig.network.requests.lock().is_empty());
+}
+
+#[tokio::test]
 async fn https_resolution_is_pinned_and_redirect_is_rechecked() {
     let mut rig = rig();
     rig.network.respond(
         "https://images.example/a",
         RawHttpsResponse {
             status: 302,
-            location: Some(Arc::from("https://cdn.example/b")),
+            location: Some(Arc::from("https://cdn.example/b#redirect-fragment")),
             body: Vec::new(),
         },
     );
@@ -372,13 +422,15 @@ async fn https_resolution_is_pinned_and_redirect_is_rechecked() {
         json!({
             "type": "resource.bytes",
             "id": "https-1",
-            "url": "https://images.example/a",
+            "url": "https://images.example/a#napplet-local-fragment",
         }),
     );
     let value = terminal(&mut rig, outcome).await;
     assert_eq!(value["type"], "resource.bytes.result");
     let requests = rig.network.requests.lock();
     assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].url.as_ref(), "https://images.example/a");
+    assert_eq!(requests[1].url.as_ref(), "https://cdn.example/b");
     assert_eq!(requests[0].host.as_ref(), "images.example");
     assert_eq!(requests[1].host.as_ref(), "cdn.example");
     assert_eq!(
@@ -462,6 +514,63 @@ async fn http_redirect_and_credentialed_url_are_refused() {
         terminal(&mut rig, outcome).await["error"],
         "blocked-by-policy"
     );
+}
+
+#[tokio::test]
+async fn redirect_limit_and_missing_location_are_typed_failures() {
+    let limits = ResourceProviderLimits {
+        maximum_redirects: 1,
+        ..ResourceProviderLimits::default()
+    };
+    let mut limited_rig = rig_with_limits(limits);
+    limited_rig.network.respond(
+        "https://images.example/a",
+        RawHttpsResponse {
+            status: 302,
+            location: Some(Arc::from("https://images.example/b")),
+            body: Vec::new(),
+        },
+    );
+    limited_rig.network.respond(
+        "https://images.example/b",
+        RawHttpsResponse {
+            status: 302,
+            location: Some(Arc::from("https://images.example/c")),
+            body: Vec::new(),
+        },
+    );
+    let outcome = dispatch(
+        &limited_rig,
+        json!({
+            "type": "resource.bytes",
+            "id": "redirect-cap",
+            "url": "https://images.example/a",
+        }),
+    );
+    assert_eq!(
+        terminal(&mut limited_rig, outcome).await["error"],
+        "blocked-by-policy"
+    );
+    assert_eq!(limited_rig.network.requests.lock().len(), 2);
+
+    let mut rig = rig();
+    rig.network.respond(
+        "https://images.example/missing-location",
+        RawHttpsResponse {
+            status: 302,
+            location: None,
+            body: Vec::new(),
+        },
+    );
+    let outcome = dispatch(
+        &rig,
+        json!({
+            "type": "resource.bytes",
+            "id": "missing-location",
+            "url": "https://images.example/missing-location",
+        }),
+    );
+    assert_eq!(terminal(&mut rig, outcome).await["error"], "network-error");
 }
 
 #[tokio::test]
@@ -618,6 +727,38 @@ async fn bulk_preserves_order_and_per_item_failure() {
     assert_eq!(items[2]["ok"], true);
 }
 
+#[tokio::test]
+async fn bulk_enforces_its_byte_ceiling_per_item_without_discarding_later_siblings() {
+    let limits = ResourceProviderLimits {
+        maximum_response_bytes: 64,
+        maximum_svg_bytes: 64,
+        maximum_bulk_response_bytes: 24,
+        maximum_blob_bytes_per_request: 128,
+        ..ResourceProviderLimits::default()
+    };
+    let mut rig = rig_with_limits(limits);
+    let full = format!("data:image/png;base64,{}", STANDARD.encode(PNG));
+    let small = format!(
+        "data:image/png;base64,{}",
+        STANDARD.encode(b"\x89PNG\r\n\x1a\n")
+    );
+    let outcome = dispatch(
+        &rig,
+        json!({
+            "type": "resource.bytesMany",
+            "id": "bulk-bytes",
+            "urls": [full.clone(), full, small],
+        }),
+    );
+    let value = terminal(&mut rig, outcome).await;
+    let items = value["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0]["ok"], true);
+    assert_eq!(items[1]["ok"], false);
+    assert_eq!(items[1]["error"], "quota-exceeded");
+    assert_eq!(items[2]["ok"], true);
+}
+
 #[test]
 fn empty_or_over_cap_bulk_gets_one_top_level_error() {
     let rig = rig();
@@ -636,6 +777,71 @@ fn empty_or_over_cap_bulk_gets_one_top_level_error() {
         call.response.unwrap().decode().unwrap()["error"],
         "invalid-request"
     );
+
+    let urls = (0..=ResourceProviderLimits::default().maximum_urls_per_bulk)
+        .map(|index| format!("https://images.example/{index}"))
+        .collect::<Vec<_>>();
+    let DispatchOutcome::Handled(call) = dispatch(
+        &rig,
+        json!({
+            "type": "resource.bytesMany",
+            "id": "over-cap",
+            "urls": urls,
+        }),
+    ) else {
+        panic!("request must be handled");
+    };
+    assert!(!call.is_active());
+    let value = call.response.unwrap().decode().unwrap();
+    assert_eq!(value["type"], "resource.bytesMany.error");
+    assert_eq!(value["error"], "too-large");
+}
+
+#[test]
+fn correlated_malformed_requests_get_typed_action_error_terminals() {
+    let rig = rig();
+    for (request, expected_type) in [
+        (
+            json!({
+                "type": "resource.info",
+                "id": "bad-info",
+                "unexpected": true,
+            }),
+            "resource.info.error",
+        ),
+        (
+            json!({
+                "type": "resource.bytes",
+                "id": "bad-bytes",
+                "url": 42,
+            }),
+            "resource.bytes.error",
+        ),
+        (
+            json!({
+                "type": "resource.bytesMany",
+                "id": "bad-many-shape",
+                "urls": "not-an-array",
+            }),
+            "resource.bytesMany.error",
+        ),
+        (
+            json!({
+                "type": "resource.bytesMany",
+                "id": "bad-many-item",
+                "urls": ["https://images.example/a", 42],
+            }),
+            "resource.bytesMany.error",
+        ),
+    ] {
+        let DispatchOutcome::Handled(call) = dispatch(&rig, request) else {
+            panic!("well-correlated malformed request must be handled");
+        };
+        assert!(!call.is_active());
+        let value = call.response.unwrap().decode().unwrap();
+        assert_eq!(value["type"], expected_type);
+        assert_eq!(value["error"], "invalid-request");
+    }
 }
 
 #[test]
@@ -722,12 +928,57 @@ fn explicit_cancel_is_idempotent_and_activity_facts_omit_urls() {
     };
     assert!(!cancel.is_active());
     rig.network.wait_finished();
+    rig.activity.wait_for(
+        ResourceActivityAction::Bytes,
+        ResourceActivityOutcome::Cancelled,
+    );
     assert!(call.operation().unwrap().is_cancelled());
+    assert!(rig.observer.drain(8).unwrap().pushes.is_empty());
     let facts = rig.activity.0.lock();
     assert!(facts.iter().any(|fact| {
         fact.action == ResourceActivityAction::Cancel
             && fact.outcome == ResourceActivityOutcome::Cancelled
     }));
+}
+
+#[test]
+fn bulk_cancel_drops_partial_results_and_releases_the_full_reservation() {
+    let rig = rig();
+    rig.network.set_blocking();
+    let outcome = dispatch(
+        &rig,
+        json!({
+            "type": "resource.bytesMany",
+            "id": "cancel-bulk",
+            "urls": [
+                "https://images.example/one",
+                "https://images.example/two",
+            ],
+        }),
+    );
+    let DispatchOutcome::Handled(call) = outcome else {
+        panic!("request must be handled");
+    };
+    rig.network.wait_started();
+    let DispatchOutcome::Handled(cancel) = dispatch(
+        &rig,
+        json!({
+            "type": "resource.cancel",
+            "id": "cancel-bulk",
+        }),
+    ) else {
+        panic!("cancel must be handled");
+    };
+    assert!(!cancel.is_active());
+    rig.network.wait_finished();
+    rig.activity.wait_for(
+        ResourceActivityAction::BytesMany,
+        ResourceActivityOutcome::Cancelled,
+    );
+    assert!(call.operation().unwrap().is_cancelled());
+    assert_eq!(rig.provider.census().active_requests, 0);
+    assert_eq!(rig.provider.census().in_flight_urls, 0);
+    assert!(rig.observer.drain(8).unwrap().pushes.is_empty());
 }
 
 #[test]
@@ -764,7 +1015,7 @@ fn per_napplet_concurrency_and_rate_refuse_without_queueing() {
     assert!(!second.is_active());
     assert_eq!(
         second.response.unwrap().decode().unwrap()["error"],
-        "quota-exceeded"
+        "blocked-by-policy"
     );
     rig.registry.close_session(rig.context.id);
     rig.network.wait_finished();

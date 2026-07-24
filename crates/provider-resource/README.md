@@ -25,3 +25,16 @@ base64, raw network authority, resolver results, IP addresses, upstream
 `data:`, `https:`, and canonical `blossom:sha256:<hex>` are the only advertised
 schemes. `http:`, `htree:`, `nostr:`, unknown schemes, credential-bearing URLs,
 non-public resolved addresses, and raw SVG delivery fail closed.
+
+Well-correlated malformed `info`, `bytes`, and `bytesMany` requests receive the
+matching typed `resource.*.error` terminal. Bulk work preserves one result item
+per input URL, applies the dedicated bulk byte ceiling cumulatively without
+discarding later siblings that still fit, and counts each URL against
+rate/concurrency policy. Those policy refusals use `blocked-by-policy`;
+`quota-exceeded` is reserved for the Blob budget.
+
+The runtime accepts the same standard base64 forms as the pinned web projection
+for `data:` URLs, including percent-escaped padding, ignored ASCII whitespace,
+and valid unpadded input. URL fragments remain untouched in the
+napplet-supplied and bulk-result URL strings, but are stripped before any HTTPS
+request.

@@ -172,6 +172,16 @@ test("materialization is parser-based rather than regex HTML rewriting", () => {
     /Object\.defineProperty\(window, "napplet"/
   );
   assert.equal(
+    shell.compatibilityPreludeSource(["resource"]).includes("\u0000"),
+    false,
+    "the serialized prelude must not contain an HTML-replaced NUL"
+  );
+  assert.match(
+    shell.compatibilityPreludeSource(["resource"]),
+    /\\u0000-\\u001f\\u007f/,
+    "control-character bounds must survive HTML parsing as regex escapes"
+  );
+  assert.equal(
     shell.isVerifiedArtifactBaseURL(
       "nmp-artifact://abcd1234-1234-4123-8123-abcdefabcdef/"
     ),

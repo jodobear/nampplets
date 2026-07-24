@@ -3,7 +3,10 @@ use std::{
     sync::Arc,
 };
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
+};
 use nmp_native_runtime_core::Cancellation;
 use sha2::{Digest, Sha256};
 use url::{Host, Url};
@@ -34,11 +37,11 @@ impl AcquisitionContext<'_> {
         if self.cancellation.is_cancelled() {
             return Err(cancelled());
         }
-        if raw_url.starts_with("data:") {
-            return self.acquire_data(raw_url);
+        if let Some(encoded) = strip_scheme(raw_url, "data") {
+            return self.acquire_data(encoded);
         }
-        if raw_url.starts_with("blossom:") {
-            return self.acquire_blossom(raw_url);
+        if let Some(address) = strip_scheme(raw_url, "blossom") {
+            return self.acquire_blossom(address);
         }
         let url = Url::parse(raw_url).map_err(|_| {
             failure(
@@ -56,8 +59,7 @@ impl AcquisitionContext<'_> {
         self.classify_and_sanitize(bytes)
     }
 
-    fn acquire_data(&self, raw_url: &str) -> Result<AcquiredResource, ResourceFailure> {
-        let encoded = raw_url.strip_prefix("data:").expect("prefix checked");
+    fn acquire_data(&self, encoded: &str) -> Result<AcquiredResource, ResourceFailure> {
         let (metadata, body) = encoded.split_once(',').ok_or_else(|| {
             failure(
                 ResourceErrorCode::InvalidRequest,
@@ -69,12 +71,19 @@ impl AcquisitionContext<'_> {
             .skip(1)
             .any(|token| token.eq_ignore_ascii_case("base64"));
         let bytes = if base64 {
-            STANDARD.decode(body).map_err(|_| {
-                failure(
-                    ResourceErrorCode::DecodeFailed,
-                    "data URL base64 payload is invalid",
-                )
-            })?
+            let compact = percent_decode(body)?
+                .into_iter()
+                .filter(|byte| !byte.is_ascii_whitespace())
+                .collect::<Vec<_>>();
+            STANDARD
+                .decode(&compact)
+                .or_else(|_| STANDARD_NO_PAD.decode(&compact))
+                .map_err(|_| {
+                    failure(
+                        ResourceErrorCode::DecodeFailed,
+                        "data URL base64 payload is invalid",
+                    )
+                })?
         } else {
             percent_decode(body)?
         };
@@ -84,9 +93,9 @@ impl AcquisitionContext<'_> {
         self.classify_and_sanitize(bytes)
     }
 
-    fn acquire_blossom(&self, raw_url: &str) -> Result<AcquiredResource, ResourceFailure> {
-        let hash = raw_url
-            .strip_prefix("blossom:sha256:")
+    fn acquire_blossom(&self, address: &str) -> Result<AcquiredResource, ResourceFailure> {
+        let hash = address
+            .strip_prefix("sha256:")
             .filter(|hash| {
                 hash.len() == 64
                     && hash
@@ -148,6 +157,9 @@ impl AcquisitionContext<'_> {
         };
         for redirect_count in 0..=self.limits.maximum_redirects {
             self.check_live(deadline)?;
+            // URL fragments are client-side identifiers and must never cross
+            // the raw network capability boundary.
+            url.set_fragment(None);
             validate_https_url(&url)?;
             let host = url.host().ok_or_else(|| {
                 failure(
@@ -339,6 +351,11 @@ impl AcquisitionContext<'_> {
         }
         Ok(())
     }
+}
+
+fn strip_scheme<'a>(raw_url: &'a str, expected: &str) -> Option<&'a str> {
+    let (scheme, remainder) = raw_url.split_once(':')?;
+    scheme.eq_ignore_ascii_case(expected).then_some(remainder)
 }
 
 fn validate_https_url(url: &Url) -> Result<(), ResourceFailure> {

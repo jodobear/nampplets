@@ -11,6 +11,7 @@ public struct ContentView: View {
     private let accountManager: any WorkbenchAccountManaging
     private let catalogClient: any CatalogClient
     private let libraryManager: any WorkbenchLibraryManaging
+    private let injectedPermissionManager: (any PermissionReviewManaging)?
 
     @State private var selection = "Home"
     @State private var activity = "Opening application runtime profile"
@@ -24,8 +25,14 @@ public struct ContentView: View {
     @State private var isCatalogSheetPresented = false
     @State private var isLibrarySheetPresented = false
     @State private var isActivitySheetPresented = false
+    @State private var isPermissionSheetPresented = false
+    @State private var isSettingsSheetPresented = false
     @State private var activitySource: RuntimeWorkbenchActivitySource?
     @State private var activitySheetError: String?
+    @State private var permissionManager: (any PermissionReviewManaging)?
+    @State private var permissionSheetError: String?
+    @State private var settingsSnapshot: WorkbenchSettingsSnapshot?
+    @State private var settingsRoute = WorkbenchSettingsRouteState()
     @FocusState private var focusedRole: WorkbenchSlotRole?
 
     @MainActor
@@ -35,7 +42,8 @@ public struct ContentView: View {
         layoutStore: (any WorkbenchLayoutPersisting)? = nil,
         accountManager: (any WorkbenchAccountManaging)? = nil,
         catalogClient: (any CatalogClient)? = nil,
-        libraryManager: (any WorkbenchLibraryManaging)? = nil
+        libraryManager: (any WorkbenchLibraryManaging)? = nil,
+        permissionManager: (any PermissionReviewManaging)? = nil
     ) {
         self.profile = profile
         self.bootstrapError = bootstrapError
@@ -51,7 +59,12 @@ public struct ContentView: View {
         self.catalogClient = catalogClient ?? RuntimeWorkbenchCatalogClient()
         self.libraryManager =
             libraryManager
-            ?? UnavailableWorkbenchLibraryManager()
+            ?? profile.map(RuntimeWorkbenchLibraryManager.init(profile:))
+            ?? UnavailableWorkbenchLibraryManager(
+                reason: bootstrapError
+                    ?? "The application runtime profile is still opening."
+            )
+        injectedPermissionManager = permissionManager
 
         do {
             let restored = try resolvedLayoutStore.loadLayout(
@@ -139,7 +152,20 @@ public struct ContentView: View {
                 .accessibilityHint(
                     "Shows bounded activity for the exact Good Morning build"
                 )
-                Button("Settings", systemImage: "gearshape") {}
+                Button("Permissions", systemImage: "lock.shield") {
+                    openPermissionReview()
+                }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+                .accessibilityHint(
+                    "Reviews exact-build permissions without launching the napplet"
+                )
+                Button("Settings", systemImage: "gearshape") {
+                    openSettings()
+                }
+                .keyboardShortcut(",", modifiers: [.command])
+                .accessibilityHint(
+                    "Opens runtime ownership and management settings"
+                )
             }
         }
         .sheet(isPresented: $isAccountSheetPresented) {
@@ -171,6 +197,44 @@ public struct ContentView: View {
                         )
                     )
                     .navigationTitle("Runtime Activity")
+                    .frame(minWidth: 620, minHeight: 420)
+                }
+            }
+        }
+        .sheet(isPresented: $isPermissionSheetPresented) {
+            if let permissionManager {
+                PermissionReviewSheet(manager: permissionManager)
+            } else {
+                NavigationStack {
+                    ContentUnavailableView(
+                        "Permission review unavailable",
+                        systemImage: "lock.slash",
+                        description: Text(
+                            permissionSheetError
+                                ?? "The exact-build permission review was not admitted."
+                        )
+                    )
+                    .navigationTitle("Review Permissions")
+                    .frame(minWidth: 620, minHeight: 420)
+                }
+            }
+        }
+        .sheet(isPresented: $isSettingsSheetPresented) {
+            if let settingsSnapshot {
+                WorkbenchSettingsSheet(
+                    snapshot: settingsSnapshot,
+                    openDestination: scheduleSettingsDestination
+                )
+            } else {
+                NavigationStack {
+                    ContentUnavailableView(
+                        "Settings unavailable",
+                        systemImage: "gearshape.fill",
+                        description: Text(
+                            "The bounded runtime profile status could not be displayed."
+                        )
+                    )
+                    .navigationTitle("Settings")
                     .frame(minWidth: 620, minHeight: 420)
                 }
             }
@@ -207,6 +271,20 @@ public struct ContentView: View {
             next.focus(newRole)
             layout = next
             scheduleLayoutSave()
+        }
+        .onChange(of: isSettingsSheetPresented) { _, isPresented in
+            var route = settingsRoute
+            guard
+                let destination = route.consumeAfterDismiss(
+                    settingsIsPresented: isPresented
+                )
+            else {
+                return
+            }
+            settingsRoute = route
+            DispatchQueue.main.async {
+                openSettingsDestination(destination)
+            }
         }
         .onDisappear {
             pendingLayoutSave?.cancel()
@@ -444,6 +522,77 @@ public struct ContentView: View {
             }
         }
         isActivitySheetPresented = true
+    }
+
+    @MainActor
+    private func openPermissionReview() {
+        permissionSheetError = nil
+        permissionManager = nil
+        if let injectedPermissionManager {
+            permissionManager = injectedPermissionManager
+            isPermissionSheetPresented = true
+            return
+        }
+        guard let profile else {
+            permissionSheetError =
+                bootstrapError ?? "The application runtime profile is unavailable."
+            isPermissionSheetPresented = true
+            return
+        }
+        guard
+            let principal = PermissionExactBuildPrincipal(
+                manifestAuthorPublicKey: GoodMorningFixture.author,
+                dTag: GoodMorningFixture.dTag,
+                aggregateHash: GoodMorningFixture.aggregateHash
+            )
+        else {
+            permissionSheetError =
+                "The bundled Good Morning exact-build identity is invalid."
+            isPermissionSheetPresented = true
+            return
+        }
+        do {
+            permissionManager = try RuntimeWorkbenchPermissionManager(
+                profile: profile,
+                principal: principal
+            )
+        } catch {
+            permissionSheetError = error.localizedDescription
+        }
+        isPermissionSheetPresented = true
+    }
+
+    @MainActor
+    private func openSettings() {
+        let unavailableReason =
+            bootstrapError ?? "The application runtime profile is still opening."
+        settingsSnapshot = WorkbenchSettingsSnapshot(
+            profileAvailable: profile != nil,
+            unavailableReason: profile == nil ? unavailableReason : nil
+        )
+        settingsRoute = WorkbenchSettingsRouteState()
+        isSettingsSheetPresented = true
+    }
+
+    @MainActor
+    private func scheduleSettingsDestination(
+        _ destination: WorkbenchSettingsDestination
+    ) {
+        settingsRoute.schedule(destination)
+    }
+
+    @MainActor
+    private func openSettingsDestination(
+        _ destination: WorkbenchSettingsDestination
+    ) {
+        switch destination {
+        case .account:
+            isAccountSheetPresented = true
+        case .installedLibrary:
+            isLibrarySheetPresented = true
+        case .activity:
+            openActivityDrawer()
+        }
     }
 
     private func role(
