@@ -1436,7 +1436,7 @@ fn open_runtime_controller(
         detail: error.to_string(),
     })?;
     let (signal, _) = watch::channel(0_u64);
-    Ok(Arc::new(RuntimeController {
+    let controller = Arc::new(RuntimeController {
         app,
         data_plane,
         runtime_store,
@@ -1463,7 +1463,15 @@ fn open_runtime_controller(
         maximum_observers: config.maximum_observers,
         permission_mode: config.permission_mode,
         closed: AtomicBool::new(false),
-    }))
+    });
+    // Demo profiles are deliberately permissive for local end-to-end demos.
+    // Re-apply that explicit policy to metadata restored from a prior process
+    // too; otherwise a first run under interactive review can leave a denied
+    // exact-build grant persisted forever, making NAP-OUTBOX appear absent on
+    // the next demo launch. The helper remains a no-op for interactive
+    // profiles and still binds every decision to the restored exact principal.
+    controller.grant_demo_permissions_for_installed_builds();
+    Ok(controller)
 }
 
 #[uniffi::export]
@@ -2246,6 +2254,27 @@ impl RuntimeController {
                 principal: principal.clone(),
                 decisions,
             });
+        }
+    }
+
+    fn grant_demo_permissions_for_installed_builds(&self) {
+        if self.permission_mode != RuntimePermissionMode::DemoPinnedGoodMorning {
+            return;
+        }
+        let principals = self
+            .app
+            .snapshot()
+            .library
+            .builds
+            .iter()
+            .map(|view| view.build.principal.clone())
+            .collect::<Vec<_>>();
+        for principal in principals {
+            self.grant_demo_permissions(
+                principal.manifest_author(),
+                principal.d_tag(),
+                principal.aggregate_hash(),
+            );
         }
     }
 
@@ -4527,6 +4556,76 @@ mod tests {
             serde_json::json!(["identity", "inc", "outbox", "shell"]),
             "the trusted shell must receive the same Rust-negotiated domain set"
         );
+    }
+
+    #[test]
+    fn demo_profile_repairs_a_persisted_denied_outbox_grant() {
+        let temp = TempDir::new().unwrap();
+        let runtime = controller(&temp);
+        let artifact = runtime
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("published fixture verifies");
+        runtime.install(Arc::clone(&artifact));
+        let coordinate = exact_coordinate(&artifact);
+        let review = runtime
+            .permission_review(coordinate.clone())
+            .review
+            .expect("installed Good Morning has a permission review");
+        let denied = runtime.apply_permission_decisions(RuntimePermissionDecisionBatch {
+            coordinate: coordinate.clone(),
+            decisions: review
+                .capabilities
+                .iter()
+                .map(|capability| RuntimePermissionDecisionSelection {
+                    domain: capability.domain.clone(),
+                    decision: RuntimeGrantDecision::Denied,
+                })
+                .collect(),
+        });
+        assert!(denied.applied);
+        assert!(!denied.review.unwrap().launch_permitted);
+        runtime.close();
+        drop(runtime);
+
+        let demo = RuntimeController::open(
+            RuntimeConfig {
+                runtime_store_path: temp.path().join("runtime.sqlite3").display().to_string(),
+                nmp_store_path: None,
+                artifact_cache_path: temp.path().join("artifacts").display().to_string(),
+                permission_mode: RuntimePermissionMode::DemoPinnedGoodMorning,
+                ..RuntimeConfig::default()
+            },
+            Box::new(FixtureSource(BTreeMap::from([(
+                DIGEST.to_owned(),
+                INDEX.to_vec(),
+            )]))),
+        )
+        .unwrap();
+        let repaired = demo
+            .permission_review(coordinate)
+            .review
+            .expect("demo startup restores the installed exact build review");
+        for domain in ["identity", "inc", "outbox"] {
+            let capability = repaired
+                .capabilities
+                .iter()
+                .find(|capability| capability.domain == domain)
+                .unwrap_or_else(|| panic!("missing required {domain} capability"));
+            assert_eq!(
+                capability.existing_decision,
+                RuntimePermissionExistingDecision::AllowExactBuild,
+                "demo startup must repair persisted denial for {domain}"
+            );
+        }
+        assert!(repaired.launch_permitted);
+        demo.close();
     }
 
     #[test]
