@@ -120,6 +120,13 @@ final class PermissionReviewSheetModel {
         guard canConfirm else {
             return
         }
+        guard !review.capabilities.isEmpty else {
+            snapshot = PermissionReviewSnapshot(
+                review: review,
+                submissionState: .applied
+            )
+            return
+        }
         guard
             let batch = PermissionDecisionBatch(
                 principal: review.principal,
@@ -281,15 +288,24 @@ public struct PermissionReviewSheet: View {
             Text("Capability Decisions")
                 .font(.headline)
 
-            Text(
-                "Required capabilities must be permitted for the napplet to run. "
-                    + "Optional capabilities may be denied and degrade honestly."
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
+            if model.review.capabilities.isEmpty {
+                Label(
+                    "This napplet does not request any capabilities.",
+                    systemImage: "checkmark.shield"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            } else {
+                Text(
+                    "Required capabilities must be permitted for the napplet to run. "
+                        + "Optional capabilities may be denied and degrade honestly."
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
 
-            ForEach(model.review.capabilities) { capability in
-                capabilityCard(capability)
+                ForEach(model.review.capabilities) { capability in
+                    capabilityCard(capability)
+                }
             }
         }
     }

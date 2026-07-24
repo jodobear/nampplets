@@ -354,7 +354,6 @@ public struct PermissionReview: Equatable, Sendable {
                 + $0.decisionOptions.compactMap(\.invalidReason)
         }
         guard
-            !capabilities.isEmpty,
             capabilities.count <= PermissionLimits.maximumCapabilities,
             uniqueDomains,
             displayTexts.allSatisfy({
