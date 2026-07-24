@@ -59,6 +59,15 @@ schema, or lifecycle state machine. Coordinate changes at the owning boundary.
 - Legacy compatibility becomes green before the private surface extension may
   be described as supported.
 
+## Git workflow
+
+- Always make changes in a dedicated git worktree, never in the base checkout.
+- Always open a pull request for the change; never push or merge directly into
+  `main` from the base checkout.
+- Immediately after opening (or merging) the pull request, remove the
+  worktree used for that change. Do not leave finished worktrees lying
+  around.
+
 ## Required gates
 
 Run the narrow gate while iterating, then all applicable gates before handoff:
