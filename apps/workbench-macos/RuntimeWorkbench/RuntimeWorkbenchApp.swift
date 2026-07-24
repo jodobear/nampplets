@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import RuntimeWorkbenchFeature
 
@@ -9,10 +10,20 @@ struct RuntimeWorkbenchApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(
-                profile: runtimeProfile,
-                bootstrapError: runtimeError
-            )
+            Group {
+                if let runtimeProfile {
+                    ContentView(profile: runtimeProfile)
+                        .id(ObjectIdentifier(runtimeProfile))
+                } else if let runtimeError {
+                    ContentView(bootstrapError: runtimeError)
+                } else {
+                    ProgressView("Opening runtime…")
+                        .frame(minWidth: 1_050, minHeight: 660)
+                }
+            }
+            .onAppear {
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            }
             .task {
                 await openRuntimeIfNeeded()
             }

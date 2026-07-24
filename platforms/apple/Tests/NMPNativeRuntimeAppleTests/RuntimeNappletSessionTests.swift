@@ -116,9 +116,31 @@ final class RuntimeNappletSessionTests: XCTestCase {
         XCTAssertEqual(installed.permissionCoordinate.manifestAuthor, author)
         XCTAssertEqual(installed.permissionCoordinate.dTag, "good-morning")
         XCTAssertTrue(profile.snapshotForTesting.sessions.isEmpty)
+        let reacquired: NativeRuntimeInstalledArtifact
+        switch profile.reacquireInstalledArtifact(
+            installed.permissionCoordinate
+        ) {
+        case .refused(let failure):
+            XCTFail(
+                "The exact installed handle should reopen without network work: "
+                    + "\(failure.code): \(failure.detail)"
+            )
+            return
+        case .installed(let installation):
+            XCTAssertEqual(installation.title, "Good Morning Protocol")
+            XCTAssertEqual(
+                installation.installedArtifact.permissionCoordinate,
+                installed.permissionCoordinate
+            )
+            reacquired = installation.installedArtifact
+        }
+        XCTAssertTrue(
+            profile.snapshotForTesting.sessions.isEmpty,
+            "reacquisition must never launch"
+        )
 
         let review = try XCTUnwrap(
-            profile.permissionReview(for: installed.permissionCoordinate).review
+            profile.permissionReview(for: reacquired.permissionCoordinate).review
         )
         XCTAssertEqual(
             review.capabilities.map(\.domain),
@@ -129,7 +151,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
             [.required, .required, .required, .optional, .optional, .optional]
         )
 
-        XCTAssertThrowsError(try profile.launchInstalled(installed)) { error in
+        XCTAssertThrowsError(try profile.launchInstalled(reacquired)) { error in
             guard case RuntimeNappletOpenError.launchRefused = error else {
                 return XCTFail("Expected Rust launch refusal, got \(error)")
             }
@@ -138,7 +160,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
 
         let update = profile.applyPermissionDecisions(
             NativeRuntimePermissionDecisionBatch(
-                coordinate: installed.permissionCoordinate,
+                coordinate: reacquired.permissionCoordinate,
                 decisions: review.capabilities.map {
                     NativeRuntimePermissionDecisionSelection(
                         domain: $0.domain,
@@ -157,7 +179,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
             "applying permissions must never launch"
         )
 
-        let launched = try profile.launchInstalled(installed)
+        let launched = try profile.launchInstalled(reacquired)
         XCTAssertEqual(
             launched.negotiatedDomains,
             ["identity", "inc", "outbox", "shell"]

@@ -26,6 +26,21 @@ final class RuntimeWorkbenchUITests: XCTestCase {
             "good-morning-permission-launch"
         app.launch()
 
+        let initialPermissionConfirm = app.buttons["permission-confirm"]
+        XCTAssertTrue(
+            initialPermissionConfirm.waitForExistence(timeout: 10),
+            "The exact build must enter native permission review"
+        )
+        let cancelInitialReview = app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancelInitialReview.waitForExistence(timeout: 2))
+        cancelInitialReview.click()
+        let reopenReview = app.buttons["Review Permissions"]
+        XCTAssertTrue(
+            reopenReview.waitForExistence(timeout: 10),
+            "Installation must place a recoverable permission action on the canvas"
+        )
+        reopenReview.click()
+
         for domain in ["identity", "inc", "outbox"] {
             let decision = app.descendants(matching: .any)[
                 "permission-decision-\(domain)"
@@ -181,11 +196,23 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         // Do not approve any capability for a network napplet in this test.
         // Reaching Rust's exact permission review proves installation and is
         // the furthest safe point when launch requires new grants.
+        let permissionConfirm = app.buttons["permission-confirm"]
         XCTAssertTrue(
-            app.buttons[
-                "permission-confirm"
-            ].waitForExistence(timeout: 10),
+            permissionConfirm.waitForExistence(timeout: 10),
             "An installed build that cannot launch grant-free must enter exact permission review"
+        )
+        XCTAssertTrue(
+            permissionConfirm.isHittable,
+            "Permission review must be visibly presented after the catalog closes"
+        )
+        let cancelReview = app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancelReview.waitForExistence(timeout: 2))
+        cancelReview.click()
+        XCTAssertTrue(
+            app.buttons["Review Permissions"].waitForExistence(
+                timeout: 10
+            ),
+            "The verified installation must remain as a recoverable canvas window"
         )
     }
 

@@ -170,6 +170,24 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
         return artifact
     }
 
+    func reacquireInstalledArtifact(
+        for identity: WorkbenchExactBuildIdentity
+    ) -> NativeRuntimeCatalogInstallResult {
+        let coordinate = NativeRuntimePermissionCoordinate(
+            manifestAuthor: identity.manifestAuthor,
+            dTag: identity.dTag,
+            aggregateHash: identity.aggregateHash
+        )
+        let result = native.reacquireInstalledArtifact(coordinate)
+        if case let .installed(installation) = result {
+            storeCatalogArtifact(
+                installation.installedArtifact,
+                identity: identity
+            )
+        }
+        return result
+    }
+
     private func storeCatalogReview(_ review: NativeRuntimeCatalogReview) {
         catalogStateLock.lock()
         catalogReviews[review.token] = review

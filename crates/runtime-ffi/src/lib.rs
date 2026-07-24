@@ -1124,6 +1124,49 @@ fn installation_capability_requests(
     Ok(requests)
 }
 
+fn installed_manifest_event_id(build: &InstalledBuild) -> Result<String, String> {
+    let metadata: serde_json::Value = serde_json::from_str(build.manifest_metadata.as_str())
+        .map_err(|error| format!("installed manifest metadata is invalid JSON: {error}"))?;
+    let event_id = metadata
+        .get("event_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "installed manifest metadata has no verified event_id".to_owned())?;
+    nmp_native_artifact::Sha256Digest::parse(event_id)
+        .map_err(|error| format!("installed manifest event_id is invalid: {error}"))?;
+    Ok(event_id.to_owned())
+}
+
+fn installed_confirmation(
+    artifact: &VerifiedArtifact,
+    build: &InstalledBuild,
+    provenance: Vec<RuntimeCatalogProvenance>,
+) -> RuntimeCatalogConfirmation {
+    RuntimeCatalogConfirmation {
+        event_id: artifact.handle.index().event_id().as_str().to_owned(),
+        coordinate: format!(
+            "35129:{}:{}",
+            build.principal.manifest_author(),
+            build.principal.d_tag()
+        ),
+        manifest_author: build.principal.manifest_author().to_owned(),
+        d_tag: Some(build.principal.d_tag().to_owned()),
+        title: Some(build.title.to_string()),
+        aggregate_hash: build.principal.aggregate_hash().to_owned(),
+        capabilities: build
+            .capability_requests
+            .iter()
+            .map(|request| RuntimeCatalogCapability {
+                domain: request.capability.as_str().to_owned(),
+                requirement: match request.requirement {
+                    CapabilityRequirement::Required => RuntimePermissionRequirement::Required,
+                    CapabilityRequirement::Optional => RuntimePermissionRequirement::Optional,
+                },
+            })
+            .collect(),
+        provenance,
+    }
+}
+
 #[uniffi::export]
 impl RuntimeController {
     #[uniffi::constructor]
@@ -1781,6 +1824,98 @@ impl RuntimeController {
         }
         RuntimeCatalogConfirmationResult {
             confirmation: Some(confirmation),
+            artifact: Some(artifact),
+            failure: None,
+        }
+    }
+
+    /// Reopens one installed exact build from its retained verifier handle.
+    ///
+    /// Native supplies only the exact library coordinate. Rust checks the
+    /// unfiltered persistent installation and returns the already-attached
+    /// immutable handle only when its signed event, coordinate, aggregate, and
+    /// capability inventory still match. After process restart this fails
+    /// closed until the artifact owner exposes an exact persistent-cache reopen
+    /// seam; this boundary never resolves a newer replaceable manifest as a
+    /// substitute for the installed event.
+    ///
+    /// This call is blocking and must be invoked away from a native UI thread.
+    pub fn reacquire_installed_artifact(
+        &self,
+        coordinate: RuntimeExactBuildCoordinate,
+    ) -> RuntimeCatalogConfirmationResult {
+        if self.closed.load(Ordering::Acquire) {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure("closed", "runtime is closed")),
+            };
+        }
+        let principal = match Principal::new(
+            coordinate.manifest_author,
+            coordinate.d_tag,
+            coordinate.aggregate_hash,
+        ) {
+            Ok(principal) => principal,
+            Err(error) => {
+                return RuntimeCatalogConfirmationResult {
+                    confirmation: None,
+                    artifact: None,
+                    failure: Some(runtime_catalog_failure(
+                        "invalid-exact-build-coordinate",
+                        error.to_string(),
+                    )),
+                };
+            }
+        };
+        let installed = match self.runtime_store.installed_builds() {
+            Ok(installed) => installed
+                .into_iter()
+                .find(|candidate| candidate.principal == principal),
+            Err(error) => {
+                return RuntimeCatalogConfirmationResult {
+                    confirmation: None,
+                    artifact: None,
+                    failure: Some(runtime_catalog_failure(
+                        "installed-library-unavailable",
+                        error.to_string(),
+                    )),
+                };
+            }
+        };
+        let Some(installed) = installed else {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure(
+                    "not-installed",
+                    "the exact build is not present in the runtime library",
+                )),
+            };
+        };
+        let retained_handle = { self.artifacts.lock().get(&principal).cloned() };
+        let Some(handle) = retained_handle else {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure(
+                    "artifact-handle-unavailable",
+                    "the installed exact bytes are not retained in this runtime process",
+                )),
+            };
+        };
+        let artifact = match self.verified_installed_artifact(&installed, handle) {
+            Ok(artifact) => artifact,
+            Err(failure) => {
+                return RuntimeCatalogConfirmationResult {
+                    confirmation: None,
+                    artifact: None,
+                    failure: Some(failure),
+                };
+            }
+        };
+        RuntimeCatalogConfirmationResult {
+            confirmation: Some(installed_confirmation(&artifact, &installed, Vec::new())),
             artifact: Some(artifact),
             failure: None,
         }
@@ -2638,6 +2773,40 @@ impl RuntimeController {
 }
 
 impl RuntimeController {
+    fn verified_installed_artifact(
+        &self,
+        build: &InstalledBuild,
+        handle: Arc<VerifiedArtifactHandle>,
+    ) -> Result<Arc<VerifiedArtifact>, RuntimeCatalogFailure> {
+        let expected_event_id = installed_manifest_event_id(build)
+            .map_err(|detail| runtime_catalog_failure("installed-metadata-invalid", detail))?;
+        let index = handle.index();
+        if index.kind() != 35_129
+            || index.event_id().as_str() != expected_event_id
+            || index.author().as_str() != build.principal.manifest_author()
+            || index.d_tag() != Some(build.principal.d_tag())
+            || index.aggregate().as_str() != build.principal.aggregate_hash()
+        {
+            return Err(runtime_catalog_failure(
+                "installed-artifact-mismatch",
+                "the verifier handle does not match the persisted exact signed manifest",
+            ));
+        }
+        let artifact = Arc::new(VerifiedArtifact {
+            handle,
+            principal: Some(build.principal.clone()),
+        });
+        let requests = installation_capability_requests(&artifact)
+            .map_err(|detail| runtime_catalog_failure("installed-capability-mismatch", detail))?;
+        if requests != build.capability_requests {
+            return Err(runtime_catalog_failure(
+                "installed-capability-mismatch",
+                "the verified manifest capability inventory differs from the persisted installation",
+            ));
+        }
+        Ok(artifact)
+    }
+
     fn refusal(&self, code: impl Into<String>, detail: impl Into<String>) -> RuntimeRefusal {
         RuntimeRefusal {
             code: code.into(),
@@ -4355,6 +4524,111 @@ mod tests {
             ),
             "the boundary must release its live verifier handle after kernel-confirmed uninstall"
         );
+    }
+
+    #[test]
+    fn installed_artifact_reacquisition_reuses_the_live_exact_handle() {
+        let temp = TempDir::new().unwrap();
+        let runtime = controller(&temp);
+        let artifact = runtime
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("fixture verifies");
+        let coordinate = exact_coordinate(&artifact);
+        runtime.install(artifact);
+        runtime.set_library_filter("does-not-match".to_owned());
+
+        let reopened = runtime.reacquire_installed_artifact(coordinate);
+        assert!(reopened.failure.is_none());
+        let confirmation = reopened.confirmation.expect("exact confirmation");
+        let event: Value = serde_json::from_slice(EVENT).unwrap();
+        assert_eq!(
+            confirmation.event_id,
+            event["id"].as_str().expect("fixture event id")
+        );
+        assert_eq!(confirmation.manifest_author, AUTHOR);
+        assert_eq!(confirmation.d_tag.as_deref(), Some("good-morning"));
+        assert_eq!(confirmation.aggregate_hash, GOOD_MORNING_AGGREGATE_HASH);
+        assert_eq!(
+            reopened
+                .artifact
+                .expect("opaque artifact")
+                .handle
+                .read_verified(nmp_native_artifact::INDEX_PATH, INDEX.len())
+                .unwrap(),
+            INDEX
+        );
+    }
+
+    #[test]
+    fn persisted_install_without_a_live_handle_fails_closed_after_restart() {
+        let temp = TempDir::new().unwrap();
+        let runtime = controller(&temp);
+        let artifact = runtime
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("fixture verifies");
+        runtime.install(Arc::clone(&artifact));
+        let coordinate = exact_coordinate(&artifact);
+        runtime.close();
+        drop(runtime);
+
+        let reopened = controller(&temp);
+        let result = reopened.reacquire_installed_artifact(coordinate);
+        assert_eq!(
+            reopened.snapshot().installed_library.builds[0].availability,
+            RuntimeInstalledBuildAvailability::MetadataOnly
+        );
+        assert!(result.artifact.is_none());
+        assert_eq!(
+            result.failure.expect("typed refusal").code,
+            "artifact-handle-unavailable"
+        );
+    }
+
+    #[test]
+    fn installed_artifact_reattach_refuses_signed_event_drift() {
+        let temp = TempDir::new().unwrap();
+        let runtime = controller(&temp);
+        let artifact = runtime
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("fixture verifies");
+        runtime.install(Arc::clone(&artifact));
+        let mut installed = runtime.app.snapshot().library.builds[0].build.clone();
+        installed.manifest_metadata = BoundedJson::from_value(
+            &serde_json::json!({
+                "event_id": "0".repeat(64),
+                "kind": 35_129,
+                "mode": "single-file",
+                "paths": 1,
+            }),
+            1_024,
+        )
+        .unwrap();
+
+        let failure = runtime
+            .verified_installed_artifact(&installed, Arc::clone(&artifact.handle))
+            .expect_err("a different signed event must not inherit the persisted install");
+        assert_eq!(failure.code, "installed-artifact-mismatch");
     }
 
     #[test]

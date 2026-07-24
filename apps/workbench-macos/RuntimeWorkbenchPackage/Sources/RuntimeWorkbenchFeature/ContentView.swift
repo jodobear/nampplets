@@ -14,12 +14,17 @@ public struct ContentView: View {
     private let injectedPermissionManager: (any PermissionReviewManaging)?
 
     @State private var activity = "Opening application runtime profile"
-    @State private var pendingInstalledArtifact:
-        NativeRuntimeInstalledArtifact?
-    @State private var pendingInstalledIdentity:
+    @State private var installedArtifacts:
+        [WorkbenchExactBuildIdentity: NativeRuntimeInstalledArtifact] = [:]
+    @State private var permissionTargetIdentity:
+        WorkbenchExactBuildIdentity?
+    @State private var deferredPermissionIdentity:
+        WorkbenchExactBuildIdentity?
+    @State private var deferredLibraryOpenIdentity:
         WorkbenchExactBuildIdentity?
     @State private var runningArtifacts:
         [WorkbenchExactBuildIdentity: NappletArtifact] = [:]
+    @State private var reacquiringIdentity: WorkbenchExactBuildIdentity?
     @State private var launchingIdentity: WorkbenchExactBuildIdentity?
     @State private var layout: WorkbenchLayoutModel
     @State private var layoutPersistenceError: String?
@@ -126,7 +131,17 @@ public struct ContentView: View {
             )
         }
         .sheet(isPresented: $isLibrarySheetPresented) {
-            WorkbenchLibrarySheet(manager: libraryManager)
+            WorkbenchLibrarySheet(
+                manager: libraryManager,
+                onOpen: { build in
+                    deferredLibraryOpenIdentity = WorkbenchExactBuildIdentity(
+                        manifestAuthor: build.exactBuild.manifestAuthor,
+                        dTag: build.exactBuild.dTag,
+                        aggregateHash: build.exactBuild.aggregateHash
+                    )
+                    isLibrarySheetPresented = false
+                }
+            )
         }
         .sheet(isPresented: $isActivitySheetPresented) {
             if
@@ -234,6 +249,27 @@ public struct ContentView: View {
                 accountSnapshot = accountManager.snapshot()
             }
         }
+        .onChange(of: isCatalogSheetPresented) { _, isPresented in
+            guard
+                !isPresented,
+                let identity = deferredPermissionIdentity
+            else {
+                return
+            }
+            deferredPermissionIdentity = nil
+            permissionTargetIdentity = identity
+            isPermissionSheetPresented = true
+        }
+        .onChange(of: isLibrarySheetPresented) { _, isPresented in
+            guard
+                !isPresented,
+                let identity = deferredLibraryOpenIdentity
+            else {
+                return
+            }
+            deferredLibraryOpenIdentity = nil
+            reacquireInstalledArtifact(identity)
+        }
         .onChange(of: isSettingsSheetPresented) { _, isPresented in
             var route = settingsRoute
             guard
@@ -251,11 +287,12 @@ public struct ContentView: View {
         .onChange(of: isPermissionSheetPresented) { _, isPresented in
             guard
                 !isPresented,
+                let identity = permissionTargetIdentity,
                 permissionManager?.snapshot().submissionState == .applied
             else {
                 return
             }
-            launchPendingInstalledIfPermitted()
+            launchInstalledIfPermitted(identity)
         }
         .onDisappear {
             pendingLayoutSave?.cancel()
@@ -531,13 +568,56 @@ public struct ContentView: View {
             let artifact = runningArtifacts[identity]
         {
             nappletSurface(artifact, title: window.title)
+        } else if
+            let identity = window.exactBuild,
+            launchingIdentity == identity || reacquiringIdentity == identity
+        {
+            VStack(spacing: 12) {
+                ProgressView()
+                Text("Launching verified napplet")
+                    .font(.headline)
+                Text("The exact build is opening inside its isolated runtime.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityIdentifier("napplet-launching")
+        } else if
+            let identity = window.exactBuild,
+            installedArtifacts[identity] != nil
+        {
+            ContentUnavailableView {
+                Label("Permission review required", systemImage: "lock.shield")
+            } description: {
+                Text(
+                    "This exact verified build is installed. Review its required "
+                        + "capabilities before it runs."
+                )
+            } actions: {
+                Button("Review Permissions") {
+                    permissionTargetIdentity = identity
+                    openPermissionReview()
+                }
+                .accessibilityIdentifier("review-installed-permissions")
+            }
+            .accessibilityIdentifier("installed-napplet-awaiting-permission")
+        } else if let identity = window.exactBuild {
+            ContentUnavailableView {
+                Label("Napplet is not running", systemImage: "app.badge")
+            } description: {
+                Text(
+                    "Reopen this installed exact build without changing its grants."
+                )
+            } actions: {
+                Button("Open Installed Napplet") {
+                    reacquireInstalledArtifact(identity)
+                }
+                .accessibilityIdentifier("reopen-installed-napplet")
+            }
         } else {
             ContentUnavailableView(
                 "Napplet is not running",
                 systemImage: "app.badge",
-                description: Text(
-                    "Open the installed build from the library to launch it."
-                )
+                description: Text("This canvas window has no exact installed build.")
             )
         }
     }
@@ -635,7 +715,11 @@ public struct ContentView: View {
             return
         }
         do {
-            try prepareInstalledArtifact(installed, identity: identity)
+            try prepareInstalledArtifact(
+                installed,
+                identity: identity,
+                deferPermissionPresentation: true
+            )
         } catch {
             activity = "Refused: \(error.localizedDescription)"
         }
@@ -644,15 +728,38 @@ public struct ContentView: View {
     @MainActor
     private func prepareInstalledArtifact(
         _ installed: NativeRuntimeInstalledArtifact,
-        identity: WorkbenchExactBuildIdentity
+        identity: WorkbenchExactBuildIdentity,
+        deferPermissionPresentation: Bool = false
     ) throws {
         guard let profile else {
             throw RuntimeWorkbenchPermissionError.malformed(
                 "the application runtime profile is unavailable"
             )
         }
-        pendingInstalledArtifact = installed
-        pendingInstalledIdentity = identity
+        if let existing = layout.windows.first(where: {
+            $0.exactBuild == identity
+        }) {
+            mutateLayout {
+                $0.bringToFront(existing.id)
+            }
+        } else {
+            var next = layout
+            let window = WorkbenchCanvasWindow.installed(
+                title: installed.title,
+                identity: identity,
+                offset: Double(next.windows.count % 8) * 24
+            )
+            guard next.addWindow(window) else {
+                throw RuntimeWorkbenchPermissionError.refused(
+                    code: "workspace-capacity",
+                    detail: "Close a canvas window before adding another napplet."
+                )
+            }
+            layout = next
+            scheduleLayoutSave()
+        }
+        installedArtifacts[identity] = installed
+        permissionTargetIdentity = identity
         let principal = try permissionPrincipal(identity)
         permissionManager = try RuntimeWorkbenchPermissionManager(
             profile: profile,
@@ -671,19 +778,63 @@ public struct ContentView: View {
             )
         }
         if review.launchPermitted {
-            launchPendingInstalledIfPermitted()
+            launchInstalledIfPermitted(identity)
         } else {
             activity = "Permission review required before launch"
-            isPermissionSheetPresented = true
+            if deferPermissionPresentation {
+                deferredPermissionIdentity = identity
+            } else {
+                isPermissionSheetPresented = true
+            }
         }
     }
 
     @MainActor
-    private func launchPendingInstalledIfPermitted() {
+    private func reacquireInstalledArtifact(
+        _ identity: WorkbenchExactBuildIdentity
+    ) {
+        guard let profile else {
+            activity = "Refused: the application runtime profile is unavailable"
+            return
+        }
+        guard
+            reacquiringIdentity != identity,
+            launchingIdentity != identity
+        else {
+            return
+        }
+        reacquiringIdentity = identity
+        activity = "Reopening installed exact build"
+        Task {
+            let result = await Task.detached {
+                profile.reacquireInstalledArtifact(for: identity)
+            }.value
+            reacquiringIdentity = nil
+            switch result {
+            case let .refused(failure):
+                activity = "Refused: \(failure.code): \(failure.detail)"
+            case let .installed(installation):
+                do {
+                    try prepareInstalledArtifact(
+                        installation.installedArtifact,
+                        identity: identity
+                    )
+                } catch {
+                    activity = "Refused: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func launchInstalledIfPermitted(
+        _ identity: WorkbenchExactBuildIdentity
+    ) {
         guard
             let profile,
-            let installed = pendingInstalledArtifact,
-            let identity = pendingInstalledIdentity,
+            let installed =
+                installedArtifacts[identity]
+                ?? profile.installedCatalogArtifact(for: identity),
             launchingIdentity != identity,
             runningArtifacts[identity] == nil
         else {
@@ -707,18 +858,9 @@ public struct ContentView: View {
                     try profile.native.launchInstalled(installed)
                 }.value
                 runningArtifacts[identity] = launched
-                let window = WorkbenchCanvasWindow.installed(
-                    title: installed.title,
-                    identity: identity,
-                    offset: Double(layout.windows.count % 8) * 24
-                )
-                if layout.window(id: window.id) == nil {
-                    mutateLayout {
-                        _ = $0.addWindow(window)
-                    }
+                if permissionTargetIdentity == identity {
+                    permissionTargetIdentity = nil
                 }
-                pendingInstalledArtifact = nil
-                pendingInstalledIdentity = nil
                 activity = "Signed exact-build session ready"
             } catch {
                 activity = "Refused: \(error.localizedDescription)"
@@ -762,7 +904,7 @@ public struct ContentView: View {
         }
         guard
             let identity =
-                pendingInstalledIdentity ?? layout.selectedWindow?.exactBuild
+                permissionTargetIdentity ?? layout.selectedWindow?.exactBuild
         else {
             permissionSheetError =
                 "Select an exact-build napplet window to review permissions."
@@ -770,11 +912,21 @@ public struct ContentView: View {
             return
         }
         do {
+            guard
+                installedArtifacts[identity] != nil
+                    || profile.installedCatalogArtifact(for: identity) != nil
+            else {
+                throw RuntimeWorkbenchPermissionError.refused(
+                    code: "artifact-handle-unavailable",
+                    detail: "Reinstall this exact build to reopen its verified artifact."
+                )
+            }
             let principal = try permissionPrincipal(identity)
             permissionManager = try RuntimeWorkbenchPermissionManager(
                 profile: profile,
                 principal: principal
             )
+            permissionTargetIdentity = identity
         } catch {
             permissionSheetError = error.localizedDescription
         }
@@ -872,6 +1024,13 @@ public struct ContentView: View {
         }
         if let identity = window.exactBuild {
             runningArtifacts.removeValue(forKey: identity)
+            installedArtifacts.removeValue(forKey: identity)
+            if permissionTargetIdentity == identity {
+                permissionTargetIdentity = nil
+            }
+            if deferredPermissionIdentity == identity {
+                deferredPermissionIdentity = nil
+            }
         }
         activity = "Closed \(window.title) without uninstalling it"
     }

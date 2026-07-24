@@ -635,6 +635,21 @@ public protocol RuntimeControllerProtocol: AnyObject, Sendable {
      */
     func permissionReview(coordinate: RuntimeExactBuildCoordinate)  -> RuntimePermissionReviewResult
 
+    /**
+     * Reopens one installed exact build from its retained verifier handle.
+     *
+     * Native supplies only the exact library coordinate. Rust checks the
+     * unfiltered persistent installation and returns the already-attached
+     * immutable handle only when its signed event, coordinate, aggregate, and
+     * capability inventory still match. After process restart this fails
+     * closed until the artifact owner exposes an exact persistent-cache reopen
+     * seam; this boundary never resolves a newer replaceable manifest as a
+     * substitute for the installed event.
+     *
+     * This call is blocking and must be invoked away from a native UI thread.
+     */
+    func reacquireInstalledArtifact(coordinate: RuntimeExactBuildCoordinate)  -> RuntimeCatalogConfirmationResult
+
     func readVerified(sessionId: UInt64, logicalPath: String, maximumBytes: UInt64)  -> VerifiedRead
 
     /**
@@ -1037,6 +1052,27 @@ open func observe(observer: RuntimeObserver) -> ObservationStart  {
 open func permissionReview(coordinate: RuntimeExactBuildCoordinate) -> RuntimePermissionReviewResult  {
     return try!  FfiConverterTypeRuntimePermissionReviewResult_lift(try! rustCall() {
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_permission_review(self.uniffiClonePointer(),
+        FfiConverterTypeRuntimeExactBuildCoordinate_lower(coordinate),$0
+    )
+})
+}
+
+    /**
+     * Reopens one installed exact build from its retained verifier handle.
+     *
+     * Native supplies only the exact library coordinate. Rust checks the
+     * unfiltered persistent installation and returns the already-attached
+     * immutable handle only when its signed event, coordinate, aggregate, and
+     * capability inventory still match. After process restart this fails
+     * closed until the artifact owner exposes an exact persistent-cache reopen
+     * seam; this boundary never resolves a newer replaceable manifest as a
+     * substitute for the installed event.
+     *
+     * This call is blocking and must be invoked away from a native UI thread.
+     */
+open func reacquireInstalledArtifact(coordinate: RuntimeExactBuildCoordinate) -> RuntimeCatalogConfirmationResult  {
+    return try!  FfiConverterTypeRuntimeCatalogConfirmationResult_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_reacquire_installed_artifact(self.uniffiClonePointer(),
         FfiConverterTypeRuntimeExactBuildCoordinate_lower(coordinate),$0
     )
 })
@@ -9956,6 +9992,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_permission_review() != 34440) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_reacquire_installed_artifact() != 18436) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_read_verified() != 14937) {

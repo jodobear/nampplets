@@ -129,6 +129,33 @@ import Testing
     #expect(restored.selectedWindow?.exactBuild == exactBuild)
 }
 
+@Test func installedWindowIdentityIncludesTheCompleteExactBuildCoordinate() {
+    let author = String(repeating: "a", count: 64)
+    let aggregate = String(repeating: "b", count: 64)
+    let first = WorkbenchCanvasWindow.installed(
+        title: "First",
+        identity: WorkbenchExactBuildIdentity(
+            manifestAuthor: author,
+            dTag: "first",
+            aggregateHash: aggregate
+        ),
+        offset: 0
+    )
+    let second = WorkbenchCanvasWindow.installed(
+        title: "Second",
+        identity: WorkbenchExactBuildIdentity(
+            manifestAuthor: author,
+            dTag: "second",
+            aggregateHash: aggregate
+        ),
+        offset: 0
+    )
+
+    #expect(first.id != second.id)
+    #expect(first.componentID != second.componentID)
+    #expect(first.id.rawValue.count == 72)
+}
+
 @Test func canvasRefusesWindowsBeyondItsPersistedBound() {
     var layout = WorkbenchLayoutModel()
     for index in 0 ..< WorkbenchLayoutSnapshot.maximumWindowCount {

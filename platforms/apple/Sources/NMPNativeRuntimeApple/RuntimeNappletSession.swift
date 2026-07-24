@@ -747,6 +747,71 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         )
     }
 
+    /// Reacquires one installed exact build from the current profile's retained
+    /// verifier handle without granting or launching it.
+    ///
+    /// Rust owns the unfiltered installation lookup and exact-build drift
+    /// checks. Native supplies only the complete installed coordinate and
+    /// receives the same sealed handle shape as a fresh catalog installation.
+    /// A restarted profile fails closed until artifact-owned persistent exact
+    /// bytes can be reopened through a supported Rust seam.
+    public func reacquireInstalledArtifact(
+        _ coordinate: NativeRuntimePermissionCoordinate
+    ) -> NativeRuntimeCatalogInstallResult {
+        lock.lock()
+        let closed = isClosed
+        lock.unlock()
+        guard !closed else {
+            return .refused(
+                NativeRuntimeCatalogFailure(
+                    code: "closed",
+                    detail: "The application runtime profile is closed",
+                    provenance: []
+                )
+            )
+        }
+        let result = controller.reacquireInstalledArtifact(
+            coordinate: RuntimeExactBuildCoordinate(
+                manifestAuthor: coordinate.manifestAuthor,
+                dTag: coordinate.dTag,
+                aggregateHash: coordinate.aggregateHash
+            )
+        )
+        if let failure = result.failure {
+            return .refused(failure)
+        }
+        guard
+            let confirmation = result.confirmation,
+            let artifact = result.artifact,
+            confirmation.manifestAuthor == coordinate.manifestAuthor,
+            confirmation.dTag == coordinate.dTag,
+            confirmation.aggregateHash == coordinate.aggregateHash
+        else {
+            return .refused(
+                NativeRuntimeCatalogFailure(
+                    code: "incomplete-reacquisition",
+                    detail: "Rust returned no complete exact installed artifact",
+                    provenance: []
+                )
+            )
+        }
+        let title = confirmation.title ?? "Untitled napplet"
+        return .installed(
+            NativeRuntimeCatalogInstallation(
+                title: title,
+                manifestAuthor: coordinate.manifestAuthor,
+                dTag: coordinate.dTag,
+                aggregateHash: coordinate.aggregateHash,
+                installedArtifact: NativeRuntimeInstalledArtifact(
+                    title: title,
+                    ownerID: profileID,
+                    artifact: artifact,
+                    permissionCoordinate: coordinate
+                )
+            )
+        )
+    }
+
     /// Verifies and installs one exact named build without granting or
     /// launching it. The returned opaque handle is bound to this profile.
     public func installSignedNamed(

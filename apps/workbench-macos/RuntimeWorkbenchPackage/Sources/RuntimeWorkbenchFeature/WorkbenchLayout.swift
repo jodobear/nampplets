@@ -1,4 +1,5 @@
 import CoreGraphics
+import CryptoKit
 import Foundation
 
 public enum WorkbenchLayoutMode: String, CaseIterable, Codable, Hashable, Sendable {
@@ -193,8 +194,12 @@ public struct WorkbenchCanvasWindow:
         identity: WorkbenchExactBuildIdentity,
         offset: Double
     ) -> Self {
-        let stableID =
-            "\(identity.manifestAuthor.prefix(32))-\(identity.aggregateHash)"
+        let stableMaterial =
+            "\(identity.manifestAuthor)\u{0}\(identity.dTag)\u{0}\(identity.aggregateHash)"
+        let stableDigest = SHA256.hash(data: Data(stableMaterial.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let stableID = "napplet-\(stableDigest)"
         return Self(
             id: WorkbenchWindowID(rawValue: stableID),
             componentID: WorkbenchComponentID(rawValue: stableID),
