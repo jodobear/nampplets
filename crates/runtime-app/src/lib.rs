@@ -20,7 +20,8 @@ use nmp_native_nap_bridge::{
     ActivitySink, BridgeError, BridgeLimits, DispatchOutcome, InjectionPlan, Provider,
     ProviderActivity, ProviderDescriptor, ProviderOperation, ProviderPlatformAvailability,
     ProviderPush, ProviderPushBatch, ProviderPushError, ProviderPushObserver,
-    ProviderPushTermination, ProviderRegistry, ProviderSessionEnd, SessionContext, SourceWindowId,
+    ProviderPushTermination, ProviderRegistry, ProviderSessionEnd, ProviderWriteProposal,
+    SessionContext, SourceWindowId,
 };
 use nmp_native_providers::ShellProvider;
 use nmp_native_runtime_core::{
@@ -221,6 +222,10 @@ pub enum PlatformCommand {
     ApproveWrite {
         write: ApprovedWrite,
     },
+    DecideProviderWrite {
+        operation: ProviderOperationId,
+        approve: bool,
+    },
     SaveWorkspace {
         workspace: WorkspaceRecord,
     },
@@ -397,6 +402,16 @@ pub struct ReceiptView {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderWriteProposalView {
+    pub operation: ProviderOperationId,
+    pub approval_id: Arc<str>,
+    pub principal: Principal,
+    pub session: SessionId,
+    pub account: nmp_native_runtime_core::AccountRef,
+    pub draft: BoundedJson,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkspaceView {
     pub id: Arc<str>,
     pub definition: BoundedJson,
@@ -484,6 +499,7 @@ pub struct AppSnapshot {
     pub session_domains: Vec<SessionDomainView>,
     pub provider_push_lanes: Vec<ProviderPushLaneView>,
     pub bindings: Vec<BindingView>,
+    pub pending_writes: Vec<ProviderWriteProposalView>,
     pub receipts: Vec<ReceiptView>,
     pub workspaces: Vec<WorkspaceView>,
     pub resources: ResourceCensus,
@@ -577,7 +593,26 @@ struct ActiveOperation {
     session: SessionId,
     principal: Principal,
     domain: Capability,
-    handle: ProviderOperation,
+    handle: Option<ProviderOperation>,
+    proposal: Option<ProviderWriteProposal>,
+}
+
+impl ActiveOperation {
+    fn cancel(self, reason: Arc<str>) {
+        if let Some(proposal) = self.proposal {
+            proposal.refuse(reason);
+        }
+        if let Some(handle) = self.handle {
+            handle.cancel();
+        }
+    }
+
+    fn complete(self) {
+        drop(self.proposal);
+        if let Some(handle) = self.handle {
+            handle.complete();
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -672,6 +707,7 @@ impl RuntimeApp {
             session_domains: Vec::new(),
             provider_push_lanes: Vec::new(),
             bindings: Vec::new(),
+            pending_writes: Vec::new(),
             receipts: Vec::new(),
             workspaces: Vec::new(),
             resources: resources.census(),
@@ -810,6 +846,9 @@ impl RuntimeApp {
             }
             PlatformCommand::ApproveWrite { write } => {
                 self.approve_write(&mut state, write, now);
+            }
+            PlatformCommand::DecideProviderWrite { operation, approve } => {
+                self.decide_provider_write(&mut state, operation, approve, now);
             }
             PlatformCommand::SaveWorkspace { workspace } => {
                 self.save_workspace(&mut state, workspace, now);
@@ -1436,7 +1475,7 @@ impl RuntimeApp {
                     .collect::<Vec<_>>();
                 for id in operations {
                     if let Some(operation) = state.operations.remove(&id) {
-                        operation.handle.cancel();
+                        operation.cancel(Arc::from("permission revoked"));
                     }
                 }
             }
@@ -1499,7 +1538,7 @@ impl RuntimeApp {
             .collect::<Vec<_>>();
         for (id, _) in operations {
             if let Some(operation) = state.operations.remove(&id) {
-                operation.handle.cancel();
+                operation.cancel(Arc::from("session ended"));
             }
         }
         self.record_activity(
@@ -1751,7 +1790,7 @@ impl RuntimeApp {
             .collect::<Vec<_>>();
         for operation_id in operation_ids {
             if let Some(operation) = state.operations.remove(&operation_id) {
-                operation.handle.cancel();
+                operation.cancel(Arc::from("provider operation cancelled"));
             }
         }
         self.shell_provider.close_session(session_id);
@@ -1930,9 +1969,35 @@ impl RuntimeApp {
                         now,
                     );
                 }
-                let operation = if let Some(handle) = call.take_operation() {
-                    if state.operations.len() >= self.limits.maximum_provider_operations {
+                let mut handle = call.take_operation();
+                let mut proposal = call.take_write_proposal();
+                if handle.is_some() && proposal.is_some() {
+                    if let Some(proposal) = proposal.take() {
+                        proposal.refuse(Arc::from(
+                            "provider returned both a streaming operation and a write proposal",
+                        ));
+                    }
+                    if let Some(handle) = handle.take() {
                         handle.cancel();
+                    }
+                    self.refuse(
+                        state,
+                        AppErrorCode::Bridge,
+                        Some(principal.clone()),
+                        Some(session_id),
+                        "provider returned conflicting operation ownership",
+                        now,
+                    );
+                    return None;
+                }
+                let operation = if handle.is_some() || proposal.is_some() {
+                    if state.operations.len() >= self.limits.maximum_provider_operations {
+                        if let Some(proposal) = proposal.take() {
+                            proposal.refuse(Arc::from("provider operation capacity is full"));
+                        }
+                        if let Some(handle) = handle.take() {
+                            handle.cancel();
+                        }
                         self.refuse(
                             state,
                             AppErrorCode::Capacity,
@@ -1944,7 +2009,14 @@ impl RuntimeApp {
                         return None;
                     }
                     let Some(next) = state.next_operation_id.checked_add(1) else {
-                        handle.cancel();
+                        if let Some(proposal) = proposal.take() {
+                            proposal.refuse(Arc::from(
+                                "provider operation identifier space is exhausted",
+                            ));
+                        }
+                        if let Some(handle) = handle.take() {
+                            handle.cancel();
+                        }
                         self.refuse(
                             state,
                             AppErrorCode::Capacity,
@@ -1967,6 +2039,7 @@ impl RuntimeApp {
                             principal: principal.clone(),
                             domain,
                             handle,
+                            proposal,
                         },
                     );
                     Some(id)
@@ -2241,7 +2314,19 @@ impl RuntimeApp {
             );
             return;
         };
-        operation.handle.complete();
+        if operation.proposal.is_some() {
+            operation.cancel(Arc::from("pending write requires an approval decision"));
+            self.refuse(
+                state,
+                AppErrorCode::Bridge,
+                None,
+                None,
+                "a pending provider write cannot be completed without approval",
+                now,
+            );
+            return;
+        }
+        operation.complete();
         self.push_event(
             state,
             PlatformEvent::ProviderOperationFinished {
@@ -2341,7 +2426,77 @@ impl RuntimeApp {
     }
 
     fn approve_write(&self, state: &mut AppState, write: ApprovedWrite, now: u64) {
+        self.accept_approved_write(state, write, None, now);
+    }
+
+    fn decide_provider_write(
+        &self,
+        state: &mut AppState,
+        operation_id: ProviderOperationId,
+        approve: bool,
+        now: u64,
+    ) {
+        let Some(mut operation) = state.operations.remove(&operation_id) else {
+            self.refuse(
+                state,
+                AppErrorCode::Bridge,
+                None,
+                None,
+                "unknown provider write proposal",
+                now,
+            );
+            return;
+        };
+        let Some(proposal) = operation.proposal.take() else {
+            let principal = operation.principal.clone();
+            let session = operation.session;
+            operation.complete();
+            self.refuse(
+                state,
+                AppErrorCode::Bridge,
+                Some(principal),
+                Some(session),
+                "provider operation is not awaiting a write decision",
+                now,
+            );
+            return;
+        };
+        if !approve {
+            proposal.refuse(Arc::from("native approval was denied"));
+            if let Some(handle) = operation.handle {
+                handle.cancel();
+            }
+            self.push_event(
+                state,
+                PlatformEvent::ProviderOperationFinished {
+                    operation: operation_id,
+                },
+            );
+            return;
+        }
+        let (write, completion, work) = proposal.into_parts();
+        let provider_sink = completion.into_receipt_sink();
+        self.accept_approved_write(state, write, Some(provider_sink), now);
+        drop(work);
+        self.push_event(
+            state,
+            PlatformEvent::ProviderOperationFinished {
+                operation: operation_id,
+            },
+        );
+    }
+
+    fn accept_approved_write(
+        &self,
+        state: &mut AppState,
+        write: ApprovedWrite,
+        provider_sink: Option<Arc<dyn ReceiptEventSink>>,
+        now: u64,
+    ) {
         let Some(session) = state.sessions.get(&write.origin_session) else {
+            if let Some(sink) = provider_sink.as_ref() {
+                sink.close(Some(Arc::from("origin session is no longer active")));
+            }
             self.refuse(
                 state,
                 AppErrorCode::UnknownSession,
@@ -2353,6 +2508,9 @@ impl RuntimeApp {
             return;
         };
         if session.context.principal != write.origin_principal {
+            if let Some(sink) = provider_sink.as_ref() {
+                sink.close(Some(Arc::from("origin session identity changed")));
+            }
             self.refuse(
                 state,
                 AppErrorCode::SessionIdentityMismatch,
@@ -2364,6 +2522,9 @@ impl RuntimeApp {
             return;
         }
         if state.receipts.len() >= self.limits.maximum_receipts {
+            if let Some(sink) = provider_sink.as_ref() {
+                sink.close(Some(Arc::from("receipt ownership capacity is full")));
+            }
             self.refuse(
                 state,
                 AppErrorCode::Capacity,
@@ -2380,9 +2541,17 @@ impl RuntimeApp {
         let receipt = Arc::new(AppReceipt::unassigned(
             self.limits.maximum_receipt_frame_bytes,
         ));
-        let accepted = match self.data_plane.accept_write(write, receipt.clone()) {
+        let receipt_sink: Arc<dyn ReceiptEventSink> = match provider_sink {
+            Some(provider) => Arc::new(ReceiptFanout {
+                app: Arc::clone(&receipt),
+                provider,
+            }),
+            None => receipt.clone(),
+        };
+        let accepted = match self.data_plane.accept_write(write, receipt_sink.clone()) {
             Ok(accepted) => accepted,
             Err(error) => {
+                receipt_sink.close(Some(Arc::from(error.to_string())));
                 self.refuse(
                     state,
                     AppErrorCode::HostData,
@@ -2395,6 +2564,7 @@ impl RuntimeApp {
             }
         };
         if let Err(detail) = receipt.assign(accepted.receipt_id.clone()) {
+            receipt_sink.close(Some(Arc::clone(&detail)));
             self.refuse(
                 state,
                 AppErrorCode::Receipt,
@@ -2405,6 +2575,9 @@ impl RuntimeApp {
             );
         }
         if accepted.frozen_account != expected_account {
+            receipt_sink.close(Some(Arc::from(
+                "host data plane returned a different frozen account",
+            )));
             self.refuse(
                 state,
                 AppErrorCode::Receipt,
@@ -2667,6 +2840,22 @@ impl RuntimeApp {
                     schema: Arc::clone(&owner.request.schema),
                     logical_source_id: owner.binding.logical_source_id().map(Arc::from),
                     revision: owner.binding.latest().map(|snapshot| snapshot.revision),
+                })
+                .collect(),
+            pending_writes: state
+                .operations
+                .iter()
+                .filter_map(|(operation, active)| {
+                    let proposal = active.proposal.as_ref()?;
+                    let write = proposal.write.as_ref()?;
+                    Some(ProviderWriteProposalView {
+                        operation: *operation,
+                        approval_id: Arc::clone(&write.approval_id),
+                        principal: write.origin_principal.clone(),
+                        session: write.origin_session,
+                        account: write.account.clone(),
+                        draft: write.draft.clone(),
+                    })
                 })
                 .collect(),
             receipts: state
@@ -3070,6 +3259,28 @@ impl ReceiptEventSink for AppReceipt {
 
     fn close(&self, _reason: Option<Arc<str>>) {
         self.set_closed();
+    }
+}
+
+/// Keeps the runtime-owned receipt projection authoritative while forwarding
+/// the same NMP receipt frame to the provider's bounded protocol response.
+/// Provider-lane closure never weakens the app-owned durable receipt view.
+#[derive(Debug)]
+struct ReceiptFanout {
+    app: Arc<AppReceipt>,
+    provider: Arc<dyn ReceiptEventSink>,
+}
+
+impl ReceiptEventSink for ReceiptFanout {
+    fn push_latest(&self, snapshot: ReceiptSnapshot) -> Result<(), ReceiptSinkError> {
+        self.app.push_latest(snapshot.clone())?;
+        let _ = self.provider.push_latest(snapshot);
+        Ok(())
+    }
+
+    fn close(&self, reason: Option<Arc<str>>) {
+        self.app.close(reason.clone());
+        self.provider.close(reason);
     }
 }
 

@@ -11,16 +11,21 @@ generated `Packages/NMPNativeRuntime` package.
 The current reference flow loads the committed Good Morning evidence fixture:
 
 1. Rust verifies its signed named-kind manifest and exact aggregate.
-2. Rust installs the exact-build principal and derives signed requirements.
-3. The session negotiates only implemented domains.
-4. Swift mounts sealed verified bytes through the private `nmp-artifact`
+2. Rust installs the exact-build principal and derives its pinned compatibility
+   request profile.
+3. Swift presents the Rust-owned exact-build permission review and applies one
+   complete atomic decision batch.
+4. A separate launch command negotiates only permitted, implemented domains.
+5. Swift mounts sealed verified bytes through the private `nmp-artifact`
    scheme.
-5. The sandboxed iframe sends exact flat NAP envelopes through its mapped
+6. The sandboxed iframe sends exact flat NAP envelopes through its mapped
    source window.
 
-Good Morning currently renders its own limited-runtime screen because its full
-identity/INC/outbox/resource/theme/link set is not implemented. That degraded
-state is expected and covered by UI automation.
+Good Morning can launch with identity, INC, outbox, and theme after explicit
+review. Resource and link remain honestly unavailable until qualified bounded
+native executors are registered, so those optional features degrade without
+being advertised. UI automation covers the permission-to-launch path; the
+legacy-host corpus retains the deliberate missing-capability evidence.
 
 ## Open in Xcode
 

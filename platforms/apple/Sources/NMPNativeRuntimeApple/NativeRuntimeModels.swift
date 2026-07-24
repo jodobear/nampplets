@@ -2,8 +2,28 @@ import NMPNativeRuntime
 
 public typealias NativeRuntimeAccountFailure = RuntimeAccountFailure
 public typealias NativeRuntimeAccountHandle = RuntimeAccountHandle
+public typealias NativeRuntimeAccountKind = RuntimeAccountKind
 public typealias NativeRuntimeAccountSnapshot = RuntimeAccountSnapshot
 public typealias NativeRuntimeAccountUpdate = RuntimeAccountUpdate
+
+public typealias NativeRuntimeCatalogCancellationResult =
+    RuntimeCatalogCancellationResult
+public typealias NativeRuntimeCatalogCapability = RuntimeCatalogCapability
+public typealias NativeRuntimeCatalogConfirmation = RuntimeCatalogConfirmation
+public typealias NativeRuntimeCatalogEntry = RuntimeCatalogEntry
+public typealias NativeRuntimeCatalogFailure = RuntimeCatalogFailure
+public typealias NativeRuntimeCatalogFeedSnapshot = RuntimeCatalogFeedSnapshot
+public typealias NativeRuntimeCatalogLookupState = RuntimeCatalogLookupState
+public typealias NativeRuntimeCatalogPage = RuntimeCatalogPage
+public typealias NativeRuntimeCatalogPageResult = RuntimeCatalogPageResult
+public typealias NativeRuntimeCatalogProvenance = RuntimeCatalogProvenance
+public typealias NativeRuntimeCatalogReview = RuntimeCatalogReview
+public typealias NativeRuntimeCatalogReviewResult = RuntimeCatalogReviewResult
+public typealias NativeRuntimeCatalogShortfall = RuntimeCatalogShortfall
+public typealias NativeRuntimeCatalogSource = RuntimeCatalogSource
+public typealias NativeRuntimeCatalogSourceAccess = RuntimeCatalogSourceAccess
+public typealias NativeRuntimeCatalogSourceState = RuntimeCatalogSourceState
+public typealias NativeRuntimeCatalogWindowState = RuntimeCatalogWindowState
 
 public typealias NativeRuntimeWorkspaceAxis = RuntimeWorkspaceAxis
 public typealias NativeRuntimeWorkspaceDefinition = RuntimeWorkspaceDefinition
@@ -12,3 +32,4 @@ public typealias NativeRuntimeWorkspaceRestore = RuntimeWorkspaceRestore
 public typealias NativeRuntimeWorkspaceRole = RuntimeWorkspaceRole
 public typealias NativeRuntimeWorkspaceSlot = RuntimeWorkspaceSlot
 public typealias NativeRuntimeWorkspaceUpdate = RuntimeWorkspaceUpdate
+public typealias NativeRuntimePermissionMode = RuntimePermissionMode

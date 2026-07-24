@@ -348,9 +348,9 @@ private final class RecordingLibraryManager: WorkbenchLibraryManaging {
 }
 
 @MainActor
-@Test func librarySheetBuildsWithInjectedManagerAndNoLaunchContract() {
+@Test func librarySheetBuildsWithInjectedManagerAndCanvasOpenContract() {
     let manager = RecordingLibraryManager(snapshot: librarySnapshot())
-    let sheet = WorkbenchLibrarySheet(manager: manager)
+    let sheet = WorkbenchLibrarySheet(manager: manager, onOpen: { _ in })
 
     #expect(String(describing: type(of: sheet)) == "WorkbenchLibrarySheet")
     #expect(manager.actions.isEmpty)

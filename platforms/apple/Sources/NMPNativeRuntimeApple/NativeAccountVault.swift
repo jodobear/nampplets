@@ -2,13 +2,18 @@ import CryptoKit
 import Foundation
 import Security
 
-struct NativeAccountCredential: Equatable, Sendable {
+enum NativeAccountMaterial: Equatable, Sendable {
+    case localSigner(secret: String)
+    case readOnly
+}
+
+struct NativeStoredAccount: Equatable, Sendable {
     let publicKey: String
-    let secret: String
+    let material: NativeAccountMaterial
 }
 
 struct NativeAccountVaultSnapshot: Equatable, Sendable {
-    let credentials: [NativeAccountCredential]
+    let accounts: [NativeStoredAccount]
     let activePublicKey: String?
 }
 
@@ -24,9 +29,13 @@ enum NativeAccountVaultError: Error, Equatable {
 
 protocol NativeAccountVault: Sendable {
     func load(maximumAccounts: Int) throws -> NativeAccountVaultSnapshot
-    func upsert(
+    func upsertLocalSigner(
         publicKey: String,
         secret: String,
+        maximumAccounts: Int
+    ) throws
+    func upsertReadOnly(
+        publicKey: String,
         maximumAccounts: Int
     ) throws
     func setActive(
@@ -52,6 +61,8 @@ final class MacOSKeychainAccountVault:
     private static let activeAccountMarker = "__active_public_key__"
     private static let maximumNamespaceBytes = 4_096
     private static let maximumSecretBytes = 1_024
+    private static let localSignerRecordTag: UInt8 = 1
+    private static let readOnlyRecordTag: UInt8 = 2
 
     private let service: String
 
@@ -82,19 +93,21 @@ final class MacOSKeychainAccountVault:
             throw NativeAccountVaultError.capacity(limit: maximumAccounts)
         }
         let items = try readItems()
-        var credentials: [NativeAccountCredential] = []
+        var accounts: [NativeStoredAccount] = []
         var seen = Set<String>()
         var activePublicKey: String?
 
         for item in items {
             guard
                 let account = item[kSecAttrAccount as String] as? String,
-                let data = item[kSecValueData as String] as? Data,
-                let value = String(data: data, encoding: .utf8)
+                let data = item[kSecValueData as String] as? Data
             else {
                 throw NativeAccountVaultError.corrupt
             }
             if account == Self.activeAccountMarker {
+                guard let value = String(data: data, encoding: .utf8) else {
+                    throw NativeAccountVaultError.corrupt
+                }
                 guard activePublicKey == nil else {
                     throw NativeAccountVaultError.corrupt
                 }
@@ -103,22 +116,21 @@ final class MacOSKeychainAccountVault:
             }
 
             let publicKey = try Self.normalizedPublicKey(account)
-            try Self.validateSecret(value)
             guard seen.insert(publicKey).inserted else {
                 throw NativeAccountVaultError.corrupt
             }
-            credentials.append(
-                NativeAccountCredential(
+            accounts.append(
+                NativeStoredAccount(
                     publicKey: publicKey,
-                    secret: value
+                    material: try Self.decodeMaterial(data)
                 )
             )
-            guard credentials.count <= maximumAccounts else {
+            guard accounts.count <= maximumAccounts else {
                 throw NativeAccountVaultError.capacity(limit: maximumAccounts)
             }
         }
 
-        credentials.sort { $0.publicKey < $1.publicKey }
+        accounts.sort { $0.publicKey < $1.publicKey }
         if
             let activePublicKey,
             !seen.contains(activePublicKey)
@@ -126,17 +138,17 @@ final class MacOSKeychainAccountVault:
             // A stale marker cannot activate an identity without a credential.
             // Treat it as logged out while preserving the remaining accounts.
             return NativeAccountVaultSnapshot(
-                credentials: credentials,
+                accounts: accounts,
                 activePublicKey: nil
             )
         }
         return NativeAccountVaultSnapshot(
-            credentials: credentials,
+            accounts: accounts,
             activePublicKey: activePublicKey
         )
     }
 
-    func upsert(
+    func upsertLocalSigner(
         publicKey: String,
         secret: String,
         maximumAccounts: Int
@@ -145,16 +157,38 @@ final class MacOSKeychainAccountVault:
         try Self.validateSecret(secret)
         let snapshot = try load(maximumAccounts: maximumAccounts)
         if
-            !snapshot.credentials.contains(where: {
+            !snapshot.accounts.contains(where: {
                 $0.publicKey == publicKey
             }),
-            snapshot.credentials.count >= maximumAccounts
+            snapshot.accounts.count >= maximumAccounts
+        {
+            throw NativeAccountVaultError.capacity(limit: maximumAccounts)
+        }
+        var encoded = Data([Self.localSignerRecordTag])
+        encoded.append(contentsOf: secret.utf8)
+        try store(
+            account: publicKey,
+            data: encoded
+        )
+    }
+
+    func upsertReadOnly(
+        publicKey: String,
+        maximumAccounts: Int
+    ) throws {
+        let publicKey = try Self.normalizedPublicKey(publicKey)
+        let snapshot = try load(maximumAccounts: maximumAccounts)
+        if
+            !snapshot.accounts.contains(where: {
+                $0.publicKey == publicKey
+            }),
+            snapshot.accounts.count >= maximumAccounts
         {
             throw NativeAccountVaultError.capacity(limit: maximumAccounts)
         }
         try store(
             account: publicKey,
-            data: Data(secret.utf8)
+            data: Data([Self.readOnlyRecordTag])
         )
     }
 
@@ -170,7 +204,7 @@ final class MacOSKeychainAccountVault:
             requestedPublicKey
         )
         let snapshot = try load(maximumAccounts: maximumAccounts)
-        guard snapshot.credentials.contains(where: {
+        guard snapshot.accounts.contains(where: {
             $0.publicKey == publicKey
         }) else {
             throw NativeAccountVaultError.unknownAccount
@@ -288,6 +322,49 @@ final class MacOSKeychainAccountVault:
             })
         else {
             throw NativeAccountVaultError.invalidSecret
+        }
+    }
+
+    static func decodeMaterial(
+        _ data: Data
+    ) throws -> NativeAccountMaterial {
+        guard let tag = data.first else {
+            throw NativeAccountVaultError.corrupt
+        }
+        switch tag {
+        case localSignerRecordTag:
+            guard
+                let secret = String(
+                    data: Data(data.dropFirst()),
+                    encoding: .utf8
+                )
+            else {
+                throw NativeAccountVaultError.corrupt
+            }
+            do {
+                try validateSecret(secret)
+            } catch {
+                throw NativeAccountVaultError.corrupt
+            }
+            return .localSigner(secret: secret)
+        case readOnlyRecordTag:
+            guard data.count == 1 else {
+                throw NativeAccountVaultError.corrupt
+            }
+            return .readOnly
+        default:
+            // Backward-compatible decode for the original untagged local
+            // signer rows. They are rewritten in tagged form on the next
+            // successful registration.
+            guard let secret = String(data: data, encoding: .utf8) else {
+                throw NativeAccountVaultError.corrupt
+            }
+            do {
+                try validateSecret(secret)
+            } catch {
+                throw NativeAccountVaultError.corrupt
+            }
+            return .localSigner(secret: secret)
         }
     }
 }

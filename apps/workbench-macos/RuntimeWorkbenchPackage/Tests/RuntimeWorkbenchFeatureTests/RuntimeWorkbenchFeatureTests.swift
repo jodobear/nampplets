@@ -19,90 +19,73 @@ import Testing
     #expect(String(describing: type(of: view)) == "ContentView")
 }
 
-@Test func defaultLayoutHasFourVisibleBoundedSlots() {
+@Test func defaultLayoutIsAnEmptyFreeformCanvas() {
     let layout = WorkbenchLayoutModel()
 
-    #expect(
-        WorkbenchSlotRole.allCases.allSatisfy {
-            layout.isVisible($0)
-        }
+    #expect(layout.mode == .freeform)
+    #expect(layout.windows.isEmpty)
+    #expect(layout.selectedWindow == nil)
+}
+
+@Test func freeformWindowMovementAndResizeStayInsideCanvasBounds() throws {
+    var layout = WorkbenchLayoutModel()
+    let added = layout.addWindow(.goodMorning)
+    #expect(added)
+    let id = try #require(layout.selectedWindow?.id)
+
+    layout.moveWindow(
+        id: id,
+        x: 10_000,
+        y: -200,
+        canvasSize: CGSize(width: 1_000, height: 700)
     )
-    #expect(layout.component(in: .feed) == .goodMorning)
-    #expect(layout.snapshot.focusedRole == .feed)
-
-    for role in WorkbenchSlotRole.allCases {
-        let size = layout.size(for: role)
-        let constraints = role.constraints
-        #expect(size.width >= constraints.minimumWidth)
-        #expect(size.width <= constraints.maximumWidth)
-        #expect(size.height >= constraints.minimumHeight)
-        #expect(size.height <= constraints.maximumHeight)
-    }
-}
-
-@Test func movingGoodMorningChangesItsRoleWithoutDuplicatingIt() {
-    var layout = WorkbenchLayoutModel()
-
-    layout.move(.goodMorning, to: .composer)
-
-    #expect(layout.component(in: .feed) == nil)
-    #expect(layout.component(in: .composer) == .goodMorning)
-    #expect(layout.snapshot.focusedRole == .composer)
-    #expect(layout.isVisible(.composer))
-    #expect(
-        WorkbenchSlotRole.allCases.filter {
-            layout.component(in: $0) == .goodMorning
-        }.count == 1
-    )
-}
-
-@Test func hidingFocusedSlotSelectsAVisibleKeyboardFocusFallback() {
-    var layout = WorkbenchLayoutModel()
-    layout.focus(.tool)
-
-    layout.setVisible(false, role: .tool)
-
-    #expect(!layout.isVisible(.tool))
-    #expect(layout.snapshot.focusedRole == .feed)
-}
-
-@Test func focusingHiddenSlotShowsIt() {
-    var layout = WorkbenchLayoutModel()
-    layout.setVisible(false, role: .detail)
-
-    layout.focus(.detail)
-
-    #expect(layout.isVisible(.detail))
-    #expect(layout.snapshot.focusedRole == .detail)
-}
-
-@Test func renderedSizesAreClampedAndStableAtTheirBounds() {
-    var layout = WorkbenchLayoutModel()
-
-    let firstChange = layout.recordRenderedSize(
-        role: .tool,
+    layout.resizeWindow(
+        id: id,
         width: 10_000,
-        height: 1
-    )
-    let bounded = layout.size(for: .tool)
-    let constraints = WorkbenchSlotRole.tool.constraints
-    let secondChange = layout.recordRenderedSize(
-        role: .tool,
-        width: 10_000,
-        height: 1
+        height: 1,
+        canvasSize: CGSize(width: 1_000, height: 700)
     )
 
-    #expect(firstChange)
-    #expect(!secondChange)
-    #expect(bounded.width == Double(constraints.maximumWidth))
-    #expect(bounded.height == Double(constraints.minimumHeight))
+    let frame = try #require(layout.window(id: id)?.frame)
+    #expect(frame == .init(x: 0, y: 0, width: 1_000, height: 240))
+}
+
+@Test func selectingAWindowBringsItToFrontWithoutDuplicatingIt() {
+    var layout = WorkbenchLayoutModel()
+    let added = layout.addWindow(.goodMorning)
+    #expect(added)
+    let second = WorkbenchCanvasWindow(
+        id: WorkbenchWindowID(rawValue: "second"),
+        componentID: WorkbenchComponentID(rawValue: "network:second"),
+        title: "Second",
+        frame: WorkbenchWindowFrame(
+            x: 120,
+            y: 100,
+            width: 480,
+            height: 360
+        ),
+        stackingOrder: 0
+    )
+    let admitted = layout.addWindow(second)
+    layout.bringToFront(.init(rawValue: "good-morning"))
+
+    #expect(admitted)
+    #expect(layout.windows.map(\.id.rawValue) == ["second", "good-morning"])
+    #expect(layout.snapshot.windows.count == 2)
+    #expect(layout.selectedWindow?.id.rawValue == "good-morning")
 }
 
 @Test func persistedSnapshotRoundTripsWithoutPlatformStorage() throws {
     var layout = WorkbenchLayoutModel()
-    layout.move(.goodMorning, to: .tool)
-    layout.setVisible(false, role: .detail)
-    layout.recordRenderedSize(role: .composer, width: 800, height: 240)
+    let added = layout.addWindow(.goodMorning)
+    #expect(added)
+    layout.setMode(.tiling)
+    layout.moveWindow(
+        id: .init(rawValue: "good-morning"),
+        x: 180,
+        y: 90,
+        canvasSize: CGSize(width: 1_400, height: 900)
+    )
 
     let data = try JSONEncoder().encode(layout.snapshot)
     let decoded = try JSONDecoder().decode(
@@ -114,28 +97,141 @@ import Testing
     #expect(restored == layout)
 }
 
+@Test func networkDiscoveredExactBuildIdentityRoundTripsWithItsWindow() throws {
+    var layout = WorkbenchLayoutModel()
+    let exactBuild = WorkbenchExactBuildIdentity(
+        manifestAuthor: String(repeating: "a", count: 64),
+        dTag: "network-napplet",
+        aggregateHash: String(repeating: "b", count: 64)
+    )
+    let added = layout.addWindow(
+        WorkbenchCanvasWindow(
+            id: WorkbenchWindowID(rawValue: exactBuild.aggregateHash),
+            componentID: WorkbenchComponentID(
+                rawValue: exactBuild.aggregateHash
+            ),
+            exactBuild: exactBuild,
+            title: "Network Napplet",
+            frame: .init(x: 24, y: 24, width: 640, height: 480),
+            stackingOrder: 0
+        )
+    )
+    #expect(added)
+
+    let data = try JSONEncoder().encode(layout.snapshot)
+    let restored = WorkbenchLayoutModel(
+        snapshot: try JSONDecoder().decode(
+            WorkbenchLayoutSnapshot.self,
+            from: data
+        )
+    )
+
+    #expect(restored.selectedWindow?.exactBuild == exactBuild)
+}
+
+@Test func installedWindowIdentityIncludesTheCompleteExactBuildCoordinate() {
+    let author = String(repeating: "a", count: 64)
+    let aggregate = String(repeating: "b", count: 64)
+    let first = WorkbenchCanvasWindow.installed(
+        title: "First",
+        identity: WorkbenchExactBuildIdentity(
+            manifestAuthor: author,
+            dTag: "first",
+            aggregateHash: aggregate
+        ),
+        offset: 0
+    )
+    let second = WorkbenchCanvasWindow.installed(
+        title: "Second",
+        identity: WorkbenchExactBuildIdentity(
+            manifestAuthor: author,
+            dTag: "second",
+            aggregateHash: aggregate
+        ),
+        offset: 0
+    )
+
+    #expect(first.id != second.id)
+    #expect(first.componentID != second.componentID)
+    #expect(first.id.rawValue.count == 72)
+}
+
+@Test func canvasRefusesWindowsBeyondItsPersistedBound() {
+    var layout = WorkbenchLayoutModel()
+    for index in 0 ..< WorkbenchLayoutSnapshot.maximumWindowCount {
+        let admitted = layout.addWindow(
+            WorkbenchCanvasWindow(
+                id: WorkbenchWindowID(rawValue: "window-\(index)"),
+                componentID: WorkbenchComponentID(
+                    rawValue: "network:\(index)"
+                ),
+                title: "Window \(index)",
+                frame: WorkbenchWindowFrame(
+                    x: Double(index * 8),
+                    y: Double(index * 8),
+                    width: 480,
+                    height: 360
+                ),
+                stackingOrder: 0
+            )
+        )
+        #expect(admitted)
+    }
+
+    let overflowAdmitted = layout.addWindow(
+        WorkbenchCanvasWindow(
+            id: WorkbenchWindowID(rawValue: "overflow"),
+            componentID: WorkbenchComponentID(rawValue: "network:overflow"),
+            title: "Overflow",
+            frame: .init(x: 0, y: 0, width: 480, height: 360),
+            stackingOrder: 0
+        )
+    )
+
+    #expect(!overflowAdmitted)
+    #expect(
+        layout.windows.count == WorkbenchLayoutSnapshot.maximumWindowCount
+    )
+}
+
 @Test func unsupportedPersistedLayoutVersionFallsBackSafely() {
     var snapshot = WorkbenchLayoutSnapshot.workbenchDefault
     snapshot.version = WorkbenchLayoutSnapshot.currentVersion + 1
-    snapshot.visibleRoles = []
-    snapshot.assignments = [:]
+    snapshot.windows = []
+    snapshot.selectedWindowID = nil
 
     let restored = WorkbenchLayoutModel(snapshot: snapshot)
 
     #expect(restored.snapshot == .workbenchDefault)
 }
 
-@Test func malformedDuplicateComponentAssignmentIsNormalized() {
-    var snapshot = WorkbenchLayoutSnapshot.workbenchDefault
-    snapshot.assignments[.detail] = .goodMorning
+@Test func versionOneSlotLayoutMigratesToAFreeformWindow() throws {
+    let data = try #require(
+        """
+        {
+          "version": 1,
+          "visibleRoles": ["feed", "detail", "composer", "tool"],
+          "assignments": ["composer", "good-morning"],
+          "focusedRole": "composer",
+          "sizes": ["composer", {"width": 880, "height": 300}]
+        }
+        """.data(using: .utf8)
+    )
+    let decoded = try JSONDecoder().decode(
+        WorkbenchLayoutSnapshot.self,
+        from: data
+    )
+    let restored = WorkbenchLayoutModel(snapshot: decoded)
 
-    let restored = WorkbenchLayoutModel(snapshot: snapshot)
-
-    #expect(restored.component(in: .feed) == .goodMorning)
-    #expect(restored.component(in: .detail) == nil)
+    #expect(restored.snapshot.version == WorkbenchLayoutSnapshot.currentVersion)
+    #expect(restored.mode == .freeform)
+    #expect(restored.selectedWindow?.componentID == .goodMorning)
+    #expect(restored.selectedWindow?.frame.width == 880)
+    #expect(restored.selectedWindow?.frame.height == 300)
 }
 
-@Test func bundledSignedFixtureOpensThroughTheRustRuntime() async throws {
+@MainActor
+@Test func bundledSignedFixtureOpensThroughTheRustRuntime() throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent(
             "runtime-workbench-test-\(UUID().uuidString)",
@@ -146,9 +242,10 @@ import Testing
     let fixture = try GoodMorningFixture.load()
     let profile = try WorkbenchRuntimeProfile.open(storageRoot: root)
     defer { profile.close() }
-    let artifact = try await Task.detached {
-        try fixture.open(profile: profile)
-    }.value
+    let artifact = try installApproveAndLaunchGoodMorning(
+        fixture: fixture,
+        profile: profile
+    )
 
     #expect(artifact.title == "Good Morning Protocol")
 }

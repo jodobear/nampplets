@@ -1,3 +1,4 @@
+import Foundation
 @testable import NMPNativeRuntimeApple
 import Testing
 
@@ -49,4 +50,32 @@ import Testing
     try MacOSKeychainAccountVault.validateSecret(
         String(repeating: "a", count: 64)
     )
+}
+
+@Test func vaultMaterialDecodeIsVersionedBackwardCompatibleAndCorruptionTyped()
+    throws
+{
+    let secret = String(repeating: "a", count: 64)
+    var taggedSigner = Data([1])
+    taggedSigner.append(contentsOf: secret.utf8)
+
+    #expect(
+        try MacOSKeychainAccountVault.decodeMaterial(taggedSigner)
+            == .localSigner(secret: secret)
+    )
+    #expect(
+        try MacOSKeychainAccountVault.decodeMaterial(
+            Data(secret.utf8)
+        ) == .localSigner(secret: secret)
+    )
+    #expect(
+        try MacOSKeychainAccountVault.decodeMaterial(Data([2]))
+            == .readOnly
+    )
+    #expect(throws: NativeAccountVaultError.corrupt) {
+        try MacOSKeychainAccountVault.decodeMaterial(Data([2, 0]))
+    }
+    #expect(throws: NativeAccountVaultError.corrupt) {
+        try MacOSKeychainAccountVault.decodeMaterial(Data([1]))
+    }
 }

@@ -12,6 +12,7 @@ complete.
 | [0004](0004-runtime-and-nmp-storage-boundary.md) | NMP public facade; separate runtime persistence; one NMP trust profile; honest scoped evidence |
 | [0005](0005-additive-surface-separation.md) | Optional surface; host bindings; renderer restrictions; preserved binding; inert descriptor; revisioned state; typed actions |
 | [0006](0006-no-dynamic-native-code.md) | No dynamic native code or protocol cartridges in v1 |
+| [0007](0007-pinned-good-morning-capability-profile.md) | Exact-build Rust compatibility profile for the unchanged published Good Morning artifact |
 
 ## Product-spec decision coverage
 

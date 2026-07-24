@@ -10,6 +10,7 @@ import Testing
     #expect(manager.snapshot() == .unavailable(reason: reason))
 
     await manager.register(secret: "not-a-real-secret")
+    await manager.registerReadOnly(publicIdentity: "not-a-real-public-key")
     await manager.activate(
         handle: WorkbenchAccountHandle(opaqueValue: "account")
     )
@@ -19,6 +20,29 @@ import Testing
     )
 
     #expect(manager.snapshot() == .unavailable(reason: reason))
+}
+
+@MainActor
+@Test func readOnlyRegistrationAndActivationRemainSeparateActions()
+    async throws
+{
+    let manager = RecordingAccountManager()
+    let model = WorkbenchAccountSheetModel(manager: manager)
+
+    model.publicIdentity = "npub1test"
+    await model.registerReadOnly()
+
+    #expect(model.publicIdentity.isEmpty)
+    #expect(model.snapshot.accounts.count == 1)
+    #expect(model.snapshot.accounts.first?.connectionKind == .readOnly)
+    #expect(model.snapshot.activeAccount == nil)
+    #expect(manager.actions == [.registerReadOnly])
+
+    let handle = try #require(model.snapshot.accounts.first?.handle)
+    await model.activate(handle)
+
+    #expect(model.snapshot.activeAccount?.handle == handle)
+    #expect(manager.actions == [.registerReadOnly, .activate(handle)])
 }
 
 @Test func activeAccountIsDerivedFromOpaqueHandle() throws {
@@ -101,6 +125,7 @@ private extension WorkbenchStoredAccount {
 private final class RecordingAccountManager: WorkbenchAccountManaging {
     enum Action: Equatable {
         case register
+        case registerReadOnly
         case activate(WorkbenchAccountHandle)
     }
 
@@ -120,6 +145,20 @@ private final class RecordingAccountManager: WorkbenchAccountManaging {
         let account = WorkbenchStoredAccount.fixture(handle: "registered")
         accounts.append(account)
         actions.append(.register)
+    }
+
+    func registerReadOnly(publicIdentity: String) async {
+        guard publicIdentity == "npub1test" else { return }
+        let account = WorkbenchStoredAccount(
+            handle: WorkbenchAccountHandle(
+                opaqueValue: "registered-read-only"
+            ),
+            npub: "",
+            publicKeyHex: String(repeating: "b", count: 64),
+            connectionKind: .readOnly
+        )
+        accounts.append(account)
+        actions.append(.registerReadOnly)
     }
 
     func activate(handle: WorkbenchAccountHandle) async {
@@ -156,6 +195,7 @@ private final class EchoingFailureAccountManager: WorkbenchAccountManaging {
         errorMessage = "Rejected \(secret)"
     }
 
+    func registerReadOnly(publicIdentity _: String) async {}
     func activate(handle _: WorkbenchAccountHandle) async {}
     func logout() async {}
     func remove(handle _: WorkbenchAccountHandle) async {}

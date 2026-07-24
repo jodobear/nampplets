@@ -106,6 +106,36 @@ def verify_lock(lock: dict[str, Any]) -> None:
         if supported:
             raise BaselineError(f"{platform}: M0 cannot advertise providers")
 
+    profiles = lock.get("artifact_profiles", {})
+    if set(profiles) != {"good_morning"}:
+        raise BaselineError("exact-build artifact profile inventory drifted")
+    good_morning = profiles["good_morning"]
+    expected_identity = {
+        "source": "published-immutable-artifacts",
+        "author": (
+            "266815e0c9210dfa324c6cba3573b14b"
+            "ee49da4209a9456f9484e5106cd408a5"
+        ),
+        "d_tag": "good-morning",
+        "aggregate_sha256": (
+            "828a6df02afd56782ea20f805084acce6"
+            "5c53f7c37554948c1e0a64aa5a2b0a8"
+        ),
+    }
+    for field, expected in expected_identity.items():
+        if good_morning.get(field) != expected:
+            raise BaselineError(f"Good Morning artifact profile {field} drifted")
+    required = good_morning.get("required_domains")
+    optional = good_morning.get("optional_domains")
+    if required != ["identity", "inc", "outbox"]:
+        raise BaselineError("Good Morning required capability profile drifted")
+    if optional != ["resource", "theme", "link"]:
+        raise BaselineError("Good Morning optional capability profile drifted")
+    if set(required) & set(optional):
+        raise BaselineError("Good Morning capability classes overlap")
+    if not set(required + optional) <= NAP_DOMAINS:
+        raise BaselineError("Good Morning capability profile has an unknown domain")
+
     status = lock["baseline"]["status"]
     signoffs = lock["signoff"].values()
     if status == "ratified" and any(not value.strip() for value in signoffs):

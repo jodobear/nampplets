@@ -1,164 +1,322 @@
 import CoreGraphics
+import CryptoKit
 import Foundation
 
-public enum WorkbenchSlotRole: String, CaseIterable, Codable, Hashable, Sendable {
-    case feed
-    case detail
-    case composer
-    case tool
+public enum WorkbenchLayoutMode: String, CaseIterable, Codable, Hashable, Sendable {
+    case freeform
+    case tiling
 
     public var title: String {
         switch self {
-        case .feed: "Feed"
-        case .detail: "Detail"
-        case .composer: "Composer"
-        case .tool: "Tool"
+        case .freeform: "Freeform"
+        case .tiling: "Tiling"
         }
     }
 
     public var systemImage: String {
         switch self {
-        case .feed: "rectangle.stack"
-        case .detail: "sidebar.right"
-        case .composer: "square.and.pencil"
-        case .tool: "wrench.and.screwdriver"
-        }
-    }
-
-    public var constraints: WorkbenchSlotConstraints {
-        switch self {
-        case .feed:
-            WorkbenchSlotConstraints(
-                minimumWidth: 320,
-                idealWidth: 480,
-                maximumWidth: 960,
-                minimumHeight: 240,
-                idealHeight: 480,
-                maximumHeight: 1_200
-            )
-        case .detail:
-            WorkbenchSlotConstraints(
-                minimumWidth: 260,
-                idealWidth: 320,
-                maximumWidth: 720,
-                minimumHeight: 240,
-                idealHeight: 480,
-                maximumHeight: 1_200
-            )
-        case .composer:
-            WorkbenchSlotConstraints(
-                minimumWidth: 480,
-                idealWidth: 900,
-                maximumWidth: 2_400,
-                minimumHeight: 140,
-                idealHeight: 190,
-                maximumHeight: 420
-            )
-        case .tool:
-            WorkbenchSlotConstraints(
-                minimumWidth: 240,
-                idealWidth: 280,
-                maximumWidth: 560,
-                minimumHeight: 240,
-                idealHeight: 480,
-                maximumHeight: 1_200
-            )
+        case .freeform: "macwindow.on.rectangle"
+        case .tiling: "rectangle.split.2x2"
         }
     }
 }
 
-public enum WorkbenchComponentID: String, Codable, Hashable, Sendable {
-    case goodMorning = "good-morning"
+/// A stable component identity projected into the workspace.
+///
+/// This is a string-backed value instead of a closed enum so the canvas can
+/// host exact builds discovered after the Workbench shipped.
+public struct WorkbenchComponentID:
+    RawRepresentable,
+    Codable,
+    Hashable,
+    Sendable
+{
+    public let rawValue: String
 
-    public var title: String {
-        switch self {
-        case .goodMorning: "Good Morning"
-        }
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        rawValue = try container.decode(String.self)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    public static let goodMorning = Self(rawValue: "good-morning")
+}
+
+public struct WorkbenchWindowID:
+    RawRepresentable,
+    Codable,
+    Hashable,
+    Sendable
+{
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
     }
 }
 
-public struct WorkbenchSlotConstraints: Equatable, Sendable {
-    public let minimumWidth: CGFloat
-    public let idealWidth: CGFloat
-    public let maximumWidth: CGFloat
-    public let minimumHeight: CGFloat
-    public let idealHeight: CGFloat
-    public let maximumHeight: CGFloat
+public struct WorkbenchWindowFrame: Codable, Equatable, Sendable {
+    public static let minimumWidth = 320.0
+    public static let minimumHeight = 240.0
+    public static let maximumWidth = 1_600.0
+    public static let maximumHeight = 1_200.0
+    public static let maximumCoordinate = 4_096.0
+
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
 
     public init(
-        minimumWidth: CGFloat,
-        idealWidth: CGFloat,
-        maximumWidth: CGFloat,
-        minimumHeight: CGFloat,
-        idealHeight: CGFloat,
-        maximumHeight: CGFloat
+        x: Double,
+        y: Double,
+        width: Double,
+        height: Double
     ) {
-        self.minimumWidth = minimumWidth
-        self.idealWidth = idealWidth
-        self.maximumWidth = maximumWidth
-        self.minimumHeight = minimumHeight
-        self.idealHeight = idealHeight
-        self.maximumHeight = maximumHeight
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
     }
 
-    public func clamped(width: Double, height: Double) -> WorkbenchSlotSize {
-        WorkbenchSlotSize(
-            width: min(max(width, minimumWidth), maximumWidth),
-            height: min(max(height, minimumHeight), maximumHeight)
+    public func bounded() -> Self {
+        Self(
+            x: min(max(x.isFinite ? x : 0, 0), Self.maximumCoordinate),
+            y: min(max(y.isFinite ? y : 0, 0), Self.maximumCoordinate),
+            width: min(
+                max(width.isFinite ? width : Self.minimumWidth, Self.minimumWidth),
+                Self.maximumWidth
+            ),
+            height: min(
+                max(
+                    height.isFinite ? height : Self.minimumHeight,
+                    Self.minimumHeight
+                ),
+                Self.maximumHeight
+            )
+        )
+    }
+
+    func fitted(to canvasSize: CGSize) -> Self {
+        let bounded = bounded()
+        let availableWidth = max(Double(canvasSize.width), Self.minimumWidth)
+        let availableHeight = max(Double(canvasSize.height), Self.minimumHeight)
+        let width = min(bounded.width, availableWidth)
+        let height = min(bounded.height, availableHeight)
+        return Self(
+            x: min(max(bounded.x, 0), max(availableWidth - width, 0)),
+            y: min(max(bounded.y, 0), max(availableHeight - height, 0)),
+            width: width,
+            height: height
         )
     }
 }
 
-public struct WorkbenchSlotSize: Codable, Equatable, Sendable {
-    public var width: Double
-    public var height: Double
+/// Exact verified build identity projected by Rust for workspace persistence.
+public struct WorkbenchExactBuildIdentity:
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    public let manifestAuthor: String
+    public let dTag: String
+    public let aggregateHash: String
 
-    public init(width: Double, height: Double) {
-        self.width = width
-        self.height = height
+    public init(
+        manifestAuthor: String,
+        dTag: String,
+        aggregateHash: String
+    ) {
+        self.manifestAuthor = manifestAuthor
+        self.dTag = dTag
+        self.aggregateHash = aggregateHash
+    }
+}
+
+public struct WorkbenchCanvasWindow:
+    Codable,
+    Equatable,
+    Identifiable,
+    Sendable
+{
+    public let id: WorkbenchWindowID
+    public let componentID: WorkbenchComponentID
+    public let exactBuild: WorkbenchExactBuildIdentity?
+    public var title: String
+    public var frame: WorkbenchWindowFrame
+    public var stackingOrder: UInt16
+
+    public init(
+        id: WorkbenchWindowID,
+        componentID: WorkbenchComponentID,
+        exactBuild: WorkbenchExactBuildIdentity? = nil,
+        title: String,
+        frame: WorkbenchWindowFrame,
+        stackingOrder: UInt16
+    ) {
+        self.id = id
+        self.componentID = componentID
+        self.exactBuild = exactBuild
+        self.title = title
+        self.frame = frame
+        self.stackingOrder = stackingOrder
+    }
+
+    public static let goodMorning = Self(
+        id: WorkbenchWindowID(rawValue: "good-morning"),
+        componentID: .goodMorning,
+        exactBuild: WorkbenchExactBuildIdentity(
+            manifestAuthor: GoodMorningFixture.author,
+            dTag: GoodMorningFixture.dTag,
+            aggregateHash: GoodMorningFixture.aggregateHash
+        ),
+        title: "Good Morning",
+        frame: WorkbenchWindowFrame(
+            x: 40,
+            y: 40,
+            width: 760,
+            height: 520
+        ),
+        stackingOrder: 0
+    )
+
+    public static func installed(
+        title: String,
+        identity: WorkbenchExactBuildIdentity,
+        offset: Double
+    ) -> Self {
+        let stableMaterial =
+            "\(identity.manifestAuthor)\u{0}\(identity.dTag)\u{0}\(identity.aggregateHash)"
+        let stableDigest = SHA256.hash(data: Data(stableMaterial.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let stableID = "napplet-\(stableDigest)"
+        return Self(
+            id: WorkbenchWindowID(rawValue: stableID),
+            componentID: WorkbenchComponentID(rawValue: stableID),
+            exactBuild: identity,
+            title: title,
+            frame: WorkbenchWindowFrame(
+                x: 32 + offset,
+                y: 32 + offset,
+                width: 760,
+                height: 520
+            ),
+            stackingOrder: 0
+        )
     }
 }
 
 public struct WorkbenchLayoutSnapshot: Codable, Equatable, Sendable {
-    public static let currentVersion = 1
+    public static let currentVersion = 2
+    /// Mirrors the Rust workspace schema's persisted slot ceiling.
+    public static let maximumWindowCount = 16
 
     public var version: Int
-    public var visibleRoles: Set<WorkbenchSlotRole>
-    public var assignments: [WorkbenchSlotRole: WorkbenchComponentID]
-    public var focusedRole: WorkbenchSlotRole?
-    public var sizes: [WorkbenchSlotRole: WorkbenchSlotSize]
+    public var mode: WorkbenchLayoutMode
+    public var windows: [WorkbenchCanvasWindow]
+    public var selectedWindowID: WorkbenchWindowID?
 
     public init(
         version: Int = currentVersion,
-        visibleRoles: Set<WorkbenchSlotRole>,
-        assignments: [WorkbenchSlotRole: WorkbenchComponentID],
-        focusedRole: WorkbenchSlotRole?,
-        sizes: [WorkbenchSlotRole: WorkbenchSlotSize]
+        mode: WorkbenchLayoutMode,
+        windows: [WorkbenchCanvasWindow],
+        selectedWindowID: WorkbenchWindowID?
     ) {
         self.version = version
-        self.visibleRoles = visibleRoles
-        self.assignments = assignments
-        self.focusedRole = focusedRole
-        self.sizes = sizes
+        self.mode = mode
+        self.windows = windows
+        self.selectedWindowID = selectedWindowID
     }
 
     public static var workbenchDefault: WorkbenchLayoutSnapshot {
         WorkbenchLayoutSnapshot(
-            visibleRoles: Set(WorkbenchSlotRole.allCases),
-            assignments: [.feed: .goodMorning],
-            focusedRole: .feed,
-            sizes: Dictionary(
-                uniqueKeysWithValues: WorkbenchSlotRole.allCases.map { role in
-                    let constraints = role.constraints
-                    return (
-                        role,
-                        WorkbenchSlotSize(
-                            width: constraints.idealWidth,
-                            height: constraints.idealHeight
-                        )
-                    )
+            mode: .freeform,
+            windows: [],
+            selectedWindowID: nil
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case mode
+        case windows
+        case selectedWindowID
+        // Version 1 compatibility keys.
+        case visibleRoles
+        case assignments
+        case focusedRole
+        case sizes
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedVersion = try container.decodeIfPresent(
+            Int.self,
+            forKey: .version
+        ) ?? 1
+        if decodedVersion == 1 {
+            let assignments = try container.decodeIfPresent(
+                [LegacySlotRole: WorkbenchComponentID].self,
+                forKey: .assignments
+            ) ?? [:]
+            let sizes = try container.decodeIfPresent(
+                [LegacySlotRole: LegacySlotSize].self,
+                forKey: .sizes
+            ) ?? [:]
+            let assignedRole = LegacySlotRole.allCases.first {
+                assignments[$0] == .goodMorning
+            }
+            let restoredSize = assignedRole.flatMap { sizes[$0] }
+            if assignedRole != nil {
+                var window = WorkbenchCanvasWindow.goodMorning
+                if let restoredSize {
+                    window.frame.width = restoredSize.width
+                    window.frame.height = restoredSize.height
                 }
-            )
+                windows = [window]
+                selectedWindowID = window.id
+            } else {
+                windows = []
+                selectedWindowID = nil
+            }
+            version = Self.currentVersion
+            mode = .freeform
+            return
+        }
+
+        version = decodedVersion
+        mode = try container.decodeIfPresent(
+            WorkbenchLayoutMode.self,
+            forKey: .mode
+        ) ?? .freeform
+        windows = try container.decodeIfPresent(
+            [WorkbenchCanvasWindow].self,
+            forKey: .windows
+        ) ?? []
+        selectedWindowID = try container.decodeIfPresent(
+            WorkbenchWindowID.self,
+            forKey: .selectedWindowID
+        )
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(version, forKey: .version)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(windows, forKey: .windows)
+        try container.encodeIfPresent(
+            selectedWindowID,
+            forKey: .selectedWindowID
         )
     }
 }
@@ -170,67 +328,111 @@ public struct WorkbenchLayoutModel: Equatable, Sendable {
         self.snapshot = Self.normalized(snapshot)
     }
 
-    public func isVisible(_ role: WorkbenchSlotRole) -> Bool {
-        snapshot.visibleRoles.contains(role)
+    public var mode: WorkbenchLayoutMode {
+        snapshot.mode
     }
 
-    public func component(in role: WorkbenchSlotRole) -> WorkbenchComponentID? {
-        snapshot.assignments[role]
-    }
-
-    public func size(for role: WorkbenchSlotRole) -> WorkbenchSlotSize {
-        snapshot.sizes[role] ?? role.constraints.clamped(
-            width: role.constraints.idealWidth,
-            height: role.constraints.idealHeight
-        )
-    }
-
-    public mutating func move(
-        _ component: WorkbenchComponentID,
-        to role: WorkbenchSlotRole
-    ) {
-        for existingRole in WorkbenchSlotRole.allCases
-        where snapshot.assignments[existingRole] == component {
-            snapshot.assignments.removeValue(forKey: existingRole)
-        }
-        snapshot.assignments[role] = component
-        snapshot.visibleRoles.insert(role)
-        snapshot.focusedRole = role
-    }
-
-    public mutating func setVisible(
-        _ isVisible: Bool,
-        role: WorkbenchSlotRole
-    ) {
-        if isVisible {
-            snapshot.visibleRoles.insert(role)
-        } else {
-            snapshot.visibleRoles.remove(role)
-            if snapshot.focusedRole == role {
-                snapshot.focusedRole = WorkbenchSlotRole.allCases.first {
-                    snapshot.visibleRoles.contains($0)
-                }
+    public var windows: [WorkbenchCanvasWindow] {
+        snapshot.windows.sorted {
+            if $0.stackingOrder == $1.stackingOrder {
+                return $0.id.rawValue < $1.id.rawValue
             }
+            return $0.stackingOrder < $1.stackingOrder
         }
     }
 
-    public mutating func focus(_ role: WorkbenchSlotRole) {
-        snapshot.visibleRoles.insert(role)
-        snapshot.focusedRole = role
+    public var selectedWindow: WorkbenchCanvasWindow? {
+        guard let selectedWindowID = snapshot.selectedWindowID else {
+            return nil
+        }
+        return snapshot.windows.first { $0.id == selectedWindowID }
     }
 
-    @discardableResult
-    public mutating func recordRenderedSize(
-        role: WorkbenchSlotRole,
+    public func window(
+        id: WorkbenchWindowID
+    ) -> WorkbenchCanvasWindow? {
+        snapshot.windows.first { $0.id == id }
+    }
+
+    public mutating func setMode(_ mode: WorkbenchLayoutMode) {
+        snapshot.mode = mode
+    }
+
+    public mutating func select(_ id: WorkbenchWindowID?) {
+        guard
+            id == nil || snapshot.windows.contains(where: { $0.id == id })
+        else {
+            return
+        }
+        snapshot.selectedWindowID = id
+    }
+
+    public mutating func bringToFront(_ id: WorkbenchWindowID) {
+        guard let index = snapshot.windows.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let orderedIDs = windows.map(\.id).filter { $0 != id } + [id]
+        for (order, orderedID) in orderedIDs.enumerated() {
+            guard let orderedIndex = snapshot.windows.firstIndex(where: {
+                $0.id == orderedID
+            }) else {
+                continue
+            }
+            snapshot.windows[orderedIndex].stackingOrder = UInt16(order)
+        }
+        snapshot.selectedWindowID = snapshot.windows[index].id
+    }
+
+    public mutating func moveWindow(
+        id: WorkbenchWindowID,
+        x: Double,
+        y: Double,
+        canvasSize: CGSize
+    ) {
+        guard let index = snapshot.windows.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        var frame = snapshot.windows[index].frame
+        frame.x = x
+        frame.y = y
+        snapshot.windows[index].frame = frame.fitted(to: canvasSize)
+    }
+
+    public mutating func resizeWindow(
+        id: WorkbenchWindowID,
         width: Double,
-        height: Double
-    ) -> Bool {
-        let clamped = role.constraints.clamped(width: width, height: height)
-        guard size(for: role) != clamped else {
+        height: Double,
+        canvasSize: CGSize
+    ) {
+        guard let index = snapshot.windows.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        var frame = snapshot.windows[index].frame
+        frame.width = width
+        frame.height = height
+        snapshot.windows[index].frame = frame.fitted(to: canvasSize)
+    }
+
+    public mutating func addWindow(_ window: WorkbenchCanvasWindow) -> Bool {
+        guard
+            snapshot.windows.count < WorkbenchLayoutSnapshot.maximumWindowCount,
+            !snapshot.windows.contains(where: { $0.id == window.id })
+        else {
             return false
         }
-        snapshot.sizes[role] = clamped
+        var admitted = window
+        admitted.frame = admitted.frame.bounded()
+        admitted.stackingOrder = UInt16(snapshot.windows.count)
+        snapshot.windows.append(admitted)
+        snapshot.selectedWindowID = admitted.id
         return true
+    }
+
+    public mutating func removeWindow(id: WorkbenchWindowID) {
+        snapshot.windows.removeAll { $0.id == id }
+        if snapshot.selectedWindowID == id {
+            snapshot.selectedWindowID = windows.last?.id
+        }
     }
 
     private static func normalized(
@@ -241,35 +443,43 @@ public struct WorkbenchLayoutModel: Equatable, Sendable {
         }
 
         var result = candidate
-        var assignedComponents = Set<WorkbenchComponentID>()
-        for role in WorkbenchSlotRole.allCases {
-            let proposed = result.sizes[role] ?? WorkbenchSlotSize(
-                width: role.constraints.idealWidth,
-                height: role.constraints.idealHeight
-            )
-            result.sizes[role] = role.constraints.clamped(
-                width: proposed.width,
-                height: proposed.height
-            )
-
-            guard let component = result.assignments[role] else {
-                continue
-            }
-            if assignedComponents.contains(component) {
-                result.assignments.removeValue(forKey: role)
-            } else {
-                assignedComponents.insert(component)
+        var seenIDs = Set<WorkbenchWindowID>()
+        result.windows = Array(
+            result.windows
+                .filter { seenIDs.insert($0.id).inserted }
+                .prefix(WorkbenchLayoutSnapshot.maximumWindowCount)
+        )
+        for index in result.windows.indices {
+            result.windows[index].frame = result.windows[index].frame.bounded()
+            result.windows[index].stackingOrder = UInt16(index)
+            if result.windows[index].title.isEmpty {
+                result.windows[index].title = "Napplet"
             }
         }
 
-        if let focusedRole = result.focusedRole,
-           !result.visibleRoles.contains(focusedRole) {
-            result.focusedRole = WorkbenchSlotRole.allCases.first {
-                result.visibleRoles.contains($0)
-            }
+        if
+            let selected = result.selectedWindowID,
+            !result.windows.contains(where: { $0.id == selected })
+        {
+            result.selectedWindowID = result.windows.last?.id
+        }
+        if result.selectedWindowID == nil {
+            result.selectedWindowID = result.windows.last?.id
         }
         return result
     }
+}
+
+private enum LegacySlotRole: String, CaseIterable, Codable {
+    case feed
+    case detail
+    case composer
+    case tool
+}
+
+private struct LegacySlotSize: Codable {
+    let width: Double
+    let height: Double
 }
 
 /// The Rust workspace adapter implements this protocol. The feature deliberately

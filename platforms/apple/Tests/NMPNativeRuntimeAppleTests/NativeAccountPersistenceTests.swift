@@ -15,7 +15,7 @@ private final class FakeNativeAccountVault:
 
     private let lock = NSLock()
     private var stored = NativeAccountVaultSnapshot(
-        credentials: [],
+        accounts: [],
         activePublicKey: nil
     )
     private var failure: Failure?
@@ -54,13 +54,13 @@ private final class FakeNativeAccountVault:
         defer { lock.unlock() }
         requestedLoadLimits.append(maximumAccounts)
         try refuseIfNeeded(.load)
-        guard stored.credentials.count <= maximumAccounts else {
+        guard stored.accounts.count <= maximumAccounts else {
             throw NativeAccountVaultError.capacity(limit: maximumAccounts)
         }
         return stored
     }
 
-    func upsert(
+    func upsertLocalSigner(
         publicKey: String,
         secret: String,
         maximumAccounts: Int
@@ -68,18 +68,47 @@ private final class FakeNativeAccountVault:
         lock.lock()
         defer { lock.unlock() }
         try refuseIfNeeded(.upsert)
-        var credentials = stored.credentials.filter {
+        var accounts = stored.accounts.filter {
             $0.publicKey != publicKey
         }
-        guard credentials.count < maximumAccounts else {
+        guard accounts.count < maximumAccounts else {
             throw NativeAccountVaultError.capacity(limit: maximumAccounts)
         }
-        credentials.append(
-            NativeAccountCredential(publicKey: publicKey, secret: secret)
+        accounts.append(
+            NativeStoredAccount(
+                publicKey: publicKey,
+                material: .localSigner(secret: secret)
+            )
         )
-        credentials.sort { $0.publicKey < $1.publicKey }
+        accounts.sort { $0.publicKey < $1.publicKey }
         stored = NativeAccountVaultSnapshot(
-            credentials: credentials,
+            accounts: accounts,
+            activePublicKey: stored.activePublicKey
+        )
+    }
+
+    func upsertReadOnly(
+        publicKey: String,
+        maximumAccounts: Int
+    ) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try refuseIfNeeded(.upsert)
+        var accounts = stored.accounts.filter {
+            $0.publicKey != publicKey
+        }
+        guard accounts.count < maximumAccounts else {
+            throw NativeAccountVaultError.capacity(limit: maximumAccounts)
+        }
+        accounts.append(
+            NativeStoredAccount(
+                publicKey: publicKey,
+                material: .readOnly
+            )
+        )
+        accounts.sort { $0.publicKey < $1.publicKey }
+        stored = NativeAccountVaultSnapshot(
+            accounts: accounts,
             activePublicKey: stored.activePublicKey
         )
     }
@@ -91,17 +120,17 @@ private final class FakeNativeAccountVault:
         lock.lock()
         defer { lock.unlock() }
         try refuseIfNeeded(.setActive)
-        guard stored.credentials.count <= maximumAccounts else {
+        guard stored.accounts.count <= maximumAccounts else {
             throw NativeAccountVaultError.capacity(limit: maximumAccounts)
         }
         if let publicKey,
-           !stored.credentials.contains(where: {
+           !stored.accounts.contains(where: {
                $0.publicKey == publicKey
            }) {
             throw NativeAccountVaultError.unknownAccount
         }
         stored = NativeAccountVaultSnapshot(
-            credentials: stored.credentials,
+            accounts: stored.accounts,
             activePublicKey: publicKey
         )
     }
@@ -113,11 +142,11 @@ private final class FakeNativeAccountVault:
         lock.lock()
         defer { lock.unlock() }
         try refuseIfNeeded(.remove)
-        guard stored.credentials.count <= maximumAccounts else {
+        guard stored.accounts.count <= maximumAccounts else {
             throw NativeAccountVaultError.capacity(limit: maximumAccounts)
         }
         stored = NativeAccountVaultSnapshot(
-            credentials: stored.credentials.filter {
+            accounts: stored.accounts.filter {
                 $0.publicKey != publicKey
             },
             activePublicKey: stored.activePublicKey == publicKey
@@ -202,7 +231,7 @@ private final class FakeNativeAccountVault:
         #expect(profile.activateLocalAccount(handle: firstHandle).accepted)
         #expect(profile.removeLocalAccount(handle: firstHandle).accepted)
         #expect(
-            !vault.snapshot().credentials.contains {
+            !vault.snapshot().accounts.contains {
                 $0.publicKey == firstPublicKey
             }
         )
@@ -218,6 +247,50 @@ private final class FakeNativeAccountVault:
         #expect(restored.activePublicKey == nil)
     }
     #expect(vault.loadLimits().allSatisfy { $0 == 32 })
+}
+
+@Test func keylessReadOnlyAccountPersistsRestoresAndReactivates() throws {
+    let root = temporaryAccountPersistenceRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let vault = FakeNativeAccountVault()
+    let npub =
+        "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
+    var publicKey = ""
+
+    do {
+        let profile = try openTestProfile(root: root, vault: vault)
+        let registration = profile.registerReadOnlyAccount(
+            publicIdentity: npub
+        )
+        let handle = try #require(registration.handle)
+        publicKey = handle.publicKey
+        #expect(registration.accepted)
+        #expect(handle.kind == .readOnly)
+        #expect(registration.snapshot?.activePublicKey == nil)
+        #expect(profile.activateLocalAccount(handle: handle).accepted)
+        #expect(vault.snapshot().activePublicKey == publicKey)
+        #expect(
+            vault.snapshot().accounts
+                == [
+                    NativeStoredAccount(
+                        publicKey: publicKey,
+                        material: .readOnly
+                    ),
+                ]
+        )
+        profile.close()
+    }
+
+    do {
+        let profile = try openTestProfile(root: root, vault: vault)
+        defer { profile.close() }
+        let restored = try #require(profile.accountSnapshot().snapshot)
+        let account = try #require(restored.localAccounts.first)
+        #expect(restored.localAccounts.count == 1)
+        #expect(account.publicKey == publicKey)
+        #expect(account.kind == .readOnly)
+        #expect(restored.activePublicKey == publicKey)
+    }
 }
 
 @Test func vaultFailuresDoNotBlockReadOnlyStartupOrExposeSecrets()
@@ -253,7 +326,7 @@ private final class FakeNativeAccountVault:
             .errorDescription ?? ""
         #expect(!description.contains(secret))
         #expect(!String(describing: profile.accountPersistenceIssue()).contains(secret))
-        #expect(vault.snapshot().credentials.isEmpty)
+        #expect(vault.snapshot().accounts.isEmpty)
     }
 }
 
@@ -265,10 +338,12 @@ private final class FakeNativeAccountVault:
     let vault = FakeNativeAccountVault()
     vault.replace(
         NativeAccountVaultSnapshot(
-            credentials: (1...33).map { index in
-                NativeAccountCredential(
+            accounts: (1...33).map { index in
+                NativeStoredAccount(
                     publicKey: String(format: "%064x", index),
-                    secret: String(format: "%064x", index)
+                    material: .localSigner(
+                        secret: String(format: "%064x", index)
+                    )
                 )
             },
             activePublicKey: nil

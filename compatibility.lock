@@ -130,6 +130,14 @@ reference_fixture_digest = "5013983282a03741305b2f9740e2268ea6c038843b6e2214b0f3
 kehto_fixture_digest = "ea51178f523a911615ab84a0083d464aa729322384eda3ee35cffc09bbd506b2"
 published_fixture_digest = "4bbd1218609000deaa273ef43c232211a90515c481dbd1929c40536c1e44e466"
 
+[artifact_profiles.good_morning]
+source = "published-immutable-artifacts"
+author = "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5"
+d_tag = "good-morning"
+aggregate_sha256 = "828a6df02afd56782ea20f805084acce65c53f7c37554948c1e0a64aa5a2b0a8"
+required_domains = ["identity", "inc", "outbox"]
+optional_domains = ["resource", "theme", "link"]
+
 [signoff]
 product_owner = ""
 compatibility_reviewer = ""

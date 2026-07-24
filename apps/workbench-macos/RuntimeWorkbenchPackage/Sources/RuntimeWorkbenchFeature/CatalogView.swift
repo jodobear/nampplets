@@ -11,8 +11,18 @@ public struct CatalogSheet: View {
     }
 
     @MainActor
-    public init(client: any CatalogClient) {
-        _model = State(initialValue: CatalogViewModel(client: client))
+    public init(
+        client: any CatalogClient,
+        onInstalled: @escaping @MainActor (CatalogInstalledBuild) -> Void = {
+            _ in
+        }
+    ) {
+        _model = State(
+            initialValue: CatalogViewModel(
+                client: client,
+                onInstalled: onInstalled
+            )
+        )
     }
 
     public var body: some View {
@@ -51,7 +61,9 @@ public struct CatalogSheet: View {
                 onCancel: model.cancelReview,
                 onConfirm: {
                     Task {
-                        await model.confirmInstall()
+                        if await model.confirmInstall() != nil {
+                            dismiss()
+                        }
                     }
                 }
             )
@@ -59,12 +71,18 @@ public struct CatalogSheet: View {
         .onAppear {
             focus = .search
         }
+        .task {
+            await model.start()
+        }
+        .onDisappear {
+            model.stop()
+        }
     }
 
     private var searchControls: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                TextField("Search approved catalog sources", text: $model.query)
+                TextField("Filter the current catalog window", text: $model.query)
                     .textFieldStyle(.roundedBorder)
                     .focused($focus, equals: .search)
                     .onSubmit {
@@ -74,7 +92,7 @@ public struct CatalogSheet: View {
                     }
                     .accessibilityLabel("Search napplet catalog")
                     .accessibilityHint(
-                        "Searches only catalog sources approved by the runtime"
+                        "Filters the current bounded NMP window locally"
                     )
 
                 Button("Search", systemImage: "magnifyingglass") {
@@ -83,8 +101,14 @@ public struct CatalogSheet: View {
                     }
                 }
                 .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(model.isSearching)
             }
+
+            Text(
+                "The pinned NMP facade does not expose NIP-50 full-text search. "
+                    + "Live queries filter the current finite window locally."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
 
             HStack {
                 TextField(
@@ -112,17 +136,13 @@ public struct CatalogSheet: View {
                 .disabled(model.isResolvingReview)
             }
 
-            if model.isSearching || model.isResolvingReview {
+            if model.isResolvingReview {
                 ProgressView(
-                    model.isSearching
-                        ? "Searching approved sources"
-                        : "Resolving verified build"
+                    "Resolving verified build"
                 )
                 .controlSize(.small)
                 .accessibilityLabel(
-                    model.isSearching
-                        ? "Searching napplet catalog"
-                        : "Resolving napplet coordinate"
+                    "Resolving napplet coordinate"
                 )
             }
 
@@ -135,12 +155,29 @@ public struct CatalogSheet: View {
 
     @ViewBuilder
     private var results: some View {
+        VStack(spacing: 0) {
+            if let evidence = model.evidence {
+                CatalogBrowseEvidenceView(
+                    evidence: evidence,
+                    hasMore: model.hasMore
+                )
+                Divider()
+            }
+
+            resultRows
+        }
+    }
+
+    @ViewBuilder
+    private var resultRows: some View {
         if model.entries.isEmpty {
             ContentUnavailableView(
-                "No catalog results",
+                "No napplets in this feed",
                 systemImage: "square.grid.2x2",
                 description: Text(
-                    "Search approved sources or enter a manifest coordinate."
+                    model.evidence == nil
+                        ? "The live catalog is unavailable for this profile."
+                        : "The current bounded live replacement has no matching napplets."
                 )
             )
         } else {
@@ -154,6 +191,7 @@ public struct CatalogSheet: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(model.isResolvingReview)
+                .accessibilityIdentifier("catalog-entry")
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(
                     "\(entry.title), by \(entry.publisher.visibleName), "
@@ -161,19 +199,188 @@ public struct CatalogSheet: View {
                 )
                 .accessibilityHint("Opens the verified install review")
             }
-            .overlay(alignment: .bottom) {
-                if model.hasMore {
-                    Text("More results are available. Refine the search.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(8)
-                        .background(.bar, in: Capsule())
-                        .padding()
-                        .accessibilityLabel(
-                            "More results are available; refine the search"
-                        )
-                }
+        }
+    }
+}
+
+private struct CatalogBrowseEvidenceView: View {
+    let evidence: CatalogBrowseEvidence
+    let hasMore: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Label(scopeTitle, systemImage: scopeSymbol)
+                    .font(.headline)
+                Spacer()
+                Text(
+                    "\(evidence.projectedRows) candidates"
+                )
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
             }
+
+            Text(scopeDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if evidence.scope == .liveNMPWindow {
+                Text(windowDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if evidence.locallyFilteredRows > 0 {
+                Text(
+                    "\(evidence.locallyFilteredRows) rows were excluded by "
+                        + "the local filter."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if evidence.projectionLimitedRows > 0 {
+                Text(
+                    "\(evidence.projectionLimitedRows) matching rows were "
+                        + "omitted by the bounded screen projection."
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+
+            if evidence.refusedRows > 0 {
+                Text(
+                    "\(evidence.refusedRows) malformed or oversized rows were refused."
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+
+            if hasMore {
+                Label(
+                    "More rows exist outside this projection; refine the local filter.",
+                    systemImage: "ellipsis.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+
+            if !evidence.shortfalls.isEmpty {
+                Text(evidence.shortfalls.map(shortfallTitle).joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            if !evidence.sourceEvidence.isEmpty {
+                HStack(spacing: 12) {
+                    ForEach(evidence.sourceEvidence.prefix(3)) { source in
+                        Label(
+                            "\(source.source) · \(accessTitle(source.access))",
+                            systemImage: sourceSymbol(source.status)
+                        )
+                        .font(.caption)
+                        .foregroundStyle(sourceColor(source.status))
+                    }
+                    if evidence.sourceEvidence.count > 3 {
+                        Text("+\(evidence.sourceEvidence.count - 3) sources")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .lineLimit(1)
+                .help("Source-scoped evidence from the current NMP observation")
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("catalog-feed-evidence")
+    }
+
+    private var scopeTitle: String {
+        switch evidence.scope {
+        case .liveNMPWindow:
+            "Live NMP catalog window"
+        case .offlineFixture:
+            "Offline UI-test catalog"
+        }
+    }
+
+    private var scopeSymbol: String {
+        switch evidence.scope {
+        case .liveNMPWindow:
+            "network"
+        case .offlineFixture:
+            "testtube.2"
+        }
+    }
+
+    private var scopeDetail: String {
+        switch evidence.scope {
+        case .liveNMPWindow:
+            "Source-scoped evidence only; this is not a globally complete network result."
+        case .offlineFixture:
+            "Deterministic bundled compatibility data; no network lookup is performed."
+        }
+    }
+
+    private var windowDetail: String {
+        switch evidence.window {
+        case .idle:
+            "The NMP window is idle."
+        case .requesting:
+            "The NMP window is requesting more rows."
+        case let .returned(addedRows):
+            "The NMP window added \(addedRows) rows."
+        case let .atBound(maximumRows):
+            "The NMP window reached its \(maximumRows)-row bound."
+        case .unknown:
+            "The NMP facade did not classify this bounded window state."
+        }
+    }
+
+    private func shortfallTitle(_ shortfall: CatalogBrowseShortfall) -> String {
+        switch shortfall {
+        case .noPlannedSource:
+            "No planned source"
+        case .noResolvedDemand:
+            "No resolved demand"
+        case .localLimit:
+            "Local limit reached"
+        }
+    }
+
+    private func sourceSymbol(_ status: CatalogBrowseSourceStatus) -> String {
+        switch status {
+        case .requesting, .connecting:
+            "arrow.trianglehead.2.clockwise"
+        case .disconnected:
+            "bolt.slash"
+        case .awaitingAuthentication:
+            "person.badge.clock"
+        case .authenticationDenied:
+            "person.badge.minus"
+        case .error:
+            "exclamationmark.triangle"
+        }
+    }
+
+    private func accessTitle(_ access: CatalogBrowseAccessContext) -> String {
+        switch access {
+        case .public:
+            "public"
+        case .nip42:
+            "NIP-42"
+        }
+    }
+
+    private func sourceColor(_ status: CatalogBrowseSourceStatus) -> Color {
+        switch status {
+        case .requesting, .connecting, .awaitingAuthentication:
+            .secondary
+        case .disconnected, .authenticationDenied, .error:
+            .orange
         }
     }
 }
@@ -212,6 +419,8 @@ private struct CatalogEntryRow: View {
 
     private var compatibilitySymbol: String {
         switch entry.compatibility {
+        case .unreviewed:
+            "doc.text.magnifyingglass"
         case .compatible:
             "checkmark.seal"
         case .incompatible:
@@ -223,6 +432,8 @@ private struct CatalogEntryRow: View {
 
     private var compatibilityColor: Color {
         switch entry.compatibility {
+        case .unreviewed:
+            .secondary
         case .compatible:
             .green
         case .incompatible:
@@ -285,6 +496,7 @@ private struct CatalogInstallReviewSheet: View {
                     Button("Install Exact Build", action: onConfirm)
                         .keyboardShortcut(.defaultAction)
                         .disabled(!review.canInstall || isInstalling)
+                        .accessibilityIdentifier("catalog-install-exact-build")
                         .accessibilityHint(
                             "Installs only the hash shown in this review"
                         )
@@ -354,17 +566,22 @@ private struct CatalogInstallReviewSheet: View {
 
     private var compatibility: some View {
         CatalogReviewSection(title: "Platform compatibility") {
-            ForEach(review.platformCompatibility) { platform in
-                HStack(alignment: .firstTextBaseline) {
-                    Image(systemName: platformSymbol(platform.status))
-                        .foregroundStyle(platformColor(platform.status))
-                    Text(platform.platform)
-                        .font(.headline)
-                    Text(platform.detail)
-                        .foregroundStyle(.secondary)
-                    Spacer()
+            if review.platformCompatibility.isEmpty {
+                Text("No platform compatibility evidence was projected.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(review.platformCompatibility) { platform in
+                    HStack(alignment: .firstTextBaseline) {
+                        Image(systemName: platformSymbol(platform.status))
+                            .foregroundStyle(platformColor(platform.status))
+                        Text(platform.platform)
+                            .font(.headline)
+                        Text(platform.detail)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .accessibilityElement(children: .combine)
                 }
-                .accessibilityElement(children: .combine)
             }
         }
     }
@@ -373,6 +590,10 @@ private struct CatalogInstallReviewSheet: View {
         CatalogReviewSection(title: "Install relationship") {
             Text(review.updateRelationship.title)
                 .font(.headline)
+            if let detail = review.updateRelationship.detail {
+                Text(detail)
+                    .foregroundStyle(.secondary)
+            }
             if let installedHash = review.updateRelationship.installedHash {
                 LabeledContent("Installed hash", value: installedHash)
                     .textSelection(.enabled)

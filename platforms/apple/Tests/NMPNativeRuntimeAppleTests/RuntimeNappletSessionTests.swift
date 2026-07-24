@@ -8,6 +8,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
         "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5"
     private let indexDigest =
         "ffd35eea5c84d03cdda74c23e1bbb2c40500f503833503aa688036faa52f3808"
+    private let requiredGoodMorningDomains = ["identity", "inc", "outbox"]
 
     func testSignedNamedArtifactNegotiatesAndRespondsThroughRust() throws {
         let root = FileManager.default.temporaryDirectory
@@ -38,12 +39,15 @@ final class RuntimeNappletSessionTests: XCTestCase {
             author: author,
             dTag: "good-morning",
             blobsBySHA256: [indexDigest: index],
-            grantDomains: ["storage"]
+            grantDomains: requiredGoodMorningDomains + ["storage"]
         )
         let runtime = try XCTUnwrap(artifact.runtimeSession)
         defer { runtime.stop() }
 
-        XCTAssertEqual(artifact.negotiatedDomains, ["shell", "storage"])
+        XCTAssertEqual(
+            artifact.negotiatedDomains,
+            ["identity", "inc", "outbox", "shell", "storage"]
+        )
         let sealed = try XCTUnwrap(
             try artifact.reader.readSealed(logicalPath: "/index.html")
         )
@@ -53,7 +57,14 @@ final class RuntimeNappletSessionTests: XCTestCase {
         let received = expectation(description: "Rust emits the pinned shell.init")
         let response = LockedData()
         runtime.setResponseSink { bytes in
-            response.set(bytes)
+            guard
+                let envelope = try? JSONSerialization.jsonObject(with: bytes)
+                    as? [String: Any],
+                envelope["type"] as? String == "shell.init",
+                response.setIfEmpty(bytes)
+            else {
+                return
+            }
             received.fulfill()
         }
         runtime.mappedEnvelope(Data(#"{"type":"shell.ready"}"#.utf8))
@@ -69,8 +80,167 @@ final class RuntimeNappletSessionTests: XCTestCase {
         )
         XCTAssertEqual(
             capabilities["domains"] as? [String],
-            ["shell", "storage"]
+            ["identity", "inc", "outbox", "shell", "storage"]
         )
+    }
+
+    func testInstallPermissionAndLaunchRemainThreeSeparateOperations() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "runtime-apple-staged-launch-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = repositoryRoot().appendingPathComponent(
+            "conformance/napplet-corpus/published/good-morning",
+            isDirectory: true
+        )
+        let event = try Data(
+            contentsOf: fixture.appendingPathComponent("event.json")
+        )
+        let index = try Data(
+            contentsOf: fixture.appendingPathComponent("index.html")
+        )
+        let profile = try NativeRuntimeProfile.open(
+            configuration: NativeRuntimeProfileConfiguration(storageRoot: root)
+        )
+        defer { profile.close() }
+
+        let installed = try profile.installSignedNamed(
+            title: "Good Morning Staged",
+            eventJSON: event,
+            author: author,
+            dTag: "good-morning",
+            blobsBySHA256: [indexDigest: index]
+        )
+        XCTAssertEqual(installed.permissionCoordinate.manifestAuthor, author)
+        XCTAssertEqual(installed.permissionCoordinate.dTag, "good-morning")
+        XCTAssertTrue(profile.snapshotForTesting.sessions.isEmpty)
+        let reacquired: NativeRuntimeInstalledArtifact
+        switch profile.reacquireInstalledArtifact(
+            installed.permissionCoordinate
+        ) {
+        case .refused(let failure):
+            XCTFail(
+                "The exact installed handle should reopen without network work: "
+                    + "\(failure.code): \(failure.detail)"
+            )
+            return
+        case .installed(let installation):
+            XCTAssertEqual(installation.title, "Good Morning Protocol")
+            XCTAssertEqual(
+                installation.installedArtifact.permissionCoordinate,
+                installed.permissionCoordinate
+            )
+            reacquired = installation.installedArtifact
+        }
+        XCTAssertTrue(
+            profile.snapshotForTesting.sessions.isEmpty,
+            "reacquisition must never launch"
+        )
+
+        let review = try XCTUnwrap(
+            profile.permissionReview(for: reacquired.permissionCoordinate).review
+        )
+        XCTAssertEqual(
+            review.capabilities.map(\.domain),
+            ["identity", "inc", "outbox", "resource", "theme", "link"]
+        )
+        XCTAssertEqual(
+            review.capabilities.map(\.requirement),
+            [.required, .required, .required, .optional, .optional, .optional]
+        )
+
+        XCTAssertThrowsError(try profile.launchInstalled(reacquired)) { error in
+            guard case RuntimeNappletOpenError.launchRefused = error else {
+                return XCTFail("Expected Rust launch refusal, got \(error)")
+            }
+        }
+        XCTAssertTrue(profile.snapshotForTesting.sessions.isEmpty)
+
+        let update = profile.applyPermissionDecisions(
+            NativeRuntimePermissionDecisionBatch(
+                coordinate: reacquired.permissionCoordinate,
+                decisions: review.capabilities.map {
+                    NativeRuntimePermissionDecisionSelection(
+                        domain: $0.domain,
+                        decision: $0.requirement == .required
+                            ? .allowExactBuild
+                            : .denied
+                    )
+                }
+            )
+        )
+        XCTAssertTrue(update.applied)
+        XCTAssertTrue(update.review?.launchPermitted == true)
+        XCTAssertNil(update.refusal)
+        XCTAssertTrue(
+            profile.snapshotForTesting.sessions.isEmpty,
+            "applying permissions must never launch"
+        )
+
+        let launched = try profile.launchInstalled(reacquired)
+        XCTAssertEqual(
+            launched.negotiatedDomains,
+            ["identity", "inc", "outbox", "shell"]
+        )
+        launched.runtimeSession?.stop()
+    }
+
+    func testInstalledHandleCannotCrossRuntimeProfiles() throws {
+        let firstRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "runtime-apple-installed-owner-a-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        let secondRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "runtime-apple-installed-owner-b-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer {
+            try? FileManager.default.removeItem(at: firstRoot)
+            try? FileManager.default.removeItem(at: secondRoot)
+        }
+        let fixture = repositoryRoot().appendingPathComponent(
+            "conformance/napplet-corpus/published/good-morning",
+            isDirectory: true
+        )
+        let event = try Data(
+            contentsOf: fixture.appendingPathComponent("event.json")
+        )
+        let index = try Data(
+            contentsOf: fixture.appendingPathComponent("index.html")
+        )
+        let first = try NativeRuntimeProfile.open(
+            configuration: NativeRuntimeProfileConfiguration(
+                storageRoot: firstRoot
+            )
+        )
+        let second = try NativeRuntimeProfile.open(
+            configuration: NativeRuntimeProfileConfiguration(
+                storageRoot: secondRoot
+            )
+        )
+        defer {
+            first.close()
+            second.close()
+        }
+
+        let installed = try first.installSignedNamed(
+            title: "Good Morning Owner",
+            eventJSON: event,
+            author: author,
+            dTag: "good-morning",
+            blobsBySHA256: [indexDigest: index]
+        )
+        XCTAssertThrowsError(try second.launchInstalled(installed)) { error in
+            XCTAssertEqual(
+                error as? RuntimeNappletOpenError,
+                .installedArtifactProfileMismatch
+            )
+        }
+        XCTAssertTrue(second.snapshotForTesting.sessions.isEmpty)
     }
 
     func testStoppingOneSessionDoesNotCloseSharedProfileOrSibling() throws {
@@ -101,7 +271,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
             author: author,
             dTag: "good-morning",
             blobsBySHA256: [indexDigest: index],
-            grantDomains: ["storage"]
+            grantDomains: requiredGoodMorningDomains + ["storage"]
         )
         let second = try profile.openSignedNamed(
             title: "Good Morning Two",
@@ -109,7 +279,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
             author: author,
             dTag: "good-morning",
             blobsBySHA256: [indexDigest: index],
-            grantDomains: ["storage"]
+            grantDomains: requiredGoodMorningDomains + ["storage"]
         )
         let firstRuntime = try XCTUnwrap(first.runtimeSession)
         let secondRuntime = try XCTUnwrap(second.runtimeSession)
@@ -167,7 +337,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
             author: author,
             dTag: "good-morning",
             blobsBySHA256: [indexDigest: index],
-            grantDomains: ["storage"]
+            grantDomains: requiredGoodMorningDomains + ["storage"]
         )
         let runtime = try XCTUnwrap(artifact.runtimeSession)
         let unexpectedResponse = expectation(
@@ -209,7 +379,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
             author: author,
             dTag: "good-morning",
             blobsBySHA256: [indexDigest: index],
-            grantDomains: ["theme", "config"]
+            grantDomains: requiredGoodMorningDomains + ["theme", "config"]
         )
         XCTAssertTrue(artifact.negotiatedDomains.contains("theme"))
         XCTAssertTrue(artifact.negotiatedDomains.contains("config"))
@@ -356,6 +526,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
         profile.update(
             frame: RuntimeObservationFrame(
                 snapshot: intermediate,
+                catalog: profile.catalogSnapshotForTesting,
                 events: [],
                 oldestAvailableEvent: 0,
                 newestAvailableEvent: 0,
@@ -368,6 +539,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
         profile.update(
             frame: RuntimeObservationFrame(
                 snapshot: latest,
+                catalog: profile.catalogSnapshotForTesting,
                 events: [],
                 oldestAvailableEvent: 0,
                 newestAvailableEvent: 0,
@@ -483,7 +655,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
             author: author,
             dTag: "good-morning",
             blobsBySHA256: [indexDigest: index],
-            grantDomains: []
+            grantDomains: requiredGoodMorningDomains
         )
         let runtime = try XCTUnwrap(artifact.runtimeSession)
         defer { runtime.stop() }
@@ -634,6 +806,16 @@ private final class LockedData: @unchecked Sendable {
         lock.lock()
         storage = value
         lock.unlock()
+    }
+
+    func setIfEmpty(_ value: Data) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storage == nil else {
+            return false
+        }
+        storage = value
+        return true
     }
 }
 

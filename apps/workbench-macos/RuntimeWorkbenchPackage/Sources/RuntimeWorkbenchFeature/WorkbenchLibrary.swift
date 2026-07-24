@@ -240,12 +240,17 @@ public struct WorkbenchLibrarySheet: View {
     @State private var model: WorkbenchLibrarySheetModel
     @State private var uninstallCandidate: WorkbenchLibraryBuild?
     @FocusState private var filterFocused: Bool
+    private let onOpen: @MainActor (WorkbenchLibraryBuild) -> Void
 
     @MainActor
-    public init(manager: any WorkbenchLibraryManaging) {
+    public init(
+        manager: any WorkbenchLibraryManaging,
+        onOpen: @escaping @MainActor (WorkbenchLibraryBuild) -> Void = { _ in }
+    ) {
         _model = State(
             initialValue: WorkbenchLibrarySheetModel(manager: manager)
         )
+        self.onOpen = onOpen
     }
 
     public var body: some View {
@@ -387,6 +392,9 @@ public struct WorkbenchLibrarySheet: View {
                     build: build,
                     workspaces: snapshot.workspaces,
                     commandsAvailable: model.commandsAvailable,
+                    onOpen: {
+                        onOpen(build)
+                    },
                     onSuspend: model.suspend,
                     onResume: model.resume,
                     onAssign: { workspace in
@@ -482,6 +490,7 @@ private struct WorkbenchLibraryBuildRow: View {
     let build: WorkbenchLibraryBuild
     let workspaces: [WorkbenchLibraryWorkspace]
     let commandsAvailable: Bool
+    let onOpen: () -> Void
     let onSuspend: (WorkbenchLibrarySession) -> Void
     let onResume: (WorkbenchLibrarySession) -> Void
     let onAssign: (WorkbenchLibraryWorkspace) -> Void
@@ -512,6 +521,13 @@ private struct WorkbenchLibraryBuildRow: View {
                 }
 
                 Spacer()
+
+                Button("Open", systemImage: "rectangle.on.rectangle") {
+                    onOpen()
+                }
+                .disabled(!commandsAvailable)
+                .accessibilityLabel("Open \(build.title) on canvas")
+                .accessibilityIdentifier("open-installed-napplet")
 
                 Menu("Workspace", systemImage: "rectangle.3.group") {
                     if workspaces.isEmpty {

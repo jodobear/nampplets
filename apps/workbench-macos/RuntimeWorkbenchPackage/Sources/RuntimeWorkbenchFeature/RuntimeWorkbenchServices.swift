@@ -25,6 +25,14 @@ public final class RuntimeWorkbenchAccountManager:
         apply(profile.native.registerLocalAccount(secretKey: secret))
     }
 
+    public func registerReadOnly(publicIdentity: String) async {
+        apply(
+            profile.native.registerReadOnlyAccount(
+                publicIdentity: publicIdentity
+            )
+        )
+    }
+
     public func activate(handle: WorkbenchAccountHandle) async {
         guard let native = nativeHandles[handle] else {
             setError("The selected account installation is stale.")
@@ -75,7 +83,7 @@ public final class RuntimeWorkbenchAccountManager:
                 // hand-rolling protocol semantics in Swift.
                 npub: "",
                 publicKeyHex: native.publicKey,
-                connectionKind: .localSigner
+                connectionKind: connectionKind(native.kind)
             )
         }
         let activeHandle = snapshot.activePublicKey.flatMap { active in
@@ -90,6 +98,17 @@ public final class RuntimeWorkbenchAccountManager:
             errorMessage: update.failure.map(message(for:))
                 ?? persistenceMessage
         )!
+    }
+
+    private func connectionKind(
+        _ kind: NativeRuntimeAccountKind
+    ) -> WorkbenchAccountConnectionKind {
+        switch kind {
+        case .localSigner:
+            .localSigner
+        case .readOnly:
+            .readOnly
+        }
     }
 
     private func setError(_ message: String) {
@@ -112,6 +131,10 @@ public final class RuntimeWorkbenchAccountManager:
             return "The account service is closed."
         case .invalidSecretKey:
             return "The secret key is invalid."
+        case .invalidPublicKey:
+            return "Enter a valid npub or canonical 64-character hexadecimal public key."
+        case .nip05ResolutionUnavailable:
+            return "NIP-05 sign-in is not available because the pinned NMP facade cannot resolve NIP-05 identifiers yet. Use an npub or hexadecimal public key."
         case let .capacity(limit):
             return "The account registry is full at \(limit) entries."
         case .instanceExhausted:
@@ -172,7 +195,7 @@ public final class RuntimeWorkbenchLayoutStore:
             )
         } catch {
             throw RuntimeWorkbenchLayoutStoreError.malformed(
-                "Workspace preferences do not match version 1."
+                "Workspace preferences do not match a supported canvas layout."
             )
         }
     }
@@ -195,17 +218,17 @@ public final class RuntimeWorkbenchLayoutStore:
         let definition = NativeRuntimeWorkspaceDefinition(
             schemaVersion: 1,
             workspaceId: workspaceID,
+            // Freeform versus tiling is a bounded presentation preference in
+            // preferencesJSON; the pinned native workspace facade exposes only
+            // horizontal/vertical structural axes.
             axis: .horizontal,
-            slots: WorkbenchSlotRole.allCases.enumerated().map {
-                index,
-                role in
+            slots: snapshot.windows.enumerated().map { index, window in
                 nativeSlot(
-                    role: role,
-                    order: UInt16(index),
-                    snapshot: snapshot
+                    window: window,
+                    order: UInt16(index)
                 )
             },
-            focusedSlotId: snapshot.focusedRole?.rawValue,
+            focusedSlotId: snapshot.selectedWindowID?.rawValue,
             activityDrawerVisible: false,
             preferencesJson: preferencesJSON,
             retainedReceiptIds: []
@@ -219,52 +242,25 @@ public final class RuntimeWorkbenchLayoutStore:
     }
 
     private func nativeSlot(
-        role: WorkbenchSlotRole,
-        order: UInt16,
-        snapshot: WorkbenchLayoutSnapshot
+        window: WorkbenchCanvasWindow,
+        order: UInt16
     ) -> NativeRuntimeWorkspaceSlot {
-        let assigned = snapshot.assignments[role] == .goodMorning
-        let constraints = role.constraints
-        let size = snapshot.sizes[role] ?? WorkbenchSlotSize(
-            width: constraints.idealWidth,
-            height: constraints.idealHeight
-        )
-        let usesHeight = role == .composer
         return NativeRuntimeWorkspaceSlot(
-            slotId: role.rawValue,
-            role: nativeRole(role),
-            renderer: assigned ? .legacyNapplet : .native,
-            handlerId: assigned ? GoodMorningFixture.dTag : "native-\(role.rawValue)",
-            manifestAuthor: assigned ? GoodMorningFixture.author : nil,
-            dTag: assigned ? GoodMorningFixture.dTag : nil,
-            aggregateHash: assigned ? GoodMorningFixture.aggregateHash : nil,
+            slotId: window.id.rawValue,
+            role: .toolWindow,
+            renderer: window.exactBuild == nil ? .native : .legacyNapplet,
+            handlerId: window.componentID.rawValue,
+            manifestAuthor: window.exactBuild?.manifestAuthor,
+            dTag: window.exactBuild?.dTag,
+            aggregateHash: window.exactBuild?.aggregateHash,
             bindingParametersJson: "{}",
             navigationJson: "{}",
-            visible: snapshot.visibleRoles.contains(role),
+            visible: true,
             order: order,
-            sizePoints: boundedPoint(usesHeight ? size.height : size.width),
-            minimumPoints: boundedPoint(
-                usesHeight
-                    ? constraints.minimumHeight
-                    : constraints.minimumWidth
-            ),
-            maximumPoints: boundedPoint(
-                usesHeight
-                    ? constraints.maximumHeight
-                    : constraints.maximumWidth
-            )
+            sizePoints: boundedPoint(window.frame.width),
+            minimumPoints: boundedPoint(WorkbenchWindowFrame.minimumWidth),
+            maximumPoints: boundedPoint(WorkbenchWindowFrame.maximumWidth)
         )
-    }
-
-    private func nativeRole(
-        _ role: WorkbenchSlotRole
-    ) -> NativeRuntimeWorkspaceRole {
-        switch role {
-        case .feed: .feed
-        case .detail: .detail
-        case .composer: .composer
-        case .tool: .toolWindow
-        }
     }
 
     private func boundedPoint(_ value: Double) -> UInt16 {

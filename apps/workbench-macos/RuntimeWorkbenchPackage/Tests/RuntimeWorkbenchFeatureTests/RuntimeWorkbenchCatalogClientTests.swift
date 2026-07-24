@@ -45,11 +45,28 @@ private func searchPage(
 }
 
 @MainActor
+@Test func defaultClientDoesNotMasqueradeBundledFixturesAsLiveNetwork() async {
+    let response = await RuntimeWorkbenchCatalogClient().search(
+        CatalogSearchRequest(query: "")!
+    )
+
+    guard case let .unavailable(issue) = response else {
+        Issue.record("A profile-less catalog unexpectedly returned fixtures")
+        return
+    }
+    #expect(issue.title == "Live catalog unavailable")
+}
+
+@MainActor
 @Test func emptySearchListsEveryPinnedCorpusEntryWithoutPagination() async throws {
-    let page = try await searchPage(RuntimeWorkbenchCatalogClient())
+    let page = try await searchPage(
+        RuntimeWorkbenchCatalogClient.offlineFixture()
+    )
 
     #expect(page.entries.count == 20)
     #expect(!page.hasMore)
+    #expect(page.evidence.scope == .offlineFixture)
+    #expect(page.evidence.projectedRows == 20)
     #expect(page.entries.first?.id == goodMorningEntryID)
     #expect(
         page.entries.contains {
@@ -70,11 +87,14 @@ private func searchPage(
 @MainActor
 @Test func searchIsLocalLiteralAndSurfacesBuiltNotRunStatus() async throws {
     let page = try await searchPage(
-        RuntimeWorkbenchCatalogClient(),
+        RuntimeWorkbenchCatalogClient.offlineFixture(),
         query: "resource"
     )
 
     #expect(page.entries.map(\.title) == ["Good Morning Protocol", "Resource Demo"])
+    #expect(page.evidence.scope == .offlineFixture)
+    #expect(page.evidence.queryWasLocalFilter)
+    #expect(page.evidence.locallyFilteredRows == 18)
     let demo = try #require(
         page.entries.first(where: { $0.title == "Resource Demo" })
     )
@@ -88,7 +108,7 @@ private func searchPage(
 
 @MainActor
 @Test func goodMorningReviewPinsIdentityBuildCapabilitiesAndPlatforms() async throws {
-    let client = RuntimeWorkbenchCatalogClient()
+    let client = RuntimeWorkbenchCatalogClient.offlineFixture()
     let page = try await searchPage(client, query: "good morning")
     let entry = try #require(page.entries.first)
 
@@ -136,7 +156,7 @@ private func searchPage(
 
 @MainActor
 @Test func referenceAndKehtoEntriesCannotMasqueradeAsInstallableBuilds() async throws {
-    let client = RuntimeWorkbenchCatalogClient()
+    let client = RuntimeWorkbenchCatalogClient.offlineFixture()
     let page = try await searchPage(client)
     let externalAssets = try #require(
         page.entries.first { $0.id.hasPrefix("reference:external-assets:") }
@@ -162,7 +182,7 @@ private func searchPage(
 
 @MainActor
 @Test func manualResolutionAndInstallConfirmationStayTruthfullyUnavailable() async throws {
-    let client = RuntimeWorkbenchCatalogClient()
+    let client = RuntimeWorkbenchCatalogClient.offlineFixture()
     let manual = await client.resolveReview(
         .manualCoordinate(
             CatalogManualCoordinateRequest(
@@ -174,7 +194,7 @@ private func searchPage(
         Issue.record("Manual coordinate unexpectedly resolved")
         return
     }
-    #expect(manualIssue.title == "Remote resolution unavailable")
+    #expect(manualIssue.title == "Offline coordinate resolution unavailable")
 
     let page = try await searchPage(client, query: "good morning")
     let entry = try #require(page.entries.first)
@@ -192,12 +212,141 @@ private func searchPage(
     }
     #expect(installIssue.title == "Installation unavailable")
     #expect(installIssue.message.contains(goodMorningAggregate))
+    #expect(installIssue.message.contains("offline UI-test corpus"))
 }
 
 @MainActor
 @Test func contentViewAcceptsCatalogClientForToolbarSheetIntegration() async {
-    let view = ContentView(catalogClient: RuntimeWorkbenchCatalogClient())
+    let view = ContentView(
+        catalogClient: RuntimeWorkbenchCatalogClient.offlineFixture()
+    )
     #expect(String(describing: type(of: view)) == "ContentView")
+}
+
+@MainActor
+@Test func profileBackedClientForwardsLiveOperationsAndCancellation() async {
+    let backing = FakeCatalogProfileBacking()
+    let client = RuntimeWorkbenchCatalogClient(profileBacking: backing)
+    let request = CatalogSearchRequest(query: "clock")!
+    let coordinate = CatalogManualCoordinateRequest(
+        coordinate: "35129:publisher:clock"
+    )!
+
+    let search = await client.search(request)
+    let review = await client.resolveReview(.manualCoordinate(coordinate))
+    client.cancelPendingCatalogWork()
+    let install = await client.confirmExactVerifiedInstall(
+        CatalogInstallConfirmation(review: backing.review)
+    )
+
+    #expect(search == .page(backing.page))
+    #expect(review == .ready(backing.review))
+    #expect(install == .installed(backing.installed))
+    #expect(backing.searches == [request])
+    #expect(backing.reviewTargets == [.manualCoordinate(coordinate)])
+    #expect(backing.confirmations == [
+        CatalogInstallConfirmation(review: backing.review)
+    ])
+    #expect(backing.cancellations == 1)
+}
+
+@MainActor
+private final class FakeCatalogProfileBacking:
+    RuntimeWorkbenchCatalogProfileBacking
+{
+    let review: CatalogInstallReview
+    let installed: CatalogInstalledBuild
+    let page: CatalogSearchPage
+
+    private(set) var searches: [CatalogSearchRequest] = []
+    private(set) var reviewTargets: [CatalogReviewTarget] = []
+    private(set) var confirmations: [CatalogInstallConfirmation] = []
+    private(set) var cancellations = 0
+
+    init() {
+        let author = String(repeating: "c", count: 64)
+        let aggregate = String(repeating: "d", count: 64)
+        let publisher = CatalogPublisher(
+            displayName: "Network publisher",
+            publicKey: author
+        )
+        let entry = CatalogEntry(
+            id: "event",
+            title: "Clock",
+            summary: "A live candidate",
+            publisher: publisher,
+            coordinate: "35129:\(author):clock",
+            compatibility: .unreviewed
+        )!
+        let source = CatalogBrowseSourceEvidence(
+            id: "relay",
+            source: "wss://relay.example",
+            access: .public,
+            status: .connecting,
+            reconciledThrough: 42
+        )!
+        let evidence = CatalogBrowseEvidence(
+            scope: .liveNMPWindow,
+            queryWasLocalFilter: true,
+            locallyFilteredRows: 3,
+            projectedRows: 1,
+            projectionLimitedRows: 4,
+            refusedRows: 2,
+            window: .atBound(maximumRows: 512),
+            sourceEvidence: [source],
+            shortfalls: [.localLimit]
+        )!
+        page = CatalogSearchPage(
+            entries: [entry],
+            hasMore: true,
+            evidence: evidence
+        )!
+        review = CatalogInstallReview(
+            id: "frozen-review",
+            title: "Clock",
+            publisher: publisher,
+            coordinate: entry.coordinate,
+            exactAggregateHash: aggregate,
+            sources: [],
+            requiredDomains: [],
+            optionalDomains: [],
+            platformCompatibility: [],
+            warnings: [],
+            updateRelationship: .firstInstall,
+            canInstall: true
+        )!
+        installed = CatalogInstalledBuild(
+            title: review.title,
+            manifestAuthor: publisher.publicKey,
+            dTag: "clock",
+            exactAggregateHash: review.exactAggregateHash
+        )!
+    }
+
+    func browseCatalog(
+        _ request: CatalogSearchRequest
+    ) async -> CatalogSearchResponse {
+        searches.append(request)
+        return .page(page)
+    }
+
+    func resolveCatalogReview(
+        _ target: CatalogReviewTarget
+    ) async -> CatalogReviewResponse {
+        reviewTargets.append(target)
+        return .ready(review)
+    }
+
+    func cancelCatalogWork() {
+        cancellations += 1
+    }
+
+    func installCatalogReview(
+        _ confirmation: CatalogInstallConfirmation
+    ) async -> CatalogInstallResponse {
+        confirmations.append(confirmation)
+        return .installed(installed)
+    }
 }
 
 private enum CatalogClientTestError: Error {

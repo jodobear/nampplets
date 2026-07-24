@@ -31,6 +31,30 @@ import Testing
     await manager.remove(handle: registered.handle)
     #expect(manager.snapshot().accounts.isEmpty)
     #expect(manager.snapshot().activeAccount == nil)
+
+    await manager.registerReadOnly(
+        publicIdentity:
+            "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
+    )
+    let readOnly = try #require(manager.snapshot().accounts.first)
+    #expect(readOnly.connectionKind == .readOnly)
+    #expect(readOnly.publicKeyHex.count == 64)
+    #expect(manager.snapshot().activeAccount == nil)
+
+    await manager.activate(handle: readOnly.handle)
+    #expect(
+        manager.snapshot().activeAccount?.connectionKind == .readOnly
+    )
+
+    await manager.registerReadOnly(publicIdentity: "pablo@example.com")
+    #expect(
+        manager.snapshot().errorMessage?.contains(
+            "pinned NMP facade cannot resolve NIP-05"
+        ) == true
+    )
+    #expect(
+        manager.snapshot().activeAccount?.handle == readOnly.handle
+    )
 }
 
 @MainActor
@@ -39,10 +63,15 @@ import Testing
     defer { try? FileManager.default.removeItem(at: root) }
     let workspaceID = "restart-proof"
     var expected = WorkbenchLayoutSnapshot.workbenchDefault
-    expected.visibleRoles.remove(.tool)
-    expected.focusedRole = .composer
-    expected.assignments = [.composer: .goodMorning]
-    expected.sizes[.composer] = WorkbenchSlotSize(width: 1_100, height: 260)
+    expected.mode = .tiling
+    expected.windows = [.goodMorning]
+    expected.selectedWindowID = WorkbenchCanvasWindow.goodMorning.id
+    expected.windows[0].frame = WorkbenchWindowFrame(
+        x: 180,
+        y: 90,
+        width: 1_100,
+        height: 620
+    )
 
     do {
         let profile = try WorkbenchRuntimeProfile.open(storageRoot: root)

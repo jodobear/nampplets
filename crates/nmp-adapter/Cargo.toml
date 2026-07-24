@@ -7,6 +7,8 @@ rust-version.workspace = true
 
 [dependencies]
 nmp.workspace = true
+nmp-native-artifact = { path = "../artifact" }
+nmp-native-catalog-resolver = { path = "../catalog-resolver" }
 nmp-native-nap-bridge = { path = "../nap-bridge" }
 nmp-native-runtime-core = { path = "../runtime-core" }
 parking_lot.workspace = true

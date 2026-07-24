@@ -26,8 +26,8 @@ use nmp_native_artifact::{
 };
 use nmp_native_nap_bridge::{BridgeLimits, Provider};
 use nmp_native_nmp_adapter::{
-    AccountLifecycleError, LocalAccountHandle, LocalAccountSnapshot, NapNostrProviderLimits,
-    NapNostrProviderSet, NmpDataPlane,
+    AccountLifecycleError, LocalAccountHandle, LocalAccountKind, LocalAccountSnapshot,
+    NapNostrProviderLimits, NapNostrProviderSet, NmpDataPlane,
 };
 use nmp_native_provider_identity::{
     IdentityDataPlane, IdentityProvider, IdentityProviderLimits, NoopIdentityDiagnostics,
@@ -48,7 +48,7 @@ use nmp_native_providers::{
 use nmp_native_runtime_app::{
     AppLimits, AppSnapshot, ExecutableArtifact, InstalledBuildAvailability, KernelClock,
     PermissionDecision, PermissionPlatformAvailability, PermissionReviewView, PlatformCommand,
-    PlatformEvent, RuntimeApp, RuntimeAppConfig, WorkspaceView,
+    PlatformEvent, ProviderOperationId, RuntimeApp, RuntimeAppConfig, WorkspaceView,
 };
 use nmp_native_runtime_core::{
     BoundedJson, Capability, CapabilityRequest, CapabilityRequirement, ExecutionProfile,
@@ -63,6 +63,18 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
+mod catalog;
+
+pub use catalog::{
+    RuntimeCatalogCancellationResult, RuntimeCatalogCapability, RuntimeCatalogConfirmation,
+    RuntimeCatalogConfirmationResult, RuntimeCatalogEntry, RuntimeCatalogFailure,
+    RuntimeCatalogFeedSnapshot, RuntimeCatalogLookupState, RuntimeCatalogPage,
+    RuntimeCatalogPageResult, RuntimeCatalogProvenance, RuntimeCatalogReview,
+    RuntimeCatalogReviewResult, RuntimeCatalogShortfall, RuntimeCatalogSource,
+    RuntimeCatalogSourceAccess, RuntimeCatalogSourceState, RuntimeCatalogWindowState,
+};
+use catalog::{RuntimeCatalogService, project_catalog_error};
+
 const DEFAULT_MAXIMUM_CONFIG_STRING_BYTES: u64 = 16 * 1_024;
 const DEFAULT_MAXIMUM_CONFIG_ITEMS: u64 = 64;
 const DEFAULT_MAXIMUM_MANIFEST_BYTES: u64 = 256 * 1_024;
@@ -76,6 +88,25 @@ const MAXIMUM_WORKSPACE_FIELD_BYTES: usize = 64 * 1_024;
 const MAXIMUM_WORKSPACE_RECEIPTS: usize = 256;
 const MAXIMUM_WORKSPACE_POINT_SIZE: u16 = 4_096;
 const MAXIMUM_PERMISSION_DECISIONS: usize = 64;
+const GOOD_MORNING_AUTHOR: &str =
+    "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5";
+const GOOD_MORNING_D_TAG: &str = "good-morning";
+const GOOD_MORNING_AGGREGATE_HASH: &str =
+    "828a6df02afd56782ea20f805084acce65c53f7c37554948c1e0a64aa5a2b0a8";
+const GOOD_MORNING_CAPABILITY_PROFILE: &[(&str, CapabilityRequirement)] = &[
+    ("identity", CapabilityRequirement::Required),
+    ("inc", CapabilityRequirement::Required),
+    ("outbox", CapabilityRequirement::Required),
+    ("resource", CapabilityRequirement::Optional),
+    ("theme", CapabilityRequirement::Optional),
+    ("link", CapabilityRequirement::Optional),
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RuntimePermissionMode {
+    Interactive,
+    DemoPinnedGoodMorning,
+}
 
 uniffi::setup_scaffolding!();
 
@@ -100,6 +131,7 @@ pub struct RuntimeConfig {
     pub maximum_artifact_total_bytes: u64,
     pub maximum_verified_read_bytes: u64,
     pub maximum_blob_sources: u64,
+    pub permission_mode: RuntimePermissionMode,
 }
 
 impl RuntimeConfig {
@@ -185,6 +217,7 @@ impl RuntimeConfig {
             maximum_blob_sources,
             maximum_command_items: maximum_config_items,
             maximum_command_string_bytes: maximum_config_string_bytes,
+            permission_mode: self.permission_mode,
         })
     }
 }
@@ -211,6 +244,7 @@ impl Default for RuntimeConfig {
             maximum_artifact_total_bytes: 32 * 1_024 * 1_024,
             maximum_verified_read_bytes: DEFAULT_MAXIMUM_ARTIFACT_READ_BYTES,
             maximum_blob_sources: 8,
+            permission_mode: RuntimePermissionMode::Interactive,
         }
     }
 }
@@ -234,6 +268,7 @@ struct ValidatedConfig {
     maximum_blob_sources: usize,
     maximum_command_items: usize,
     maximum_command_string_bytes: usize,
+    permission_mode: RuntimePermissionMode,
 }
 
 #[derive(Clone, Debug, thiserror::Error, uniffi::Error)]
@@ -643,6 +678,13 @@ impl RuntimeProviderUpdate {
 pub struct RuntimeAccountHandle {
     pub installation_id: u64,
     pub public_key: String,
+    pub kind: RuntimeAccountKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RuntimeAccountKind {
+    LocalSigner,
+    ReadOnly,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
@@ -656,6 +698,8 @@ pub struct RuntimeAccountSnapshot {
 pub enum RuntimeAccountFailure {
     Closed,
     InvalidSecretKey,
+    InvalidPublicKey,
+    Nip05ResolutionUnavailable,
     Capacity { limit: u64 },
     InstanceExhausted,
     StaleInstallation,
@@ -840,6 +884,18 @@ pub struct RuntimeReceiptSnapshot {
     pub latest_state_json: Option<String>,
 }
 
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct RuntimePendingWriteSnapshot {
+    pub operation_id: u64,
+    pub approval_id: String,
+    pub author: String,
+    pub d_tag: String,
+    pub aggregate_hash: String,
+    pub session_id: u64,
+    pub account: String,
+    pub draft_json: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum RuntimeWorkspaceAxis {
     Horizontal,
@@ -942,6 +998,7 @@ pub struct RuntimeSnapshot {
     pub installed_library: RuntimeInstalledLibrarySnapshot,
     pub sessions: Vec<RuntimeSessionSnapshot>,
     pub bindings: Vec<RuntimeBindingSnapshot>,
+    pub pending_writes: Vec<RuntimePendingWriteSnapshot>,
     pub receipts: Vec<RuntimeReceiptSnapshot>,
     pub workspaces: Vec<RuntimeWorkspaceDefinition>,
     pub recent_activity: Vec<RuntimeActivitySnapshot>,
@@ -964,6 +1021,7 @@ pub struct RuntimeEvent {
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct RuntimeObservationFrame {
     pub snapshot: RuntimeSnapshot,
+    pub catalog: RuntimeCatalogFeedSnapshot,
     pub events: Vec<RuntimeEvent>,
     pub oldest_available_event: u64,
     pub newest_available_event: u64,
@@ -1007,7 +1065,8 @@ pub struct RuntimeController {
     app: Arc<RuntimeApp>,
     data_plane: Arc<NmpDataPlane>,
     runtime_store: Arc<RuntimeStore>,
-    artifact_cache: FileArtifactCache,
+    artifact_cache: Arc<FileArtifactCache>,
+    catalog: Arc<RuntimeCatalogService>,
     artifact_source: CallbackArtifactSource,
     artifact_limits: ArtifactLimits,
     maximum_manifest_bytes: usize,
@@ -1025,6 +1084,7 @@ pub struct RuntimeController {
     signal: watch::Sender<u64>,
     observers: Arc<AtomicUsize>,
     maximum_observers: usize,
+    permission_mode: RuntimePermissionMode,
     closed: AtomicBool,
 }
 
@@ -1038,6 +1098,96 @@ impl fmt::Debug for RuntimeController {
             .field("maximum_observers", &self.maximum_observers)
             .field("closed", &self.closed.load(Ordering::Acquire))
             .finish()
+    }
+}
+
+/// Derives the finite permission inventory exclusively from verified bytes and
+/// Rust-owned compatibility policy.
+///
+/// Signed `requires` tags remain authoritative for general artifacts. The
+/// published Good Morning fixture predates those tags, so its immutable exact
+/// build receives the required/optional profile already pinned by the native
+/// runtime compatibility corpus. Native callers cannot select this profile or
+/// supply capability names.
+fn installation_capability_requests(
+    artifact: &VerifiedArtifact,
+) -> Result<Vec<CapabilityRequest>, String> {
+    let mut requests = artifact
+        .handle
+        .manifest()
+        .requirements()
+        .map(|domain| {
+            Capability::new(domain)
+                .map(|capability| CapabilityRequest {
+                    capability,
+                    requirement: CapabilityRequirement::Required,
+                })
+                .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let is_pinned_good_morning = artifact.handle.index().author().as_str() == GOOD_MORNING_AUTHOR
+        && artifact.handle.index().d_tag() == Some(GOOD_MORNING_D_TAG)
+        && artifact.handle.index().aggregate().as_str() == GOOD_MORNING_AGGREGATE_HASH;
+    if is_pinned_good_morning {
+        debug_assert!(requests.is_empty());
+        for (domain, requirement) in GOOD_MORNING_CAPABILITY_PROFILE {
+            requests.push(CapabilityRequest {
+                capability: Capability::new(*domain).map_err(|error| error.to_string())?,
+                requirement: *requirement,
+            });
+        }
+    }
+    if requests.len() > MAXIMUM_PERMISSION_DECISIONS {
+        return Err(format!(
+            "verified capability profile has {} domains; the maximum is {}",
+            requests.len(),
+            MAXIMUM_PERMISSION_DECISIONS
+        ));
+    }
+    Ok(requests)
+}
+
+fn installed_manifest_event_id(build: &InstalledBuild) -> Result<String, String> {
+    let metadata: serde_json::Value = serde_json::from_str(build.manifest_metadata.as_str())
+        .map_err(|error| format!("installed manifest metadata is invalid JSON: {error}"))?;
+    let event_id = metadata
+        .get("event_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "installed manifest metadata has no verified event_id".to_owned())?;
+    nmp_native_artifact::Sha256Digest::parse(event_id)
+        .map_err(|error| format!("installed manifest event_id is invalid: {error}"))?;
+    Ok(event_id.to_owned())
+}
+
+fn installed_confirmation(
+    artifact: &VerifiedArtifact,
+    build: &InstalledBuild,
+    provenance: Vec<RuntimeCatalogProvenance>,
+) -> RuntimeCatalogConfirmation {
+    RuntimeCatalogConfirmation {
+        event_id: artifact.handle.index().event_id().as_str().to_owned(),
+        coordinate: format!(
+            "35129:{}:{}",
+            build.principal.manifest_author(),
+            build.principal.d_tag()
+        ),
+        manifest_author: build.principal.manifest_author().to_owned(),
+        d_tag: Some(build.principal.d_tag().to_owned()),
+        title: Some(build.title.to_string()),
+        aggregate_hash: build.principal.aggregate_hash().to_owned(),
+        capabilities: build
+            .capability_requests
+            .iter()
+            .map(|request| RuntimeCatalogCapability {
+                domain: request.capability.as_str().to_owned(),
+                requirement: match request.requirement {
+                    CapabilityRequirement::Required => RuntimePermissionRequirement::Required,
+                    CapabilityRequirement::Optional => RuntimePermissionRequirement::Optional,
+                },
+            })
+            .collect(),
+        provenance,
     }
 }
 
@@ -1130,11 +1280,13 @@ fn open_runtime_controller(
             },
         )?,
     );
-    let artifact_cache = FileArtifactCache::open(&config.artifact_cache_path).map_err(|error| {
-        RuntimeOpenError::ArtifactCache {
-            detail: error.to_string(),
-        }
-    })?;
+    let artifact_cache = Arc::new(
+        FileArtifactCache::open(&config.artifact_cache_path).map_err(|error| {
+            RuntimeOpenError::ArtifactCache {
+                detail: error.to_string(),
+            }
+        })?,
+    );
     let data_plane = Arc::new(
         NmpDataPlane::open(
             EngineConfig {
@@ -1150,6 +1302,18 @@ fn open_runtime_controller(
         )
         .map_err(|error| RuntimeOpenError::Nmp {
             detail: error.to_string(),
+        })?,
+    );
+    let catalog = Arc::new(
+        RuntimeCatalogService::new(
+            Arc::clone(&data_plane),
+            Arc::clone(&artifact_cache),
+            config.artifact_limits,
+            config.maximum_manifest_bytes,
+            config.maximum_blob_sources,
+        )
+        .map_err(|error| RuntimeOpenError::Runtime {
+            detail: format!("catalog: {error}"),
         })?,
     );
     let shell_provider = Arc::new(
@@ -1277,6 +1441,7 @@ fn open_runtime_controller(
         data_plane,
         runtime_store,
         artifact_cache,
+        catalog,
         artifact_source: CallbackArtifactSource {
             callback: Arc::from(artifact_source),
         },
@@ -1296,6 +1461,7 @@ fn open_runtime_controller(
         signal,
         observers: Arc::new(AtomicUsize::new(0)),
         maximum_observers: config.maximum_observers,
+        permission_mode: config.permission_mode,
         closed: AtomicBool::new(false),
     }))
 }
@@ -1402,6 +1568,35 @@ impl RuntimeController {
         }
     }
 
+    /// Registers a keyless read-only identity from canonical hexadecimal or
+    /// `npub` input. Registration remains separate from activation.
+    ///
+    /// NIP-05-shaped input receives a typed refusal because the pinned NMP
+    /// public facade has no governed resolver; this boundary never performs
+    /// application-owned HTTP, DNS, or NIP-05 verification.
+    pub fn register_read_only_account(&self, public_identity: String) -> RuntimeAccountUpdate {
+        if public_identity.is_empty()
+            || public_identity.len() > 1_024
+            || public_identity.chars().any(char::is_control)
+        {
+            return RuntimeAccountUpdate {
+                accepted: false,
+                handle: None,
+                snapshot: None,
+                failure: Some(RuntimeAccountFailure::InvalidPublicKey),
+            };
+        }
+        match self.data_plane.register_read_only_account(&public_identity) {
+            Ok(handle) => self.account_update(Some(handle)),
+            Err(error) => RuntimeAccountUpdate {
+                accepted: false,
+                handle: None,
+                snapshot: None,
+                failure: Some(project_account_error(error)),
+            },
+        }
+    }
+
     /// Selects one exact, currently-owned local account installation.
     pub fn activate_local_account(&self, handle: RuntimeAccountHandle) -> RuntimeAccountUpdate {
         let handle = local_account_handle(handle);
@@ -1459,6 +1654,298 @@ impl RuntimeController {
                 snapshot: None,
                 failure: Some(project_account_error(error)),
             },
+        }
+    }
+
+    /// Reads the latest replacement from the profile's permanent finite NMP
+    /// manifest feed. A non-empty query filters that replacement locally; it
+    /// never opens another relay subscription or claims NIP-50 completeness.
+    pub fn catalog_browse(&self, query: String) -> RuntimeCatalogPageResult {
+        if self.closed.load(Ordering::Acquire) {
+            return RuntimeCatalogPageResult {
+                page: None,
+                failure: Some(runtime_catalog_failure("closed", "runtime is closed")),
+            };
+        }
+        if query.len() > 256 || query.chars().any(char::is_control) {
+            return RuntimeCatalogPageResult {
+                page: None,
+                failure: Some(runtime_catalog_failure(
+                    "invalid-query",
+                    "catalog query exceeds 256 UTF-8 bytes or contains control characters",
+                )),
+            };
+        }
+        match self.catalog.browse(Some(&query)) {
+            Ok(page) => RuntimeCatalogPageResult {
+                page: Some(page),
+                failure: None,
+            },
+            Err(error) => RuntimeCatalogPageResult {
+                page: None,
+                failure: Some(project_catalog_error(error)),
+            },
+        }
+    }
+
+    /// Returns the latest unfiltered catalog feed replacement and revision.
+    /// The underlying NMP subscription remains profile-owned and permanent.
+    pub fn catalog_feed_snapshot(&self) -> RuntimeCatalogFeedSnapshot {
+        self.catalog.feed_snapshot(None)
+    }
+
+    /// Freezes an exact review from one entry in the most recent bounded page.
+    pub fn catalog_review_entry(&self, event_id: String) -> RuntimeCatalogReviewResult {
+        if self.closed.load(Ordering::Acquire) {
+            return RuntimeCatalogReviewResult {
+                review: None,
+                failure: Some(runtime_catalog_failure("closed", "runtime is closed")),
+            };
+        }
+        match self.catalog.begin_review_for_entry(&event_id) {
+            Ok(review) => RuntimeCatalogReviewResult {
+                review: Some(review),
+                failure: None,
+            },
+            Err(error) => RuntimeCatalogReviewResult {
+                review: None,
+                failure: Some(project_catalog_error(error)),
+            },
+        }
+    }
+
+    /// Parses and freezes an exact public manifest coordinate entirely in
+    /// Rust. Native presentation never interprets Nostr coordinate identity.
+    pub fn catalog_review_manual(&self, coordinate: String) -> RuntimeCatalogReviewResult {
+        if self.closed.load(Ordering::Acquire) {
+            return RuntimeCatalogReviewResult {
+                review: None,
+                failure: Some(runtime_catalog_failure("closed", "runtime is closed")),
+            };
+        }
+        let coordinate = match parse_catalog_coordinate(&coordinate) {
+            Ok(coordinate) => coordinate,
+            Err(detail) => {
+                return RuntimeCatalogReviewResult {
+                    review: None,
+                    failure: Some(runtime_catalog_failure("invalid-coordinate", detail)),
+                };
+            }
+        };
+        match self.catalog.begin_review(coordinate) {
+            Ok(review) => RuntimeCatalogReviewResult {
+                review: Some(review),
+                failure: None,
+            },
+            Err(error) => RuntimeCatalogReviewResult {
+                review: None,
+                failure: Some(project_catalog_error(error)),
+            },
+        }
+    }
+
+    /// Cancels and discards one opaque exact review without side effects.
+    pub fn catalog_cancel_review(&self, token: String) -> RuntimeCatalogCancellationResult {
+        match self.catalog.cancel_review(&token) {
+            Ok(()) => RuntimeCatalogCancellationResult {
+                cancelled: true,
+                failure: None,
+            },
+            Err(error) => RuntimeCatalogCancellationResult {
+                cancelled: false,
+                failure: Some(project_catalog_error(error)),
+            },
+        }
+    }
+
+    /// Cancels transient exact review/acquisition work. The profile-owned
+    /// catalog feed stays subscribed until the profile closes.
+    pub fn catalog_cancel_pending(&self) -> RuntimeCatalogCancellationResult {
+        self.catalog.cancel_pending();
+        RuntimeCatalogCancellationResult {
+            cancelled: true,
+            failure: None,
+        }
+    }
+
+    /// Confirms one opaque frozen review and installs its immutable exact
+    /// bytes. The pinned Good Morning demo profile receives the Rust-owned
+    /// exact-build grant set immediately so the native Workbench can exercise
+    /// the complete journey; other builds remain review-gated. This never
+    /// launches the napplet.
+    pub fn catalog_confirm_install(
+        &self,
+        token: String,
+        expected_author: String,
+        expected_d_tag: String,
+        expected_aggregate_hash: String,
+    ) -> RuntimeCatalogConfirmationResult {
+        if self.closed.load(Ordering::Acquire) {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure("closed", "runtime is closed")),
+            };
+        }
+        let confirmed = match self.catalog.confirm_review(&token) {
+            Ok(confirmed) => confirmed,
+            Err(error) => {
+                return RuntimeCatalogConfirmationResult {
+                    confirmation: None,
+                    artifact: None,
+                    failure: Some(project_catalog_error(error)),
+                };
+            }
+        };
+        let confirmation = confirmed.confirmation.clone();
+        if confirmation.manifest_author != expected_author
+            || confirmation.d_tag.as_deref() != Some(expected_d_tag.as_str())
+            || confirmation.aggregate_hash != expected_aggregate_hash
+        {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure(
+                    "confirmation-mismatch",
+                    "native confirmation did not match the frozen exact review",
+                )),
+            };
+        }
+        let principal = match Principal::new(
+            confirmation.manifest_author.clone(),
+            expected_d_tag,
+            confirmation.aggregate_hash.clone(),
+        ) {
+            Ok(principal) => principal,
+            Err(error) => {
+                return RuntimeCatalogConfirmationResult {
+                    confirmation: None,
+                    artifact: None,
+                    failure: Some(runtime_catalog_failure(
+                        "unsupported-manifest-identity",
+                        error.to_string(),
+                    )),
+                };
+            }
+        };
+        let artifact = Arc::new(VerifiedArtifact {
+            handle: Arc::new(confirmed.into_handle()),
+            principal: Some(principal.clone()),
+        });
+        self.install(Arc::clone(&artifact));
+        let installed = self
+            .app
+            .snapshot()
+            .library
+            .builds
+            .iter()
+            .any(|candidate| candidate.build.principal == principal);
+        if !installed {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure(
+                    "install-refused",
+                    "the verified exact build was not accepted by the runtime library",
+                )),
+            };
+        }
+        RuntimeCatalogConfirmationResult {
+            confirmation: Some(confirmation),
+            artifact: Some(artifact),
+            failure: None,
+        }
+    }
+
+    /// Reopens one installed exact build from its retained verifier handle.
+    ///
+    /// Native supplies only the exact library coordinate. Rust checks the
+    /// unfiltered persistent installation and returns the already-attached
+    /// immutable handle only when its signed event, coordinate, aggregate, and
+    /// capability inventory still match. After process restart this fails
+    /// closed until the artifact owner exposes an exact persistent-cache reopen
+    /// seam; this boundary never resolves a newer replaceable manifest as a
+    /// substitute for the installed event.
+    ///
+    /// This call is blocking and must be invoked away from a native UI thread.
+    pub fn reacquire_installed_artifact(
+        &self,
+        coordinate: RuntimeExactBuildCoordinate,
+    ) -> RuntimeCatalogConfirmationResult {
+        if self.closed.load(Ordering::Acquire) {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure("closed", "runtime is closed")),
+            };
+        }
+        let principal = match Principal::new(
+            coordinate.manifest_author,
+            coordinate.d_tag,
+            coordinate.aggregate_hash,
+        ) {
+            Ok(principal) => principal,
+            Err(error) => {
+                return RuntimeCatalogConfirmationResult {
+                    confirmation: None,
+                    artifact: None,
+                    failure: Some(runtime_catalog_failure(
+                        "invalid-exact-build-coordinate",
+                        error.to_string(),
+                    )),
+                };
+            }
+        };
+        let installed = match self.runtime_store.installed_builds() {
+            Ok(installed) => installed
+                .into_iter()
+                .find(|candidate| candidate.principal == principal),
+            Err(error) => {
+                return RuntimeCatalogConfirmationResult {
+                    confirmation: None,
+                    artifact: None,
+                    failure: Some(runtime_catalog_failure(
+                        "installed-library-unavailable",
+                        error.to_string(),
+                    )),
+                };
+            }
+        };
+        let Some(installed) = installed else {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure(
+                    "not-installed",
+                    "the exact build is not present in the runtime library",
+                )),
+            };
+        };
+        let retained_handle = { self.artifacts.lock().get(&principal).cloned() };
+        let Some(handle) = retained_handle else {
+            return RuntimeCatalogConfirmationResult {
+                confirmation: None,
+                artifact: None,
+                failure: Some(runtime_catalog_failure(
+                    "artifact-handle-unavailable",
+                    "the installed exact bytes are not retained in this runtime process",
+                )),
+            };
+        };
+        let artifact = match self.verified_installed_artifact(&installed, handle) {
+            Ok(artifact) => artifact,
+            Err(failure) => {
+                return RuntimeCatalogConfirmationResult {
+                    confirmation: None,
+                    artifact: None,
+                    failure: Some(failure),
+                };
+            }
+        };
+        RuntimeCatalogConfirmationResult {
+            confirmation: Some(installed_confirmation(&artifact, &installed, Vec::new())),
+            artifact: Some(artifact),
+            failure: None,
         }
     }
 
@@ -1698,21 +2185,10 @@ impl RuntimeController {
                 .title()
                 .unwrap_or("Untitled napplet"),
         );
-        let capability_requests = artifact
-            .handle
-            .manifest()
-            .requirements()
-            .map(|domain| {
-                Capability::new(domain).map(|capability| CapabilityRequest {
-                    capability,
-                    requirement: CapabilityRequirement::Required,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>();
-        let capability_requests = match capability_requests {
+        let capability_requests = match installation_capability_requests(&artifact) {
             Ok(requests) => requests,
             Err(error) => {
-                self.record_refusal("invalid-capability-request", error.to_string());
+                self.record_refusal("invalid-capability-request", error);
                 return;
             }
         };
@@ -1722,14 +2198,57 @@ impl RuntimeController {
         let executable: Arc<dyn ExecutableArtifact> = artifact.handle.clone();
         self.app.dispatch(PlatformCommand::InstallVerified {
             build: InstalledBuild {
-                principal,
+                principal: principal.clone(),
                 title,
                 manifest_metadata: metadata,
                 capability_requests,
             },
             artifact: executable,
         });
+        self.grant_good_morning_demo_permissions(
+            principal.manifest_author(),
+            principal.d_tag(),
+            principal.aggregate_hash(),
+        );
         bump_signal(&self.signal);
+    }
+
+    fn grant_good_morning_demo_permissions(&self, author: &str, d_tag: &str, aggregate_hash: &str) {
+        if self.permission_mode != RuntimePermissionMode::DemoPinnedGoodMorning {
+            return;
+        }
+        let is_good_morning = author == GOOD_MORNING_AUTHOR
+            && d_tag == GOOD_MORNING_D_TAG
+            && aggregate_hash == GOOD_MORNING_AGGREGATE_HASH;
+        if !is_good_morning {
+            return;
+        }
+        let Ok(principal) = Principal::new(author, d_tag, aggregate_hash) else {
+            return;
+        };
+        let Ok(review) = self.app.permission_review(&principal) else {
+            return;
+        };
+        let decisions = review
+            .capabilities
+            .into_iter()
+            .map(|capability| PermissionDecision {
+                capability: capability.capability,
+                decision: capability
+                    .decision_options
+                    .into_iter()
+                    .find(|option| {
+                        option.valid && option.decision == GrantDecision::AllowExactBuild
+                    })
+                    .map_or(GrantDecision::Denied, |option| option.decision),
+            })
+            .collect::<Vec<_>>();
+        if !decisions.is_empty() {
+            self.app.dispatch(PlatformCommand::ApplyPermissionBatch {
+                principal: principal.clone(),
+                decisions,
+            });
+        }
     }
 
     /// Applies the Rust-owned, finite installed-library filter. The resulting
@@ -2045,17 +2564,19 @@ impl RuntimeController {
     }
 
     pub fn launch(&self, artifact: Arc<VerifiedArtifact>, profile: RuntimeExecutionProfile) {
-        let requirements = artifact
-            .handle
-            .manifest()
-            .requirements()
-            .collect::<Vec<_>>();
-        if requirements.len() > self.maximum_command_items {
+        let capability_requests = match installation_capability_requests(&artifact) {
+            Ok(requests) => requests,
+            Err(error) => {
+                self.record_refusal("invalid-capability-request", error);
+                return;
+            }
+        };
+        if capability_requests.len() > self.maximum_command_items {
             self.record_refusal(
                 "required-domain-capacity",
                 format!(
-                    "verified manifest requires {} domains; the maximum is {}",
-                    requirements.len(),
+                    "verified capability profile has {} domains; the maximum is {}",
+                    capability_requests.len(),
                     self.maximum_command_items
                 ),
             );
@@ -2069,15 +2590,10 @@ impl RuntimeController {
             return;
         };
         let mut domains = BTreeSet::new();
-        for domain in requirements {
-            let domain = match Capability::new(domain) {
-                Ok(domain) => domain,
-                Err(error) => {
-                    self.record_refusal("invalid-capability", error.to_string());
-                    return;
-                }
-            };
-            domains.insert(domain);
+        for request in capability_requests {
+            if request.requirement == CapabilityRequirement::Required {
+                domains.insert(request.capability);
+            }
         }
         self.app.dispatch(PlatformCommand::Launch {
             principal,
@@ -2123,6 +2639,24 @@ impl RuntimeController {
         self.app.dispatch(PlatformCommand::Crash {
             session: SessionId(session_id),
             reason: Arc::from(reason),
+        });
+        bump_signal(&self.signal);
+    }
+
+    /// Resolves one Rust-retained provider write proposal. Native supplies
+    /// only the bounded operation id and decision; the exact principal,
+    /// account, correlation, and draft remain inside RuntimeApp.
+    pub fn decide_provider_write(&self, operation_id: u64, approve: bool) {
+        if operation_id == 0 {
+            self.record_refusal(
+                "invalid-provider-operation",
+                "provider operation identifiers are positive",
+            );
+            return;
+        }
+        self.app.dispatch(PlatformCommand::DecideProviderWrite {
+            operation: ProviderOperationId(operation_id),
+            approve,
         });
         bump_signal(&self.signal);
     }
@@ -2248,6 +2782,7 @@ impl RuntimeController {
         let observers = Arc::clone(&self.observers);
         let mut app_observer = self.app.observe();
         let mut signal = self.signal.subscribe();
+        let mut catalog_signal = self.catalog.subscribe();
         let spawn = thread::Builder::new()
             .name("runtime-ffi-observer".to_owned())
             .spawn(move || {
@@ -2272,6 +2807,7 @@ impl RuntimeController {
                         event_cursor = batch.newest_available;
                         observer.update(RuntimeObservationFrame {
                             snapshot: controller.project_snapshot(&app_observer.latest()),
+                            catalog: controller.catalog.feed_snapshot(None),
                             events: batch
                                 .events
                                 .into_iter()
@@ -2288,6 +2824,11 @@ impl RuntimeController {
                                 }
                             }
                             changed = signal.changed() => {
+                                if changed.is_err() {
+                                    break;
+                                }
+                            }
+                            changed = catalog_signal.changed() => {
                                 if changed.is_err() {
                                     break;
                                 }
@@ -2312,6 +2853,7 @@ impl RuntimeController {
 
     pub fn close(&self) {
         if !self.closed.swap(true, Ordering::AcqRel) {
+            self.catalog.close();
             self.app.dispatch(PlatformCommand::Close);
             self.data_plane.close();
             bump_signal(&self.signal);
@@ -2320,6 +2862,40 @@ impl RuntimeController {
 }
 
 impl RuntimeController {
+    fn verified_installed_artifact(
+        &self,
+        build: &InstalledBuild,
+        handle: Arc<VerifiedArtifactHandle>,
+    ) -> Result<Arc<VerifiedArtifact>, RuntimeCatalogFailure> {
+        let expected_event_id = installed_manifest_event_id(build)
+            .map_err(|detail| runtime_catalog_failure("installed-metadata-invalid", detail))?;
+        let index = handle.index();
+        if index.kind() != 35_129
+            || index.event_id().as_str() != expected_event_id
+            || index.author().as_str() != build.principal.manifest_author()
+            || index.d_tag() != Some(build.principal.d_tag())
+            || index.aggregate().as_str() != build.principal.aggregate_hash()
+        {
+            return Err(runtime_catalog_failure(
+                "installed-artifact-mismatch",
+                "the verifier handle does not match the persisted exact signed manifest",
+            ));
+        }
+        let artifact = Arc::new(VerifiedArtifact {
+            handle,
+            principal: Some(build.principal.clone()),
+        });
+        let requests = installation_capability_requests(&artifact)
+            .map_err(|detail| runtime_catalog_failure("installed-capability-mismatch", detail))?;
+        if requests != build.capability_requests {
+            return Err(runtime_catalog_failure(
+                "installed-capability-mismatch",
+                "the verified manifest capability inventory differs from the persisted installation",
+            ));
+        }
+        Ok(artifact)
+    }
+
     fn refusal(&self, code: impl Into<String>, detail: impl Into<String>) -> RuntimeRefusal {
         RuntimeRefusal {
             code: code.into(),
@@ -2486,6 +3062,20 @@ impl RuntimeController {
                     revision: binding.revision,
                 })
                 .collect(),
+            pending_writes: snapshot
+                .pending_writes
+                .iter()
+                .map(|pending| RuntimePendingWriteSnapshot {
+                    operation_id: pending.operation.0,
+                    approval_id: pending.approval_id.to_string(),
+                    author: pending.principal.manifest_author().to_owned(),
+                    d_tag: pending.principal.d_tag().to_owned(),
+                    aggregate_hash: pending.principal.aggregate_hash().to_owned(),
+                    session_id: pending.session.0,
+                    account: pending.account.0.to_string(),
+                    draft_json: pending.draft.as_str().to_owned(),
+                })
+                .collect(),
             receipts: snapshot
                 .receipts
                 .iter()
@@ -2641,6 +3231,54 @@ fn map_coordinate(coordinate: ArtifactCoordinate) -> Result<ManifestCoordinate, 
         ArtifactCoordinate::Named { author, d_tag } => ManifestCoordinate::named(&author, &d_tag),
     }
     .map_err(|error| error.to_string())
+}
+
+fn parse_catalog_coordinate(value: &str) -> Result<ManifestCoordinate, String> {
+    if value.is_empty()
+        || value.len() > 2_048
+        || value.chars().any(char::is_control)
+        || value.trim() != value
+    {
+        return Err(
+            "coordinate must be 1..=2048 UTF-8 bytes without controls or surrounding whitespace"
+                .to_owned(),
+        );
+    }
+    let mut fields = value.splitn(3, ':');
+    let kind = fields.next().unwrap_or_default();
+    let first = fields
+        .next()
+        .ok_or_else(|| "coordinate is missing its author or event identifier".to_owned())?;
+    let second = fields.next();
+    let coordinate = match (kind, second) {
+        ("5129", Some(author)) => ManifestCoordinate::snapshot(first, author),
+        ("15129", None) => ManifestCoordinate::root(first),
+        ("35129", Some(d_tag)) => ManifestCoordinate::named(first, d_tag),
+        ("5129", None) => {
+            return Err("snapshot coordinate must be 5129:event-id:author".to_owned());
+        }
+        ("35129", None) => {
+            return Err("named coordinate must be 35129:author:d-tag".to_owned());
+        }
+        _ => {
+            return Err(
+                "supported coordinates are 5129:event-id:author, 15129:author, and 35129:author:d-tag"
+                    .to_owned(),
+            );
+        }
+    };
+    coordinate.map_err(|error| error.to_string())
+}
+
+fn runtime_catalog_failure(
+    code: impl Into<String>,
+    detail: impl Into<String>,
+) -> RuntimeCatalogFailure {
+    RuntimeCatalogFailure {
+        code: code.into(),
+        detail: detail.into(),
+        provenance: Vec::new(),
+    }
 }
 
 fn map_profile(profile: RuntimeExecutionProfile) -> ExecutionProfile {
@@ -2827,6 +3465,10 @@ fn local_account_handle(handle: RuntimeAccountHandle) -> LocalAccountHandle {
     LocalAccountHandle {
         installation_id: handle.installation_id,
         account: nmp_native_runtime_core::AccountRef(Arc::from(handle.public_key)),
+        kind: match handle.kind {
+            RuntimeAccountKind::LocalSigner => LocalAccountKind::LocalSigner,
+            RuntimeAccountKind::ReadOnly => LocalAccountKind::ReadOnly,
+        },
     }
 }
 
@@ -2834,6 +3476,10 @@ fn project_account_handle(handle: LocalAccountHandle) -> RuntimeAccountHandle {
     RuntimeAccountHandle {
         installation_id: handle.installation_id,
         public_key: handle.account.0.to_string(),
+        kind: match handle.kind {
+            LocalAccountKind::LocalSigner => RuntimeAccountKind::LocalSigner,
+            LocalAccountKind::ReadOnly => RuntimeAccountKind::ReadOnly,
+        },
     }
 }
 
@@ -2856,6 +3502,10 @@ fn project_account_error(error: AccountLifecycleError) -> RuntimeAccountFailure 
     match error {
         AccountLifecycleError::Closed => RuntimeAccountFailure::Closed,
         AccountLifecycleError::InvalidSecretKey => RuntimeAccountFailure::InvalidSecretKey,
+        AccountLifecycleError::InvalidPublicKey => RuntimeAccountFailure::InvalidPublicKey,
+        AccountLifecycleError::Nip05ResolutionUnavailable => {
+            RuntimeAccountFailure::Nip05ResolutionUnavailable
+        }
         AccountLifecycleError::Capacity { limit } => RuntimeAccountFailure::Capacity {
             limit: limit as u64,
         },
@@ -3535,10 +4185,13 @@ mod tests {
             .artifact
             .unwrap();
         controller.install(Arc::clone(&artifact));
-        for domain in domains {
+        for domain in ["identity", "inc", "outbox"]
+            .into_iter()
+            .chain(domains.iter().copied())
+        {
             controller.set_grant(
                 Arc::clone(&artifact),
-                (*domain).to_owned(),
+                domain.to_owned(),
                 RuntimeSensitivity::Ordinary,
                 RuntimeGrantDecision::AllowExactBuild,
             );
@@ -3587,7 +4240,7 @@ mod tests {
             RuntimeSensitivity::Ordinary,
             RuntimeGrantDecision::AllowExactBuild,
         );
-        for domain in ["identity", "inc"] {
+        for domain in ["identity", "inc", "outbox"] {
             controller.set_grant(
                 Arc::clone(&artifact),
                 domain.to_owned(),
@@ -3599,7 +4252,7 @@ mod tests {
         let runtime_snapshot = controller.snapshot();
         assert_eq!(
             runtime_snapshot.sessions[0].domains,
-            ["identity", "inc", "shell"]
+            ["identity", "inc", "outbox", "shell"]
         );
         let session = runtime_snapshot.sessions[0].id;
         controller.mapped_envelope(session, br#"{"type":"shell.ready"}"#.to_vec());
@@ -3655,6 +4308,60 @@ mod tests {
         controller.close();
         assert!(controller.snapshot().closed);
         assert!(fs::metadata(temp.path().join("runtime.sqlite3")).is_ok());
+    }
+
+    #[test]
+    fn pinned_good_morning_installs_rust_owned_permission_profile() {
+        let temp = TempDir::new().unwrap();
+        let controller = controller(&temp);
+        let artifact = controller
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: GOOD_MORNING_D_TAG.to_owned(),
+                },
+            )
+            .artifact
+            .expect("published fixture verifies");
+        assert!(
+            artifact.requires().is_empty(),
+            "the immutable manifest remains unchanged"
+        );
+
+        controller.install(Arc::clone(&artifact));
+        let review = controller
+            .permission_review(exact_coordinate(&artifact))
+            .review
+            .expect("the installed exact build has a permission review");
+        assert_eq!(
+            review
+                .capabilities
+                .iter()
+                .map(|capability| { (capability.domain.as_str(), capability.requirement) })
+                .collect::<Vec<_>>(),
+            vec![
+                ("identity", RuntimePermissionRequirement::Required),
+                ("inc", RuntimePermissionRequirement::Required),
+                ("outbox", RuntimePermissionRequirement::Required),
+                ("resource", RuntimePermissionRequirement::Optional),
+                ("theme", RuntimePermissionRequirement::Optional),
+                ("link", RuntimePermissionRequirement::Optional),
+            ]
+        );
+        assert!(!review.launch_permitted);
+        let outbox = review
+            .capabilities
+            .iter()
+            .find(|capability| capability.domain == "outbox")
+            .expect("outbox permission");
+        assert_eq!(outbox.sensitivity, RuntimePermissionSensitivity::Sensitive);
+
+        controller.launch(artifact, RuntimeExecutionProfile::Legacy);
+        assert!(
+            controller.snapshot().sessions.is_empty(),
+            "required compatibility capabilities are enforced before execution"
+        );
     }
 
     #[test]
@@ -3740,6 +4447,91 @@ mod tests {
     }
 
     #[test]
+    fn good_morning_outbox_grant_survives_default_profile_restart() {
+        let temp = TempDir::new().unwrap();
+        let runtime = controller(&temp);
+        let artifact = runtime
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("published fixture verifies");
+        runtime.install(Arc::clone(&artifact));
+        let coordinate = exact_coordinate(&artifact);
+        let review = runtime
+            .permission_review(coordinate.clone())
+            .review
+            .expect("installed Good Morning has a permission review");
+        let update = runtime.apply_permission_decisions(RuntimePermissionDecisionBatch {
+            coordinate: coordinate.clone(),
+            decisions: review
+                .capabilities
+                .iter()
+                .map(|capability| RuntimePermissionDecisionSelection {
+                    domain: capability.domain.clone(),
+                    decision: match capability.requirement {
+                        RuntimePermissionRequirement::Required => {
+                            RuntimeGrantDecision::AllowExactBuild
+                        }
+                        RuntimePermissionRequirement::Optional => RuntimeGrantDecision::Denied,
+                    },
+                })
+                .collect(),
+        });
+        assert!(update.applied);
+        assert!(update.review.unwrap().launch_permitted);
+        runtime.close();
+        drop(runtime);
+
+        let reopened = controller(&temp);
+        let artifact = reopened
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("published fixture verifies after restart");
+        reopened.install(Arc::clone(&artifact));
+        let review = reopened
+            .permission_review(coordinate)
+            .review
+            .expect("Good Morning review restores after restart");
+        for domain in ["identity", "inc", "outbox"] {
+            let capability = review
+                .capabilities
+                .iter()
+                .find(|capability| capability.domain == domain)
+                .unwrap_or_else(|| panic!("missing required {domain} capability"));
+            assert_eq!(
+                capability.existing_decision,
+                RuntimePermissionExistingDecision::AllowExactBuild
+            );
+        }
+        assert!(review.launch_permitted);
+
+        reopened.launch(artifact, RuntimeExecutionProfile::Legacy);
+        let session = reopened.snapshot().sessions[0].clone();
+        assert_eq!(
+            session.domains,
+            ["identity", "inc", "outbox", "shell"],
+            "the restored exact-build grant must negotiate NAP-OUTBOX"
+        );
+        reopened.mapped_envelope(session.id, br#"{"type":"shell.ready"}"#.to_vec());
+        assert_eq!(
+            response_of_type(&reopened, "shell.init")["capabilities"]["domains"],
+            serde_json::json!(["identity", "inc", "outbox", "shell"]),
+            "the trusted shell must receive the same Rust-negotiated domain set"
+        );
+    }
+
+    #[test]
     fn installed_library_projects_filter_lifecycle_workspace_and_uninstall() {
         let temp = TempDir::new().unwrap();
         let controller = controller(&temp);
@@ -3790,6 +4582,19 @@ mod tests {
         );
 
         controller.launch(Arc::clone(&artifact), RuntimeExecutionProfile::Legacy);
+        assert!(
+            controller.snapshot().sessions.is_empty(),
+            "the pinned required profile must refuse before execution"
+        );
+        for domain in ["identity", "inc", "outbox"] {
+            controller.set_grant(
+                Arc::clone(&artifact),
+                domain.to_owned(),
+                RuntimeSensitivity::Sensitive,
+                RuntimeGrantDecision::AllowExactBuild,
+            );
+        }
+        controller.launch(Arc::clone(&artifact), RuntimeExecutionProfile::Legacy);
         let session = controller.snapshot().installed_library.builds[0].active_session_ids[0];
         controller.suspend(session);
         assert_eq!(controller.snapshot().sessions[0].state, "suspended");
@@ -3822,6 +4627,111 @@ mod tests {
             ),
             "the boundary must release its live verifier handle after kernel-confirmed uninstall"
         );
+    }
+
+    #[test]
+    fn installed_artifact_reacquisition_reuses_the_live_exact_handle() {
+        let temp = TempDir::new().unwrap();
+        let runtime = controller(&temp);
+        let artifact = runtime
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("fixture verifies");
+        let coordinate = exact_coordinate(&artifact);
+        runtime.install(artifact);
+        runtime.set_library_filter("does-not-match".to_owned());
+
+        let reopened = runtime.reacquire_installed_artifact(coordinate);
+        assert!(reopened.failure.is_none());
+        let confirmation = reopened.confirmation.expect("exact confirmation");
+        let event: Value = serde_json::from_slice(EVENT).unwrap();
+        assert_eq!(
+            confirmation.event_id,
+            event["id"].as_str().expect("fixture event id")
+        );
+        assert_eq!(confirmation.manifest_author, AUTHOR);
+        assert_eq!(confirmation.d_tag.as_deref(), Some("good-morning"));
+        assert_eq!(confirmation.aggregate_hash, GOOD_MORNING_AGGREGATE_HASH);
+        assert_eq!(
+            reopened
+                .artifact
+                .expect("opaque artifact")
+                .handle
+                .read_verified(nmp_native_artifact::INDEX_PATH, INDEX.len())
+                .unwrap(),
+            INDEX
+        );
+    }
+
+    #[test]
+    fn persisted_install_without_a_live_handle_fails_closed_after_restart() {
+        let temp = TempDir::new().unwrap();
+        let runtime = controller(&temp);
+        let artifact = runtime
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("fixture verifies");
+        runtime.install(Arc::clone(&artifact));
+        let coordinate = exact_coordinate(&artifact);
+        runtime.close();
+        drop(runtime);
+
+        let reopened = controller(&temp);
+        let result = reopened.reacquire_installed_artifact(coordinate);
+        assert_eq!(
+            reopened.snapshot().installed_library.builds[0].availability,
+            RuntimeInstalledBuildAvailability::MetadataOnly
+        );
+        assert!(result.artifact.is_none());
+        assert_eq!(
+            result.failure.expect("typed refusal").code,
+            "artifact-handle-unavailable"
+        );
+    }
+
+    #[test]
+    fn installed_artifact_reattach_refuses_signed_event_drift() {
+        let temp = TempDir::new().unwrap();
+        let runtime = controller(&temp);
+        let artifact = runtime
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("fixture verifies");
+        runtime.install(Arc::clone(&artifact));
+        let mut installed = runtime.app.snapshot().library.builds[0].build.clone();
+        installed.manifest_metadata = BoundedJson::from_value(
+            &serde_json::json!({
+                "event_id": "0".repeat(64),
+                "kind": 35_129,
+                "mode": "single-file",
+                "paths": 1,
+            }),
+            1_024,
+        )
+        .unwrap();
+
+        let failure = runtime
+            .verified_installed_artifact(&installed, Arc::clone(&artifact.handle))
+            .expect_err("a different signed event must not inherit the persisted install");
+        assert_eq!(failure.code, "installed-artifact-mismatch");
     }
 
     #[test]
@@ -4149,6 +5059,7 @@ mod tests {
         let registered = controller.register_local_account(format!("{:064x}", 7_u8));
         assert!(registered.accepted);
         let first = registered.handle.unwrap();
+        assert_eq!(first.kind, RuntimeAccountKind::LocalSigner);
         assert_eq!(
             registered.snapshot.unwrap().active_public_key,
             None,
@@ -4192,6 +5103,59 @@ mod tests {
         assert_eq!(
             controller.account_snapshot().failure,
             Some(RuntimeAccountFailure::Closed)
+        );
+    }
+
+    #[test]
+    fn read_only_account_lifecycle_is_keyless_typed_and_explicit() {
+        let temp = TempDir::new().unwrap();
+        let controller = controller(&temp);
+        let npub = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6";
+
+        let registered = controller.register_read_only_account(npub.to_owned());
+        assert!(registered.accepted);
+        let handle = registered.handle.unwrap();
+        assert_eq!(handle.kind, RuntimeAccountKind::ReadOnly);
+        assert_eq!(handle.public_key.len(), 64);
+        assert_eq!(
+            registered.snapshot.unwrap().active_public_key,
+            None,
+            "read-only registration must not silently switch identity"
+        );
+
+        let activated = controller.activate_local_account(handle.clone());
+        assert!(activated.accepted);
+        assert_eq!(
+            activated.snapshot.unwrap().active_public_key.as_deref(),
+            Some(handle.public_key.as_str())
+        );
+        assert_eq!(
+            controller
+                .logout_local_account()
+                .snapshot
+                .unwrap()
+                .active_public_key,
+            None
+        );
+        assert!(controller.remove_local_account(handle).accepted);
+        assert!(
+            controller
+                .account_snapshot()
+                .snapshot
+                .unwrap()
+                .local_accounts
+                .is_empty()
+        );
+
+        let nip05 = controller.register_read_only_account("pablo@example.com".to_owned());
+        assert_eq!(
+            nip05.failure,
+            Some(RuntimeAccountFailure::Nip05ResolutionUnavailable)
+        );
+        let invalid = controller.register_read_only_account("not-a-key".to_owned());
+        assert_eq!(
+            invalid.failure,
+            Some(RuntimeAccountFailure::InvalidPublicKey)
         );
     }
 
@@ -4264,5 +5228,35 @@ mod tests {
             "unexpected refusal detail: {}",
             error.detail
         );
+    }
+
+    #[test]
+    fn catalog_coordinates_are_parsed_only_at_the_rust_boundary() {
+        let author = "a".repeat(64);
+        let event_id = "b".repeat(64);
+        assert!(matches!(
+            parse_catalog_coordinate(&format!("35129:{author}:good-morning")).unwrap(),
+            ManifestCoordinate::Named { .. }
+        ));
+        assert!(matches!(
+            parse_catalog_coordinate(&format!("15129:{author}")).unwrap(),
+            ManifestCoordinate::Root { .. }
+        ));
+        assert!(matches!(
+            parse_catalog_coordinate(&format!("5129:{event_id}:{author}")).unwrap(),
+            ManifestCoordinate::Snapshot { .. }
+        ));
+        for invalid in [
+            "",
+            "35129:author",
+            "15129:author:extra",
+            "unknown:author:d-tag",
+            " 35129:author:d-tag",
+        ] {
+            assert!(
+                parse_catalog_coordinate(invalid).is_err(),
+                "unexpectedly accepted {invalid:?}"
+            );
+        }
     }
 }
