@@ -493,6 +493,16 @@ public protocol WorkbenchLayoutPersisting {
     ) throws
 }
 
+public extension WorkbenchLayoutPersisting {
+    func saveLayout(
+        _ snapshot: WorkbenchLayoutSnapshot,
+        workspaceID: String,
+        retainedReceiptIDs _: [String]
+    ) throws {
+        try saveLayout(snapshot, workspaceID: workspaceID)
+    }
+}
+
 @MainActor
 public struct VolatileWorkbenchLayoutStore: WorkbenchLayoutPersisting {
     public init() {}

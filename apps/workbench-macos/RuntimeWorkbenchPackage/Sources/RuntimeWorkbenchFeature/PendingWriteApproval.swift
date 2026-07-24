@@ -54,6 +54,7 @@ final class RuntimeWorkbenchPendingWriteModel: ObservableObject {
 @MainActor
 final class RuntimeWorkbenchReceiptModel: ObservableObject {
     @Published private(set) var receipts: [NativeRuntimeReceipt] = []
+    @Published private(set) var revision: UInt64 = 0
 
     private var observation: NativeRuntimeReceiptObservation?
 
@@ -76,6 +77,7 @@ final class RuntimeWorkbenchReceiptModel: ObservableObject {
         case let .authoritative(projection),
              let .next(projection, _, _):
             receipts = projection.receipts
+            revision = projection.revision
         }
     }
 

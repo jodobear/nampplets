@@ -269,6 +269,9 @@ public struct ContentView: View {
                 accountSnapshot = accountManager.snapshot()
             }
         }
+        .onChange(of: receipts.revision) { _, _ in
+            scheduleLayoutSave()
+        }
         .onChange(of: isCatalogSheetPresented) { _, isPresented in
             guard
                 !isPresented,
@@ -1068,7 +1071,8 @@ public struct ContentView: View {
             do {
                 try layoutStore.saveLayout(
                     layout.snapshot,
-                    workspaceID: Self.workspaceID
+                    workspaceID: Self.workspaceID,
+                    retainedReceiptIDs: receipts.receipts.map(\.id)
                 )
                 layoutPersistenceError = nil
             } catch {
@@ -1084,7 +1088,8 @@ public struct ContentView: View {
         do {
             try layoutStore.saveLayout(
                 layout.snapshot,
-                workspaceID: Self.workspaceID
+                workspaceID: Self.workspaceID,
+                retainedReceiptIDs: receipts.receipts.map(\.id)
             )
             layoutPersistenceError = nil
         } catch {

@@ -204,6 +204,18 @@ public final class RuntimeWorkbenchLayoutStore:
         _ snapshot: WorkbenchLayoutSnapshot,
         workspaceID: String
     ) throws {
+        try saveLayout(
+            snapshot,
+            workspaceID: workspaceID,
+            retainedReceiptIDs: []
+        )
+    }
+
+    public func saveLayout(
+        _ snapshot: WorkbenchLayoutSnapshot,
+        workspaceID: String,
+        retainedReceiptIDs: [String]
+    ) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let preferences = try encoder.encode(snapshot)
@@ -231,7 +243,7 @@ public final class RuntimeWorkbenchLayoutStore:
             focusedSlotId: snapshot.selectedWindowID?.rawValue,
             activityDrawerVisible: false,
             preferencesJson: preferencesJSON,
-            retainedReceiptIds: []
+            retainedReceiptIds: retainedReceiptIDs
         )
         let result = profile.native.saveWorkspace(definition)
         guard result.accepted else {

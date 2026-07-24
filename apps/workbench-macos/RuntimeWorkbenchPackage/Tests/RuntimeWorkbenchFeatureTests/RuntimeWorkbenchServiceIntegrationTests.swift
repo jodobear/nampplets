@@ -90,6 +90,32 @@ import Testing
     }
 }
 
+@MainActor
+@Test func nativeLayoutAdapterPersistsRetainedReceiptIDsForRestart() throws {
+    let root = temporaryRuntimeRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let workspaceID = "receipt-restart-proof"
+    let profile = try WorkbenchRuntimeProfile.open(storageRoot: root)
+    defer { profile.close() }
+    let store = RuntimeWorkbenchLayoutStore(profile: profile)
+
+    try store.saveLayout(
+        WorkbenchLayoutSnapshot(
+            mode: .freeform,
+            windows: [.goodMorning],
+            selectedWindowID: WorkbenchCanvasWindow.goodMorning.id
+        ),
+        workspaceID: workspaceID,
+        retainedReceiptIDs: ["receipt-1", "receipt-2"]
+    )
+    let restored = try #require(
+        profile.native.restoreWorkspaces().workspaces.first {
+            $0.workspaceId == workspaceID
+        }
+    )
+    #expect(restored.retainedReceiptIds == ["receipt-1", "receipt-2"])
+}
+
 @Test func workbenchDefaultUsesAStableProfileScopedKeychainNamespace() throws {
     let firstRoot = URL(fileURLWithPath: "/private/workbench/profile-a")
     let secondRoot = URL(fileURLWithPath: "/private/workbench/profile-b")
