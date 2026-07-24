@@ -93,6 +93,21 @@ import Testing
 }
 
 @MainActor
+@Test func confirmDismissesImmediatelyWhenNoCapabilitiesAreRequested() async {
+    let initial = noCapabilitiesPermissionSnapshot()
+    let manager = RecordingPermissionManager(snapshot: initial)
+    let model = PermissionReviewSheetModel(manager: manager)
+
+    #expect(model.review.capabilities.isEmpty)
+    #expect(model.canConfirm)
+
+    await model.confirm()
+
+    #expect(manager.submissions.isEmpty)
+    #expect(model.isApplied)
+}
+
+@MainActor
 @Test func permissionReviewSheetBuildsWithInjectedManagerOnly() {
     let manager = RecordingPermissionManager(snapshot: permissionSnapshot())
     let view = PermissionReviewSheet(manager: manager)
@@ -201,6 +216,16 @@ private func permissionSnapshot() -> PermissionReviewSnapshot {
         publisherDisplayName: "Alice",
         nappletTitle: "Good Morning",
         capabilities: [identity, outbox]
+    )!
+    return PermissionReviewSnapshot(review: review)
+}
+
+private func noCapabilitiesPermissionSnapshot() -> PermissionReviewSnapshot {
+    let review = PermissionReview(
+        principal: permissionPrincipal(hash: "d"),
+        publisherDisplayName: nil,
+        nappletTitle: "Good Morning",
+        capabilities: []
     )!
     return PermissionReviewSnapshot(review: review)
 }
