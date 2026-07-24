@@ -2152,13 +2152,14 @@ mod tests {
     };
     use nmp_native_runtime_core::{
         ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, ResourceLimits, ResourceTracker,
-        Sensitivity,
+        Sensitivity, WriteReceiptId,
     };
 
     use super::*;
 
     struct NapRig {
         plane: Arc<NmpDataPlane>,
+        outbox: Arc<NapNostrProvider>,
         registry: ProviderRegistry,
         context: SessionContext,
         plan: InjectionPlan,
@@ -2198,6 +2199,7 @@ mod tests {
                 )
                 .unwrap();
         }
+        let outbox_provider = Arc::clone(&providers.outbox);
         let outbox: Arc<dyn Provider> = providers.outbox;
         let relay: Arc<dyn Provider> = providers.relay;
         registry.register(outbox).unwrap();
@@ -2216,6 +2218,7 @@ mod tests {
         registry.mark_session_ready(context.id).unwrap();
         NapRig {
             plane,
+            outbox: outbox_provider,
             registry,
             context,
             plan,
@@ -2458,6 +2461,60 @@ mod tests {
         );
         assert!(outbox_result.get("synced").is_none());
         assert!(outbox_result.get("complete").is_none());
+
+        rig.registry.close_session(rig.context.id);
+        rig.plane.close();
+    }
+
+    #[tokio::test]
+    async fn publish_result_preserves_distinct_per_relay_receipt_outcomes() {
+        let mut rig = nap_rig();
+        let outbound = rig
+            .outbox
+            .state
+            .lock()
+            .sessions
+            .get(&rig.context.id)
+            .unwrap()
+            .outbound
+            .clone();
+        let sink = NapPublishReceiptSink {
+            domain: NapDomain::Outbox,
+            id: Arc::from("publish-mixed-1"),
+            outbound,
+            engine: Arc::clone(&rig.plane.engine),
+            maximum_response_bytes: NapNostrProviderLimits::default().maximum_response_bytes,
+            delivered: AtomicBool::new(false),
+        };
+        sink.push_latest(ReceiptSnapshot {
+            receipt_id: WriteReceiptId(Arc::from("receipt-mixed-1")),
+            state: BoundedJson::from_value(
+                &json!({
+                    "state": "partial_delivery",
+                    "relays": {
+                        "wss://acked.example": {"state": "acked"},
+                        "wss://rejected.example": {
+                            "state": "rejected",
+                            "reason": "policy"
+                        }
+                    }
+                }),
+                16 * 1024,
+            )
+            .unwrap(),
+        })
+        .unwrap();
+
+        let batch = tokio::time::timeout(Duration::from_secs(1), rig.observer.changed(1))
+            .await
+            .expect("mixed receipt projection must remain bounded")
+            .unwrap();
+        let value = batch.pushes[0].envelope.decode().unwrap();
+        assert_eq!(value["type"], "outbox.publish.result");
+        assert_eq!(value["id"], "publish-mixed-1");
+        assert_eq!(value["ok"], true);
+        assert_eq!(value["relays"]["wss://acked.example"], true);
+        assert_eq!(value["relays"]["wss://rejected.example"], false);
 
         rig.registry.close_session(rig.context.id);
         rig.plane.close();
