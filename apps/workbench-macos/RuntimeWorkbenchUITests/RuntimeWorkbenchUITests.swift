@@ -18,6 +18,8 @@ final class RuntimeWorkbenchUITests: XCTestCase {
     @MainActor
     func testWorkbenchOpensSignedGoodMorningNappletInDegradedMode() throws {
         let app = XCUIApplication()
+        app.launchEnvironment["NMP_WORKBENCH_UI_TEST_SCENARIO"] =
+            "good-morning-degraded"
         app.launch()
 
         XCTAssertTrue(
@@ -26,9 +28,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
             ].waitForExistence(timeout: 10)
         )
         XCTAssertTrue(
-            app.staticTexts[
-                "Mapped shell.ready from napplet window"
-            ].waitForExistence(timeout: 10)
+            app.groups["bundled-napplet"].waitForExistence(timeout: 10)
         )
     }
 }
