@@ -1700,7 +1700,11 @@ fn query_result(
         });
         if domain == NapDomain::Outbox {
             value["incomplete"] = Value::Bool(projection.incomplete);
-        } else if projection.incomplete && projection.rows.is_empty() {
+        } else if projection.incomplete {
+            // The pinned relay facade projects a plain event array and has no
+            // supported partial-evidence field. Refuse an unresolved window
+            // even when it contains rows rather than presenting a partial
+            // public-relay result as complete.
             value["error"] = Value::String(projection.error.unwrap_or_else(|| {
                 "NMP reported unresolved relay acquisition evidence".to_owned()
             }));
@@ -2451,6 +2455,32 @@ mod tests {
         assert_eq!(value["incomplete"], true);
         assert!(value.get("synced").is_none());
         assert!(value.get("complete").is_none());
+    }
+
+    #[test]
+    fn relay_query_refuses_partial_public_evidence_even_with_rows() {
+        let value = query_result(
+            NapDomain::Relay,
+            "relay-partial-1",
+            false,
+            QueryProjection {
+                rows: vec![Row {
+                    event: public_note(),
+                    sources: BTreeSet::from(["wss://relay.example".parse().unwrap()]),
+                }],
+                source_relays: BTreeSet::from(["wss://relay.example".to_owned()]),
+                incomplete: true,
+                error: None,
+            },
+        );
+        assert_eq!(
+            value["events"][0]["event"]["content"],
+            "deterministic public note"
+        );
+        assert_eq!(
+            value["error"],
+            "NMP reported unresolved relay acquisition evidence"
+        );
     }
 
     #[test]
