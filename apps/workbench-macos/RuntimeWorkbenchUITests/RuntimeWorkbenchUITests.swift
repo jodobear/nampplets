@@ -16,19 +16,39 @@ final class RuntimeWorkbenchUITests: XCTestCase {
     }
 
     @MainActor
-    func testWorkbenchOpensSignedGoodMorningNappletInDegradedMode() throws {
+    func testWorkbenchReviewsPermissionsThenLaunchesSignedGoodMorning() throws {
         let app = XCUIApplication()
         app.launchEnvironment["NMP_WORKBENCH_UI_TEST_SCENARIO"] =
-            "good-morning-degraded"
+            "good-morning-permission-launch"
         app.launch()
 
-        XCTAssertTrue(
-            app.staticTexts[
-                "good-morning can't start here"
-            ].waitForExistence(timeout: 10)
-        )
+        for domain in ["identity", "inc", "outbox"] {
+            let decision = app.descendants(matching: .any)[
+                "permission-decision-\(domain)"
+            ]
+            XCTAssertTrue(decision.waitForExistence(timeout: 10))
+            decision.click()
+            let allow = app.descendants(matching: .any)[
+                "permission-\(domain)-allowExactBuild"
+            ]
+            XCTAssertTrue(allow.waitForExistence(timeout: 2))
+            allow.click()
+        }
+
+        let confirm = app.descendants(matching: .any)["permission-confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 2))
+        confirm.click()
+
         XCTAssertTrue(
             app.groups["bundled-napplet"].waitForExistence(timeout: 10)
         )
+        XCTAssertTrue(
+            app.radioGroups["View mode"].waitForExistence(timeout: 10),
+            "Good Morning must pass its essential NAP check after launch"
+        )
+        XCTAssertFalse(
+            app.staticTexts["good-morning can't start here"].exists
+        )
+        XCTAssertFalse(app.staticTexts["NAP-OUTBOX"].exists)
     }
 }

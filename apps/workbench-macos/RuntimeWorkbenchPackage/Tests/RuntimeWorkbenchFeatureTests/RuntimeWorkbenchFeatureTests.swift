@@ -135,7 +135,8 @@ import Testing
     #expect(restored.component(in: .detail) == nil)
 }
 
-@Test func bundledSignedFixtureOpensThroughTheRustRuntime() async throws {
+@MainActor
+@Test func bundledSignedFixtureOpensThroughTheRustRuntime() throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent(
             "runtime-workbench-test-\(UUID().uuidString)",
@@ -146,9 +147,10 @@ import Testing
     let fixture = try GoodMorningFixture.load()
     let profile = try WorkbenchRuntimeProfile.open(storageRoot: root)
     defer { profile.close() }
-    let artifact = try await Task.detached {
-        try fixture.open(profile: profile)
-    }.value
+    let artifact = try installApproveAndLaunchGoodMorning(
+        fixture: fixture,
+        profile: profile
+    )
 
     #expect(artifact.title == "Good Morning Protocol")
 }

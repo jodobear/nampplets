@@ -106,6 +106,31 @@ class BaselineTests(unittest.TestCase):
         for platform in ("macos", "ios", "android"):
             self.assertEqual(lock["platform"][platform]["supported_domains"], [])
 
+    def test_good_morning_profile_is_exact_build_scoped(self) -> None:
+        profile = verify_baseline.load_lock()["artifact_profiles"]["good_morning"]
+        self.assertEqual(
+            (
+                profile["author"],
+                profile["d_tag"],
+                profile["aggregate_sha256"],
+            ),
+            (
+                "266815e0c9210dfa324c6cba3573b14b"
+                "ee49da4209a9456f9484e5106cd408a5",
+                "good-morning",
+                "828a6df02afd56782ea20f805084acce6"
+                "5c53f7c37554948c1e0a64aa5a2b0a8",
+            ),
+        )
+        self.assertEqual(
+            profile["required_domains"],
+            ["identity", "inc", "outbox"],
+        )
+        self.assertEqual(
+            profile["optional_domains"],
+            ["resource", "theme", "link"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

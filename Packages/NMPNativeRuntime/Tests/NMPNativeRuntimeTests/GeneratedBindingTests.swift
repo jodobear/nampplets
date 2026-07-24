@@ -64,6 +64,35 @@ final class GeneratedBindingTests: XCTestCase {
         let artifact = try XCTUnwrap(verification.artifact)
         XCTAssertNil(verification.refusal)
         controller.install(artifact: artifact)
+        let coordinate = RuntimeExactBuildCoordinate(
+            manifestAuthor: publishedAuthor,
+            dTag: "good-morning",
+            aggregateHash: artifact.aggregateHash()
+        )
+        let review = try XCTUnwrap(
+            controller.permissionReview(coordinate: coordinate).review
+        )
+        XCTAssertFalse(review.launchPermitted)
+        XCTAssertEqual(
+            review.capabilities.map(\.domain),
+            ["identity", "inc", "outbox", "resource", "theme", "link"]
+        )
+        let permissionUpdate = controller.applyPermissionDecisions(
+            batch: RuntimePermissionDecisionBatch(
+                coordinate: coordinate,
+                decisions: review.capabilities.map {
+                    RuntimePermissionDecisionSelection(
+                        domain: $0.domain,
+                        decision: $0.requirement == .required
+                            ? .allowExactBuild
+                            : .denied
+                    )
+                }
+            )
+        )
+        XCTAssertTrue(permissionUpdate.applied)
+        XCTAssertTrue(permissionUpdate.review?.launchPermitted == true)
+        XCTAssertNil(permissionUpdate.refusal)
         controller.setGrant(
             artifact: artifact,
             capability: "shell",

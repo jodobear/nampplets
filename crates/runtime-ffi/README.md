@@ -71,11 +71,15 @@ the napplet.
 fire-and-observe maintenance commands. Swift must not sequence them to simulate
 a review transaction.
 
-The pinned NIP-5D manifest currently declares required domains only. The typed
-runtime/store model supports optional requests, but production artifact
-installation does not invent them by scanning JavaScript or accepting
-native-authored policy. Optional requests therefore remain empty unless a
-future verified artifact/catalog owner supplies a canonical declaration.
+The pinned NIP-5D manifest declares required domains only. Production
+installation never scans JavaScript or accepts native-authored policy. One
+legacy exception is machine-readable in `compatibility.lock`: the unchanged,
+published Good Morning exact build predates signed `requires` tags, so Rust
+attaches its pinned required identity/INC/outbox and optional
+resource/theme/link profile only when author, dTag, and aggregate hash all
+match. Launch rederives the same required set from the sealed handle. Any
+publisher, dTag, or byte change loses the profile and receives no grant
+inheritance.
 
 ## D0-D10 discharge
 

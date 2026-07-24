@@ -33,14 +33,15 @@ struct GoodMorningFixture: Sendable {
         )
     }
 
-    func open(profile: WorkbenchRuntimeProfile) throws -> NappletArtifact {
-        try profile.native.openSignedNamed(
+    func install(
+        profile: WorkbenchRuntimeProfile
+    ) throws -> NativeRuntimeInstalledArtifact {
+        try profile.native.installSignedNamed(
             title: "Good Morning Protocol",
             eventJSON: eventJSON,
             author: Self.author,
             dTag: Self.dTag,
-            blobsBySHA256: [Self.indexDigest: indexHTML],
-            grantDomains: ["identity", "inc", "storage", "theme"]
+            blobsBySHA256: [Self.indexDigest: indexHTML]
         )
     }
 

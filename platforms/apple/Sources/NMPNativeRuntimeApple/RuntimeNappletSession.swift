@@ -5,6 +5,8 @@ public enum RuntimeNappletOpenError: Error, LocalizedError, Equatable {
     case invalidStorageRoot
     case artifactSourceRefused(detail: String)
     case artifactRefused(code: String, detail: String)
+    case installRefused(detail: String)
+    case installedArtifactProfileMismatch
     case launchRefused(detail: String)
     case observerRefused(code: String, detail: String)
     case invalidAccountPersistence
@@ -17,6 +19,10 @@ public enum RuntimeNappletOpenError: Error, LocalizedError, Equatable {
             "The native artifact source was refused: \(detail)"
         case let .artifactRefused(code, detail):
             "Artifact verification was refused (\(code)): \(detail)"
+        case let .installRefused(detail):
+            "The native runtime refused to install the artifact: \(detail)"
+        case .installedArtifactProfileMismatch:
+            "The installed artifact belongs to a different runtime profile."
         case let .launchRefused(detail):
             "The native runtime refused to launch the artifact: \(detail)"
         case let .observerRefused(code, detail):
@@ -197,6 +203,31 @@ public struct NativeRuntimeProfileConfiguration: Sendable {
         self.fallbackRelays = fallbackRelays
         self.allowedLocalRelayHosts = allowedLocalRelayHosts
         self.accountPersistence = accountPersistence
+    }
+}
+
+/// One immutable verified artifact installed into exactly one runtime profile.
+///
+/// The Rust handle remains opaque. Native callers can use the exact coordinate
+/// for review presentation, but cannot replace its bytes, requirements, or
+/// launch authority.
+public final class NativeRuntimeInstalledArtifact: @unchecked Sendable {
+    public let title: String
+    public let permissionCoordinate: NativeRuntimePermissionCoordinate
+
+    fileprivate let ownerID: UUID
+    fileprivate let artifact: VerifiedArtifact
+
+    fileprivate init(
+        title: String,
+        ownerID: UUID,
+        artifact: VerifiedArtifact,
+        permissionCoordinate: NativeRuntimePermissionCoordinate
+    ) {
+        self.title = title
+        self.ownerID = ownerID
+        self.artifact = artifact
+        self.permissionCoordinate = permissionCoordinate
     }
 }
 
@@ -400,6 +431,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private static let maximumApplicationLibraryObservers = 8
     private static let maximumLocalAccounts = 32
 
+    private let profileID = UUID()
     private let controller: RuntimeController
     private let source: RegisteredArtifactSource
     private let appearanceSource: MacOSAppearanceSource
@@ -550,19 +582,20 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         lock.unlock()
     }
 
-    public func openSignedNamed(
+    /// Verifies and installs one exact named build without granting or
+    /// launching it. The returned opaque handle is bound to this profile.
+    public func installSignedNamed(
         title: String,
         eventJSON: Data,
         author: String,
         dTag: String,
-        blobsBySHA256: [String: Data],
-        grantDomains: [String]
-    ) throws -> NappletArtifact {
+        blobsBySHA256: [String: Data]
+    ) throws -> NativeRuntimeInstalledArtifact {
         lock.lock()
         let closed = isClosed
         lock.unlock()
         guard !closed else {
-            throw RuntimeNappletOpenError.launchRefused(
+            throw RuntimeNappletOpenError.installRefused(
                 detail: "The application runtime profile is closed"
             )
         }
@@ -582,23 +615,62 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         }
 
         controller.install(artifact: artifact)
-        for domain in grantDomains {
-            controller.setGrant(
-                artifact: artifact,
-                capability: domain,
-                sensitivity: .ordinary,
-                decision: .allowExactBuild
+        guard let verifiedDTag = artifact.dTag() else {
+            throw RuntimeNappletOpenError.installRefused(
+                detail: "The verified named artifact has no dTag"
             )
         }
+        let coordinate = NativeRuntimePermissionCoordinate(
+            manifestAuthor: artifact.author(),
+            dTag: verifiedDTag,
+            aggregateHash: artifact.aggregateHash()
+        )
+        let installedReview = controller.permissionReview(
+            coordinate: coordinate
+        )
+        guard installedReview.refusal == nil,
+              installedReview.review?.coordinate == coordinate
+        else {
+            throw RuntimeNappletOpenError.installRefused(
+                detail: installedReview.refusal?.detail
+                    ?? "The installed exact build was not projected by Rust"
+            )
+        }
+        return NativeRuntimeInstalledArtifact(
+            title: title,
+            ownerID: profileID,
+            artifact: artifact,
+            permissionCoordinate: coordinate
+        )
+    }
+
+    /// Launches one already-installed exact build. Permission application is a
+    /// separate Rust transaction and is never performed by this operation.
+    public func launchInstalled(
+        _ installed: NativeRuntimeInstalledArtifact
+    ) throws -> NappletArtifact {
+        guard installed.ownerID == profileID else {
+            throw RuntimeNappletOpenError.installedArtifactProfileMismatch
+        }
+        lock.lock()
+        let closed = isClosed
+        lock.unlock()
+        guard !closed else {
+            throw RuntimeNappletOpenError.launchRefused(
+                detail: "The application runtime profile is closed"
+            )
+        }
+
+        let artifact = installed.artifact
+        let coordinate = installed.permissionCoordinate
         let priorSessions = Set(controller.snapshot().sessions.map(\.id))
         controller.launch(artifact: artifact, profile: .legacy)
 
-        let aggregateHash = artifact.aggregateHash()
         guard let launched = controller.snapshot().sessions.first(where: {
             !priorSessions.contains($0.id)
-                && $0.author == author
-                && $0.dTag == dTag
-                && $0.aggregateHash == aggregateHash
+                && $0.author == coordinate.manifestAuthor
+                && $0.dTag == coordinate.dTag
+                && $0.aggregateHash == coordinate.aggregateHash
                 && $0.state == "running"
         }) else {
             let snapshot = controller.snapshot()
@@ -625,11 +697,40 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         lock.unlock()
 
         return NappletArtifact(
-            title: title,
+            title: installed.title,
             reader: runtime,
             runtimeSession: runtime,
             negotiatedDomains: launched.domains
         )
+    }
+
+    /// Compatibility helper retained for existing Apple package callers.
+    /// Product launch flows must use install, atomic permission review, and
+    /// launch as separate operations.
+    public func openSignedNamed(
+        title: String,
+        eventJSON: Data,
+        author: String,
+        dTag: String,
+        blobsBySHA256: [String: Data],
+        grantDomains: [String]
+    ) throws -> NappletArtifact {
+        let installed = try installSignedNamed(
+            title: title,
+            eventJSON: eventJSON,
+            author: author,
+            dTag: dTag,
+            blobsBySHA256: blobsBySHA256
+        )
+        for domain in grantDomains {
+            controller.setGrant(
+                artifact: installed.artifact,
+                capability: domain,
+                sensitivity: .ordinary,
+                decision: .allowExactBuild
+            )
+        }
+        return try launchInstalled(installed)
     }
 
     public func close() {

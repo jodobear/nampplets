@@ -76,6 +76,19 @@ const MAXIMUM_WORKSPACE_FIELD_BYTES: usize = 64 * 1_024;
 const MAXIMUM_WORKSPACE_RECEIPTS: usize = 256;
 const MAXIMUM_WORKSPACE_POINT_SIZE: u16 = 4_096;
 const MAXIMUM_PERMISSION_DECISIONS: usize = 64;
+const GOOD_MORNING_AUTHOR: &str =
+    "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5";
+const GOOD_MORNING_D_TAG: &str = "good-morning";
+const GOOD_MORNING_AGGREGATE_HASH: &str =
+    "828a6df02afd56782ea20f805084acce65c53f7c37554948c1e0a64aa5a2b0a8";
+const GOOD_MORNING_CAPABILITY_PROFILE: &[(&str, CapabilityRequirement)] = &[
+    ("identity", CapabilityRequirement::Required),
+    ("inc", CapabilityRequirement::Required),
+    ("outbox", CapabilityRequirement::Required),
+    ("resource", CapabilityRequirement::Optional),
+    ("theme", CapabilityRequirement::Optional),
+    ("link", CapabilityRequirement::Optional),
+];
 
 uniffi::setup_scaffolding!();
 
@@ -1041,6 +1054,53 @@ impl fmt::Debug for RuntimeController {
     }
 }
 
+/// Derives the finite permission inventory exclusively from verified bytes and
+/// Rust-owned compatibility policy.
+///
+/// Signed `requires` tags remain authoritative for general artifacts. The
+/// published Good Morning fixture predates those tags, so its immutable exact
+/// build receives the required/optional profile already pinned by the native
+/// runtime compatibility corpus. Native callers cannot select this profile or
+/// supply capability names.
+fn installation_capability_requests(
+    artifact: &VerifiedArtifact,
+) -> Result<Vec<CapabilityRequest>, String> {
+    let mut requests = artifact
+        .handle
+        .manifest()
+        .requirements()
+        .map(|domain| {
+            Capability::new(domain)
+                .map(|capability| CapabilityRequest {
+                    capability,
+                    requirement: CapabilityRequirement::Required,
+                })
+                .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let is_pinned_good_morning = artifact.handle.index().author().as_str() == GOOD_MORNING_AUTHOR
+        && artifact.handle.index().d_tag() == Some(GOOD_MORNING_D_TAG)
+        && artifact.handle.index().aggregate().as_str() == GOOD_MORNING_AGGREGATE_HASH;
+    if is_pinned_good_morning {
+        debug_assert!(requests.is_empty());
+        for (domain, requirement) in GOOD_MORNING_CAPABILITY_PROFILE {
+            requests.push(CapabilityRequest {
+                capability: Capability::new(*domain).map_err(|error| error.to_string())?,
+                requirement: *requirement,
+            });
+        }
+    }
+    if requests.len() > MAXIMUM_PERMISSION_DECISIONS {
+        return Err(format!(
+            "verified capability profile has {} domains; the maximum is {}",
+            requests.len(),
+            MAXIMUM_PERMISSION_DECISIONS
+        ));
+    }
+    Ok(requests)
+}
+
 #[uniffi::export]
 impl RuntimeController {
     #[uniffi::constructor]
@@ -1698,21 +1758,10 @@ impl RuntimeController {
                 .title()
                 .unwrap_or("Untitled napplet"),
         );
-        let capability_requests = artifact
-            .handle
-            .manifest()
-            .requirements()
-            .map(|domain| {
-                Capability::new(domain).map(|capability| CapabilityRequest {
-                    capability,
-                    requirement: CapabilityRequirement::Required,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>();
-        let capability_requests = match capability_requests {
+        let capability_requests = match installation_capability_requests(&artifact) {
             Ok(requests) => requests,
             Err(error) => {
-                self.record_refusal("invalid-capability-request", error.to_string());
+                self.record_refusal("invalid-capability-request", error);
                 return;
             }
         };
@@ -2045,17 +2094,19 @@ impl RuntimeController {
     }
 
     pub fn launch(&self, artifact: Arc<VerifiedArtifact>, profile: RuntimeExecutionProfile) {
-        let requirements = artifact
-            .handle
-            .manifest()
-            .requirements()
-            .collect::<Vec<_>>();
-        if requirements.len() > self.maximum_command_items {
+        let capability_requests = match installation_capability_requests(&artifact) {
+            Ok(requests) => requests,
+            Err(error) => {
+                self.record_refusal("invalid-capability-request", error);
+                return;
+            }
+        };
+        if capability_requests.len() > self.maximum_command_items {
             self.record_refusal(
                 "required-domain-capacity",
                 format!(
-                    "verified manifest requires {} domains; the maximum is {}",
-                    requirements.len(),
+                    "verified capability profile has {} domains; the maximum is {}",
+                    capability_requests.len(),
                     self.maximum_command_items
                 ),
             );
@@ -2069,15 +2120,10 @@ impl RuntimeController {
             return;
         };
         let mut domains = BTreeSet::new();
-        for domain in requirements {
-            let domain = match Capability::new(domain) {
-                Ok(domain) => domain,
-                Err(error) => {
-                    self.record_refusal("invalid-capability", error.to_string());
-                    return;
-                }
-            };
-            domains.insert(domain);
+        for request in capability_requests {
+            if request.requirement == CapabilityRequirement::Required {
+                domains.insert(request.capability);
+            }
         }
         self.app.dispatch(PlatformCommand::Launch {
             principal,
@@ -3535,10 +3581,13 @@ mod tests {
             .artifact
             .unwrap();
         controller.install(Arc::clone(&artifact));
-        for domain in domains {
+        for domain in ["identity", "inc", "outbox"]
+            .into_iter()
+            .chain(domains.iter().copied())
+        {
             controller.set_grant(
                 Arc::clone(&artifact),
-                (*domain).to_owned(),
+                domain.to_owned(),
                 RuntimeSensitivity::Ordinary,
                 RuntimeGrantDecision::AllowExactBuild,
             );
@@ -3587,7 +3636,7 @@ mod tests {
             RuntimeSensitivity::Ordinary,
             RuntimeGrantDecision::AllowExactBuild,
         );
-        for domain in ["identity", "inc"] {
+        for domain in ["identity", "inc", "outbox"] {
             controller.set_grant(
                 Arc::clone(&artifact),
                 domain.to_owned(),
@@ -3599,7 +3648,7 @@ mod tests {
         let runtime_snapshot = controller.snapshot();
         assert_eq!(
             runtime_snapshot.sessions[0].domains,
-            ["identity", "inc", "shell"]
+            ["identity", "inc", "outbox", "shell"]
         );
         let session = runtime_snapshot.sessions[0].id;
         controller.mapped_envelope(session, br#"{"type":"shell.ready"}"#.to_vec());
@@ -3655,6 +3704,60 @@ mod tests {
         controller.close();
         assert!(controller.snapshot().closed);
         assert!(fs::metadata(temp.path().join("runtime.sqlite3")).is_ok());
+    }
+
+    #[test]
+    fn pinned_good_morning_installs_rust_owned_permission_profile() {
+        let temp = TempDir::new().unwrap();
+        let controller = controller(&temp);
+        let artifact = controller
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: GOOD_MORNING_D_TAG.to_owned(),
+                },
+            )
+            .artifact
+            .expect("published fixture verifies");
+        assert!(
+            artifact.requires().is_empty(),
+            "the immutable manifest remains unchanged"
+        );
+
+        controller.install(Arc::clone(&artifact));
+        let review = controller
+            .permission_review(exact_coordinate(&artifact))
+            .review
+            .expect("the installed exact build has a permission review");
+        assert_eq!(
+            review
+                .capabilities
+                .iter()
+                .map(|capability| { (capability.domain.as_str(), capability.requirement) })
+                .collect::<Vec<_>>(),
+            vec![
+                ("identity", RuntimePermissionRequirement::Required),
+                ("inc", RuntimePermissionRequirement::Required),
+                ("outbox", RuntimePermissionRequirement::Required),
+                ("resource", RuntimePermissionRequirement::Optional),
+                ("theme", RuntimePermissionRequirement::Optional),
+                ("link", RuntimePermissionRequirement::Optional),
+            ]
+        );
+        assert!(!review.launch_permitted);
+        let outbox = review
+            .capabilities
+            .iter()
+            .find(|capability| capability.domain == "outbox")
+            .expect("outbox permission");
+        assert_eq!(outbox.sensitivity, RuntimePermissionSensitivity::Sensitive);
+
+        controller.launch(artifact, RuntimeExecutionProfile::Legacy);
+        assert!(
+            controller.snapshot().sessions.is_empty(),
+            "required compatibility capabilities are enforced before execution"
+        );
     }
 
     #[test]
@@ -3789,6 +3892,19 @@ mod tests {
             ["library"]
         );
 
+        controller.launch(Arc::clone(&artifact), RuntimeExecutionProfile::Legacy);
+        assert!(
+            controller.snapshot().sessions.is_empty(),
+            "the pinned required profile must refuse before execution"
+        );
+        for domain in ["identity", "inc", "outbox"] {
+            controller.set_grant(
+                Arc::clone(&artifact),
+                domain.to_owned(),
+                RuntimeSensitivity::Sensitive,
+                RuntimeGrantDecision::AllowExactBuild,
+            );
+        }
         controller.launch(Arc::clone(&artifact), RuntimeExecutionProfile::Legacy);
         let session = controller.snapshot().installed_library.builds[0].active_session_ids[0];
         controller.suspend(session);

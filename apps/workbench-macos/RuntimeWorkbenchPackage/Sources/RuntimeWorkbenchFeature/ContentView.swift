@@ -15,7 +15,9 @@ public struct ContentView: View {
 
     @State private var selection = "Home"
     @State private var activity = "Opening application runtime profile"
+    @State private var installedArtifact: NativeRuntimeInstalledArtifact?
     @State private var artifact: NappletArtifact?
+    @State private var isLaunchingArtifact = false
     @State private var composerDraft = ""
     @State private var detailDestination = "No selection"
     @State private var layout: WorkbenchLayoutModel
@@ -255,10 +257,34 @@ public struct ContentView: View {
             }
             do {
                 let fixture = try GoodMorningFixture.load()
-                artifact = try await Task.detached {
-                    try fixture.open(profile: profile)
+                let installed = try await Task.detached {
+                    try fixture.install(profile: profile)
                 }.value
-                activity = "Signed exact-build session ready"
+                installedArtifact = installed
+                let principal = try goodMorningPermissionPrincipal()
+                let manager = try RuntimeWorkbenchPermissionManager(
+                    profile: profile,
+                    principal: principal
+                )
+                permissionManager = manager
+                let nativeReview = profile.native.permissionReview(
+                    for: installed.permissionCoordinate
+                )
+                guard nativeReview.refusal == nil,
+                      let review = nativeReview.review
+                else {
+                    throw RuntimeWorkbenchPermissionError.refused(
+                        code: nativeReview.refusal?.code ?? "missing-review",
+                        detail: nativeReview.refusal?.detail
+                            ?? "Rust returned no permission review"
+                    )
+                }
+                if review.launchPermitted {
+                    launchInstalledGoodMorning()
+                } else {
+                    activity = "Permission review required before launch"
+                    isPermissionSheetPresented = true
+                }
             } catch {
                 activity = "Refused: \(error.localizedDescription)"
             }
@@ -285,6 +311,16 @@ public struct ContentView: View {
             DispatchQueue.main.async {
                 openSettingsDestination(destination)
             }
+        }
+        .onChange(of: isPermissionSheetPresented) { _, isPresented in
+            guard
+                !isPresented,
+                artifact == nil,
+                permissionManager?.snapshot().submissionState == .applied
+            else {
+                return
+            }
+            launchInstalledGoodMorning()
         }
         .onDisappear {
             pendingLayoutSave?.cancel()
@@ -525,6 +561,48 @@ public struct ContentView: View {
     }
 
     @MainActor
+    private func launchInstalledGoodMorning() {
+        guard
+            !isLaunchingArtifact,
+            artifact == nil,
+            let profile,
+            let installedArtifact
+        else {
+            return
+        }
+        isLaunchingArtifact = true
+        activity = "Launching signed exact build"
+        Task {
+            defer { isLaunchingArtifact = false }
+            do {
+                artifact = try await Task.detached {
+                    try profile.native.launchInstalled(installedArtifact)
+                }.value
+                activity = "Signed exact-build session ready"
+            } catch {
+                activity = "Refused: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func goodMorningPermissionPrincipal()
+        throws -> PermissionExactBuildPrincipal
+    {
+        guard
+            let principal = PermissionExactBuildPrincipal(
+                manifestAuthorPublicKey: GoodMorningFixture.author,
+                dTag: GoodMorningFixture.dTag,
+                aggregateHash: GoodMorningFixture.aggregateHash
+            )
+        else {
+            throw RuntimeWorkbenchPermissionError.malformed(
+                "the bundled Good Morning exact-build identity is invalid"
+            )
+        }
+        return principal
+    }
+
+    @MainActor
     private func openPermissionReview() {
         permissionSheetError = nil
         permissionManager = nil
@@ -539,19 +617,8 @@ public struct ContentView: View {
             isPermissionSheetPresented = true
             return
         }
-        guard
-            let principal = PermissionExactBuildPrincipal(
-                manifestAuthorPublicKey: GoodMorningFixture.author,
-                dTag: GoodMorningFixture.dTag,
-                aggregateHash: GoodMorningFixture.aggregateHash
-            )
-        else {
-            permissionSheetError =
-                "The bundled Good Morning exact-build identity is invalid."
-            isPermissionSheetPresented = true
-            return
-        }
         do {
+            let principal = try goodMorningPermissionPrincipal()
             permissionManager = try RuntimeWorkbenchPermissionManager(
                 profile: profile,
                 principal: principal

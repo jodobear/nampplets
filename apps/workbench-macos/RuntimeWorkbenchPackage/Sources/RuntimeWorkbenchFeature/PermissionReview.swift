@@ -219,6 +219,7 @@ public struct PermissionReviewSheet: View {
                     }
                     .keyboardShortcut(.return, modifiers: [.command])
                     .disabled(!model.canConfirm)
+                    .accessibilityIdentifier("permission-confirm")
                     .accessibilityHint(
                         "Saves this bounded permission batch without launching the napplet"
                     )
@@ -420,6 +421,9 @@ public struct PermissionReviewSheet: View {
                     }
                 }
                 .disabled(!option.isValid)
+                .accessibilityIdentifier(
+                    "permission-\(capability.domain)-\(option.decision.rawValue)"
+                )
                 .help(option.invalidReason ?? option.decision.title)
                 .accessibilityLabel(option.decision.title)
                 .accessibilityHint(
@@ -432,6 +436,7 @@ public struct PermissionReviewSheet: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .accessibilityIdentifier("permission-decision-\(capability.domain)")
         .accessibilityLabel("New decision for \(capability.title)")
         .accessibilityValue(selectionTitle(for: capability))
         .accessibilityHint("Shows the decisions permitted by the runtime")

@@ -10,7 +10,10 @@ import Testing
     let profile = try WorkbenchRuntimeProfile.open(storageRoot: root)
     defer { profile.close() }
     let fixture = try GoodMorningFixture.load()
-    let artifact = try fixture.open(profile: profile)
+    let artifact = try installApproveAndLaunchGoodMorning(
+        fixture: fixture,
+        profile: profile
+    )
     let scope = try #require(goodMorningActivityScope())
     let source = try RuntimeWorkbenchActivitySource(
         profile: profile,
@@ -47,7 +50,10 @@ import Testing
     let profile = try WorkbenchRuntimeProfile.open(storageRoot: root)
     defer { profile.close() }
     let fixture = try GoodMorningFixture.load()
-    let artifact = try fixture.open(profile: profile)
+    let artifact = try installApproveAndLaunchGoodMorning(
+        fixture: fixture,
+        profile: profile
+    )
     let scope = try #require(goodMorningActivityScope())
     let source = try RuntimeWorkbenchActivitySource(
         profile: profile,
