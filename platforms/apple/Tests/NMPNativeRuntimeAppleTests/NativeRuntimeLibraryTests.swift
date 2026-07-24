@@ -341,6 +341,7 @@ final class NativeRuntimeLibraryTests: XCTestCase {
             installedLibrary: library,
             sessions: sessions,
             bindings: [],
+            pendingWrites: [],
             receipts: [],
             workspaces: workspaces,
             recentActivity: [],
