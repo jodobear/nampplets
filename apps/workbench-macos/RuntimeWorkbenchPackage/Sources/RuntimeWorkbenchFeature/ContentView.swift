@@ -1143,6 +1143,6 @@ public struct ContentView: View {
         nativeActionNotice = notice
         mutateLayout { $0.bringToFront(window.id) }
         isInspectorPresented = true
-        activity = "(notice.title) from (window.title)"
+        activity = "\(notice.title) from \(window.title)"
     }
 }
