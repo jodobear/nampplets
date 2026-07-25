@@ -406,3 +406,12 @@ pub fn wait_for_event(
             .expect("event-driven app observation timed out")
         })
 }
+
+#[derive(Debug)]
+pub struct WriteReceiptIdForTest;
+
+impl WriteReceiptIdForTest {
+    pub fn value() -> nmp_native_runtime_core::WriteReceiptId {
+        nmp_native_runtime_core::WriteReceiptId(Arc::from("fake-receipt-999"))
+    }
+}
