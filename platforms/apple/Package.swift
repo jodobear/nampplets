@@ -4,7 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "NMPNativeRuntimeApple",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(
             name: "NMPNativeRuntimeApple",
@@ -26,7 +26,7 @@ let package = Package(
             exclude: ["Resources/README.md"],
             resources: [.copy("Resources/TrustedShell")],
             linkerSettings: [
-                .linkedFramework("Security", .when(platforms: [.macOS]))
+                .linkedFramework("Security", .when(platforms: [.macOS, .iOS]))
             ]
         ),
         .testTarget(

@@ -321,7 +321,9 @@ public struct WorkbenchAccountSheet: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(minWidth: 560, idealWidth: 620, minHeight: 520)
+        #endif
         .onAppear {
             model.refresh()
         }

@@ -10,6 +10,7 @@ bash -n "$build_script"
 help=$("$build_script" --help)
 grep -Fq -- "--arm64-only" <<<"$help"
 grep -Fq -- "--universal" <<<"$help"
+grep -Fq -- "--no-ios" <<<"$help"
 grep -Fq -- "--check-bindings" <<<"$help"
 
 test_root=$(mktemp -d)
@@ -136,6 +137,8 @@ run_fixture() {
 run_fixture --universal --check-bindings
 grep -Fq 'cargo build -p nmp-native-runtime-ffi --locked --release --target aarch64-apple-darwin' "$tool_log"
 grep -Fq 'cargo build -p nmp-native-runtime-ffi --locked --release --target x86_64-apple-darwin' "$tool_log"
+grep -Fq 'cargo build -p nmp-native-runtime-ffi --locked --release --target aarch64-apple-ios' "$tool_log"
+grep -Fq 'cargo build -p nmp-native-runtime-ffi --locked --release --target aarch64-apple-ios-sim' "$tool_log"
 test -s "$fixture_repo/Packages/NMPNativeRuntime/NMPNativeRuntime.xcframework/Info.plist"
 
 printf '%s\n' '// stale binding' \
@@ -163,5 +166,12 @@ if MOCK_LIPO_ARCHS='arm64 x86_64' run_fixture --arm64-only >"$error_file" 2>&1; 
   exit 1
 fi
 grep -Fq 'packaged library has unexpected architectures' "$error_file"
+
+: >"$tool_log"
+run_fixture --arm64-only --no-ios
+if grep -Fq 'aarch64-apple-ios' "$tool_log"; then
+  echo "--no-ios unexpectedly requested an iOS build" >&2
+  exit 1
+fi
 
 echo "build-runtime-swift-xcframework script contract passed"

@@ -52,6 +52,9 @@ These rules apply to the whole repository.
 - `crates/test-harness` owns deterministic service implementations; scenario
   contracts live under `conformance/test-services`.
 - `apps/workbench-macos` owns the macOS reference shell and native presentation.
+- `apps/workbench-ios` owns the iOS reference shell and native presentation; it
+  shares `RuntimeWorkbenchFeature` and `platforms/apple` with the macOS shell
+  rather than redefining them.
 
 Do not redefine another workstream's public envelope, principal, persistence
 schema, or lifecycle state machine. Coordinate changes at the owning boundary.
@@ -68,6 +71,15 @@ schema, or lifecycle state machine. Coordinate changes at the owning boundary.
 - Legacy compatibility becomes green before the private surface extension may
   be described as supported.
 
+## Git workflow
+
+- Always make changes in a dedicated git worktree, never in the base checkout.
+- Always open a pull request for the change; never push or merge directly into
+  `main` from the base checkout.
+- Immediately after opening (or merging) the pull request, remove the
+  worktree used for that change. Do not leave finished worktrees lying
+  around.
+
 ## Required gates
 
 Run the narrow gate while iterating, then all applicable gates before handoff:
@@ -81,5 +93,6 @@ cargo test --workspace
 ```
 
 For Apple changes, build and test the shared `RuntimeWorkbench` scheme in the
-macOS destination. For NMP-sensitive application work, run the architecture
-scanner and document which D0-D10 rules the design discharges.
+macOS destination, and build the `RuntimeWorkbenchiOS` scheme in an iOS
+Simulator destination. For NMP-sensitive application work, run the
+architecture scanner and document which D0-D10 rules the design discharges.

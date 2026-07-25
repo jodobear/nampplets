@@ -6,6 +6,7 @@ let package = Package(
     name: "NMPNativeRuntime",
     platforms: [
         .macOS(.v13),
+        .iOS(.v17),
     ],
     products: [
         .library(name: "NMPNativeRuntime", targets: ["NMPNativeRuntime"]),
@@ -19,8 +20,8 @@ let package = Package(
             name: "NMPNativeRuntime",
             dependencies: ["nmp_native_runtime_ffiFFI"],
             linkerSettings: [
-                .linkedFramework("SystemConfiguration", .when(platforms: [.macOS])),
-                .linkedFramework("Security", .when(platforms: [.macOS])),
+                .linkedFramework("SystemConfiguration", .when(platforms: [.macOS, .iOS])),
+                .linkedFramework("Security", .when(platforms: [.macOS, .iOS])),
             ]
         ),
         .testTarget(

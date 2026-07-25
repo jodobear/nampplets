@@ -1,6 +1,14 @@
 import Foundation
 import NMPNativeRuntime
 
+#if os(macOS)
+typealias PlatformAppearanceSource = MacOSAppearanceSource
+typealias PlatformSettingsExecutor = MacOSSettingsExecutor
+#elseif os(iOS)
+typealias PlatformAppearanceSource = IOSAppearanceSource
+typealias PlatformSettingsExecutor = IOSSettingsExecutor
+#endif
+
 public enum RuntimeNappletOpenError: Error, LocalizedError, Equatable {
     case invalidStorageRoot
     case artifactSourceRefused(detail: String)
@@ -285,6 +293,69 @@ public final class NativeRuntimeCatalogObservation: @unchecked Sendable {
 
     deinit {
         cancel()
+    }
+}
+
+public enum NativeRuntimeRelayDiagnosticsObservationError:
+    Error,
+    LocalizedError,
+    Equatable
+{
+    case profileClosed
+    case refused(code: String, detail: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .profileClosed:
+            "The native runtime profile is closed."
+        case let .refused(code, detail):
+            "The runtime refused relay diagnostics (\(code)): \(detail)"
+        }
+    }
+}
+
+/// Idempotent cancellation for one relay diagnostics observer.
+///
+/// Unlike the activity and catalog fanouts, this handle owns real Rust-side
+/// work: the NMP diagnostics observation is withdrawn once the last handle is
+/// cancelled or released.
+public final class NativeRuntimeRelayDiagnosticsObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancellation: (@Sendable () -> Void)?
+
+    fileprivate init(cancellation: @escaping @Sendable () -> Void) {
+        self.cancellation = cancellation
+    }
+
+    public func cancel() {
+        lock.lock()
+        let cancellation = cancellation
+        self.cancellation = nil
+        lock.unlock()
+        cancellation?()
+    }
+
+    deinit {
+        cancel()
+    }
+}
+
+private final class NativeRuntimeRelayDiagnosticsForwarder:
+    RuntimeRelayDiagnosticsObserver,
+    @unchecked Sendable
+{
+    private let receive:
+        @Sendable (NativeRuntimeRelayDiagnosticsSnapshot) -> Void
+
+    init(
+        receive: @escaping @Sendable (NativeRuntimeRelayDiagnosticsSnapshot)
+            -> Void
+    ) {
+        self.receive = receive
+    }
+
+    func update(snapshot: RuntimeRelayDiagnosticsSnapshot) {
+        receive(snapshot)
     }
 }
 
@@ -675,8 +746,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private let profileID = UUID()
     private let controller: RuntimeController
     private let source: RegisteredArtifactSource
-    private let appearanceSource: MacOSAppearanceSource
-    private let settingsExecutor: MacOSSettingsExecutor
+    private let appearanceSource: PlatformAppearanceSource
+    private let settingsExecutor: PlatformSettingsExecutor
     private let incActionExecutor: MacOSIncActionExecutor
     private let accountVault: (any NativeAccountVault)?
     private let lock = NSLock()
@@ -717,8 +788,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         }
 
         let source = RegisteredArtifactSource()
-        let appearanceSource = MacOSAppearanceSource()
-        let settingsExecutor = MacOSSettingsExecutor()
+        let appearanceSource = PlatformAppearanceSource()
+        let settingsExecutor = PlatformSettingsExecutor()
         let incActionExecutor = MacOSIncActionExecutor()
         let accountVault: (any NativeAccountVault)?
         if let injectedAccountVault {
@@ -794,8 +865,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private init(
         controller: RuntimeController,
         source: RegisteredArtifactSource,
-        appearanceSource: MacOSAppearanceSource,
-        settingsExecutor: MacOSSettingsExecutor,
+        appearanceSource: PlatformAppearanceSource,
+        settingsExecutor: PlatformSettingsExecutor,
         incActionExecutor: MacOSIncActionExecutor,
         accountVault: (any NativeAccountVault)?
     ) {
@@ -1555,6 +1626,47 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         for scope: NativeRuntimeActivityScope
     ) -> NativeRuntimeActivityProjection {
         NativeRuntimeActivityProjection(controller.snapshot(), scope: scope)
+    }
+
+    /// Returns the last NMP relay and wire-subscription read-out.
+    ///
+    /// It is only refreshed while an observation is open. Check `observing`:
+    /// empty `relays` with `observing` false means the read-out is not
+    /// currently accounted, never that the engine planned no relay session.
+    public func relayDiagnostics() -> NativeRuntimeRelayDiagnosticsSnapshot {
+        controller.relayDiagnostics()
+    }
+
+    /// Opens the Rust-owned NMP diagnostics observation for as long as the
+    /// returned handle lives, and delivers the current read-out synchronously.
+    ///
+    /// Unlike the activity and catalog observers, this starts and stops real
+    /// NMP relay accounting rather than joining an always-running fanout.
+    public func observeRelayDiagnostics(
+        _ receive: @escaping @Sendable (NativeRuntimeRelayDiagnosticsSnapshot)
+            -> Void
+    ) throws -> NativeRuntimeRelayDiagnosticsObservation {
+        lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            throw NativeRuntimeRelayDiagnosticsObservationError.profileClosed
+        }
+        lock.unlock()
+
+        let start = controller.observeRelayDiagnostics(
+            observer: NativeRuntimeRelayDiagnosticsForwarder(receive: receive)
+        )
+        guard let observation = start.observation else {
+            let refusal = start.refusal
+            throw NativeRuntimeRelayDiagnosticsObservationError.refused(
+                code: refusal?.code ?? "relay-diagnostics-observe",
+                detail: refusal?.detail
+                    ?? "the runtime returned no diagnostics observation"
+            )
+        }
+        return NativeRuntimeRelayDiagnosticsObservation {
+            observation.stop()
+        }
     }
 
     /// Adds one bounded application observer to the profile's permanent NMP

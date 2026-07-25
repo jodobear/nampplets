@@ -455,7 +455,7 @@ public struct CatalogInstallReview: Identifiable, Equatable, Sendable {
         updateRelationship: CatalogUpdateRelationship,
         canInstall: Bool
     ) {
-        let identityFields: [String] = [
+        var textFields: [String] = [
             id,
             title,
             publisher.displayName ?? "",
@@ -463,26 +463,21 @@ public struct CatalogInstallReview: Identifiable, Equatable, Sendable {
             coordinate,
             exactAggregateHash,
         ]
-        let sourceFields: [String] = sources.flatMap {
+        textFields.append(contentsOf: sources.flatMap {
             [$0.id, $0.source, $0.evidence]
-        }
-        let platformFields: [String] = platformCompatibility.flatMap {
+        })
+        textFields.append(contentsOf: requiredDomains)
+        textFields.append(contentsOf: optionalDomains)
+        textFields.append(contentsOf: platformCompatibility.flatMap {
             [$0.id, $0.platform, $0.detail]
-        }
-        let warningFields: [String] = warnings.flatMap {
+        })
+        textFields.append(contentsOf: warnings.flatMap {
             [$0.id, $0.message]
-        }
-        let updateRelationshipFields: [String] = [
+        })
+        textFields.append(contentsOf: [
             updateRelationship.installedHash ?? "",
             updateRelationship.detail ?? "",
-        ]
-        let textFields: [String] = identityFields
-            + sourceFields
-            + requiredDomains
-            + optionalDomains
-            + platformFields
-            + warningFields
-            + updateRelationshipFields
+        ])
 
         guard coordinate.utf8.count <= CatalogLimits.maximumCoordinateUTF8Bytes,
               textFields.allSatisfy({

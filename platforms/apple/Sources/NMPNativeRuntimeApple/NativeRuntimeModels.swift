@@ -25,6 +25,16 @@ public typealias NativeRuntimeCatalogSourceAccess = RuntimeCatalogSourceAccess
 public typealias NativeRuntimeCatalogSourceState = RuntimeCatalogSourceState
 public typealias NativeRuntimeCatalogWindowState = RuntimeCatalogWindowState
 
+public typealias NativeRuntimeRelayAccess = RuntimeRelayAccess
+public typealias NativeRuntimeRelayCoverage = RuntimeRelayCoverage
+public typealias NativeRuntimeRelayDiagnostics = RuntimeRelayDiagnostics
+public typealias NativeRuntimeRelayDiagnosticsSnapshot =
+    RuntimeRelayDiagnosticsSnapshot
+public typealias NativeRuntimeRelayKindCount = RuntimeRelayKindCount
+public typealias NativeRuntimeRelayLane = RuntimeRelayLane
+public typealias NativeRuntimeRelayLaneCount = RuntimeRelayLaneCount
+public typealias NativeRuntimeRelaySubscription = RuntimeRelaySubscription
+
 public typealias NativeRuntimeWorkspaceAxis = RuntimeWorkspaceAxis
 public typealias NativeRuntimeWorkspaceDefinition = RuntimeWorkspaceDefinition
 public typealias NativeRuntimeWorkspaceRenderer = RuntimeWorkspaceRenderer

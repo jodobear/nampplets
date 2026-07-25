@@ -1032,8 +1032,9 @@ fn shortfall_label(shortfall: &ShortfallFact) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nmp::{RelayUrl, SourceEvidence, Timestamp};
+    use nmp::{EngineConfig, RelayUrl, SourceEvidence, Timestamp};
     use nmp_native_catalog_resolver::CoordinateLookupState;
+    use std::{sync::mpsc, time::Duration};
 
     const PUBLISHED_EVENT: &[u8] =
         include_bytes!("../../../conformance/napplet-corpus/published/good-morning/event.json");
@@ -1074,6 +1075,104 @@ mod tests {
             ]))
         );
         assert_eq!(demand.selection.limit, None);
+    }
+
+    #[ignore = "requires explicit public relay access"]
+    #[test]
+    fn live_catalog_observation_receives_a_public_named_manifest() {
+        let configured = std::env::var("NMP_LIVE_CATALOG_RELAYS")
+            .expect("set NMP_LIVE_CATALOG_RELAYS to a comma-separated operator relay set");
+        let relays = configured
+            .split(',')
+            .map(str::trim)
+            .filter(|relay| !relay.is_empty())
+            .map(|relay| {
+                RelayUrl::parse(relay).expect("live relay URLs must be valid");
+                relay.to_owned()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !relays.is_empty(),
+            "configure at least one live catalog relay"
+        );
+
+        let engine = Arc::new(
+            Engine::new(EngineConfig {
+                indexer_relays: relays.clone(),
+                app_relays: relays,
+                ..EngineConfig::default()
+            })
+            .expect("the pinned NMP facade must open the configured relay plan"),
+        );
+        let catalog =
+            NmpManifestCatalog::new(Arc::clone(&engine), ManifestCatalogLimits::default())
+                .expect("built-in catalog limits must be valid");
+        let observation = catalog
+            .observe_browse(CatalogBrowseRequest::default())
+            .expect("the pinned NMP facade must admit the live catalog observation");
+        observation
+            .request_rows(100)
+            .expect("the expandable NMP window must admit the screen bound");
+        let cancel = observation.cancel_handle();
+        let (send, receive) = mpsc::sync_channel(1);
+        let worker = thread::Builder::new()
+            .name("live-catalog-proof".to_owned())
+            .spawn(move || {
+                let result = loop {
+                    let frame = match observation.recv() {
+                        Ok(frame) => frame,
+                        Err(error) => break Err(error),
+                    };
+                    if let Some(candidate) = frame.candidates.iter().find(|candidate| {
+                        candidate.kind == MANIFEST_NAMED_KIND
+                            && candidate.d_tag.is_some()
+                            && !candidate.observed_sources.is_empty()
+                    }) {
+                        break Ok(candidate.clone());
+                    }
+                };
+                let _ = send.send(result);
+            })
+            .expect("the bounded live proof worker must start");
+
+        let result = receive.recv_timeout(Duration::from_secs(30));
+        cancel.cancel();
+        worker
+            .join()
+            .expect("the bounded live proof worker must not panic");
+        let candidate = result
+            .expect("the configured relays must answer within the live-test deadline")
+            .expect("the live NMP observation must remain open");
+        assert_eq!(candidate.kind, MANIFEST_NAMED_KIND);
+        assert!(!candidate.event_id.is_empty());
+        assert!(!candidate.author.is_empty());
+        assert!(
+            candidate
+                .d_tag
+                .as_deref()
+                .is_some_and(|tag| !tag.is_empty())
+        );
+        assert!(
+            candidate
+                .title
+                .as_deref()
+                .is_some_and(|title| !title.is_empty()),
+            "the current live catalog proof requires one titled napplet"
+        );
+        assert!(
+            candidate
+                .observed_sources
+                .iter()
+                .all(|source| source.starts_with("wss://")),
+            "source evidence must remain scoped to the configured relay plan"
+        );
+        println!(
+            "NMP_LIVE_CATALOG_EVENT={} title={} d={} sources={}",
+            candidate.event_id,
+            candidate.title.as_deref().unwrap_or_default(),
+            candidate.d_tag.as_deref().unwrap_or_default(),
+            candidate.observed_sources.join(",")
+        );
     }
 
     #[test]
