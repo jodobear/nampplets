@@ -11,9 +11,10 @@ use thiserror::Error;
 use url::{Host, Url};
 
 use crate::{
-    ArtifactError, ArtifactLimits, ArtifactManifest, ArtifactPath, ArtifactResolver, BlobSource,
-    BlobSourceError, CachedArtifact, FileArtifactCache, INDEX_PATH, Nip5aPathTagsAggregate,
-    Sha256Digest, nip5a_path_tags_aggregate, validate_artifact_path,
+    ArchetypeDeclaration, ArtifactError, ArtifactLimits, ArtifactManifest, ArtifactPath,
+    ArtifactResolver, BlobSource, BlobSourceError, CachedArtifact, FileArtifactCache, INDEX_PATH,
+    Nip5aPathTagsAggregate, Sha256Digest, archetype::parse_archetype_tag,
+    nip5a_path_tags_aggregate, validate_artifact_path,
 };
 
 const NAPPLET_KIND_SNAPSHOT: u16 = 5_129;
@@ -101,6 +102,7 @@ pub struct ManifestEventLimits {
     pub maximum_tag_string_bytes: usize,
     pub maximum_requirements: usize,
     pub maximum_sources: usize,
+    pub maximum_archetypes: usize,
 }
 
 impl Default for ManifestEventLimits {
@@ -112,6 +114,7 @@ impl Default for ManifestEventLimits {
             maximum_tag_string_bytes: 16 * 1_024,
             maximum_requirements: KNOWN_REQUIREMENTS.len(),
             maximum_sources: 32,
+            maximum_archetypes: 128,
         }
     }
 }
@@ -129,6 +132,7 @@ impl ManifestEventVerifier {
             || limits.maximum_tag_string_bytes == 0
             || limits.maximum_requirements == 0
             || limits.maximum_sources == 0
+            || limits.maximum_archetypes == 0
         {
             return Err(ManifestError::InvalidLimits);
         }
@@ -207,6 +211,8 @@ impl ManifestEventVerifier {
         let mut requirement_names = BTreeSet::new();
         let mut servers = Vec::new();
         let mut server_names = BTreeSet::new();
+        let mut archetypes = Vec::new();
+        let mut archetype_names = BTreeSet::new();
         let mut title = None;
         let mut description = None;
         let mut source = None;
@@ -294,6 +300,24 @@ impl ManifestEventVerifier {
                         });
                     }
                 }
+                "archetype" => {
+                    let declaration = parse_archetype_tag(fields)?;
+                    if !archetype_names
+                        .insert((declaration.slug.clone(), declaration.protocol.clone()))
+                    {
+                        return Err(ManifestError::DuplicateCriticalTag(format!(
+                            "archetype:{}:{}",
+                            declaration.slug, declaration.protocol
+                        )));
+                    }
+                    archetypes.push(declaration);
+                    if archetypes.len() > self.limits.maximum_archetypes {
+                        return Err(ManifestError::ArchetypeCount {
+                            actual: archetypes.len(),
+                            maximum: self.limits.maximum_archetypes,
+                        });
+                    }
+                }
                 "title" => {
                     title = Some(single_metadata("title", fields, title.is_some())?);
                 }
@@ -368,6 +392,7 @@ impl ManifestEventVerifier {
             mode,
             requirements: requirements.into(),
             servers: servers.into(),
+            archetypes: archetypes.into(),
             title,
             description,
             source,
@@ -448,6 +473,7 @@ pub struct VerifiedManifest {
     mode: ArtifactMode,
     requirements: Arc<[Arc<str>]>,
     servers: Arc<[Arc<str>]>,
+    archetypes: Arc<[ArchetypeDeclaration]>,
     title: Option<Arc<str>>,
     description: Option<Arc<str>>,
     source: Option<Arc<str>>,
@@ -493,6 +519,10 @@ impl VerifiedManifest {
 
     pub fn servers(&self) -> impl ExactSizeIterator<Item = &str> {
         self.servers.iter().map(AsRef::as_ref)
+    }
+
+    pub fn archetypes(&self) -> impl ExactSizeIterator<Item = &ArchetypeDeclaration> {
+        self.archetypes.iter()
     }
 
     pub fn title(&self) -> Option<&str> {
@@ -1099,6 +1129,14 @@ pub enum ManifestError {
     RequirementCount { actual: usize, maximum: usize },
     #[error("manifest declares {actual} blob sources; the maximum is {maximum}")]
     SourceCount { actual: usize, maximum: usize },
+    #[error("invalid archetype slug {0:?}")]
+    InvalidArchetypeSlug(String),
+    #[error("invalid archetype protocol {0:?}: must be a bounded string in the napplet: namespace")]
+    InvalidArchetypeProtocol(String),
+    #[error("invalid archetype kind hint(s) {0:?}: expected kind:<digits>")]
+    InvalidArchetypeKind(String),
+    #[error("manifest declares {actual} archetypes; the maximum is {maximum}")]
+    ArchetypeCount { actual: usize, maximum: usize },
     #[error("manifest source metadata is not an absolute credential-free HTTP(S) URL")]
     InvalidSourceUrl,
     #[error("blob server URL violates source policy")]
@@ -1305,6 +1343,77 @@ mod tests {
             handle.read_verified("/style.css", 1_024).unwrap(),
             EXTERNAL_STYLE
         );
+    }
+
+    fn minimal_single_file_manifest_tags(extra: Vec<Vec<String>>) -> Vec<Vec<String>> {
+        let digest = Sha256Digest::of(EXTERNAL_INDEX);
+        let aggregate = nip5a_path_tags_aggregate([(INDEX_PATH, &digest)]).unwrap();
+        let mut tags = vec![
+            vec!["d".to_owned(), "fixture".to_owned()],
+            vec![
+                "path".to_owned(),
+                INDEX_PATH.to_owned(),
+                digest.as_str().to_owned(),
+            ],
+            vec![
+                "x".to_owned(),
+                aggregate.as_str().to_owned(),
+                "aggregate".to_owned(),
+            ],
+        ];
+        tags.extend(extra);
+        tags
+    }
+
+    #[test]
+    fn archetype_tags_round_trip_onto_the_verified_manifest() {
+        let tags = minimal_single_file_manifest_tags(vec![
+            vec![
+                "archetype".to_owned(),
+                "nip29-group".to_owned(),
+                "napplet:nip29-group/open".to_owned(),
+            ],
+            vec![
+                "archetype".to_owned(),
+                "nip29-group".to_owned(),
+                "napplet:nip29-group/preview".to_owned(),
+            ],
+        ]);
+        let (event, coordinate) = signed_named_manifest(tags);
+        let verified = ManifestEventVerifier::pinned()
+            .verify_json(&event, &coordinate)
+            .unwrap();
+        let archetypes: Vec<_> = verified.archetypes().collect();
+        assert_eq!(archetypes.len(), 2);
+        assert!(
+            archetypes
+                .iter()
+                .all(|entry| entry.slug.as_ref() == "nip29-group")
+        );
+        assert!(
+            archetypes
+                .iter()
+                .any(|entry| entry.protocol.as_ref() == "napplet:nip29-group/open")
+        );
+        assert!(
+            archetypes
+                .iter()
+                .any(|entry| entry.protocol.as_ref() == "napplet:nip29-group/preview")
+        );
+    }
+
+    #[test]
+    fn manifest_verification_rejects_an_archetype_protocol_outside_the_napplet_namespace() {
+        let tags = minimal_single_file_manifest_tags(vec![vec![
+            "archetype".to_owned(),
+            "nip29-group".to_owned(),
+            "https://not-napplet-namespaced".to_owned(),
+        ]]);
+        let (event, coordinate) = signed_named_manifest(tags);
+        assert!(matches!(
+            ManifestEventVerifier::pinned().verify_json(&event, &coordinate),
+            Err(ManifestError::InvalidArchetypeProtocol(_))
+        ));
     }
 
     #[test]

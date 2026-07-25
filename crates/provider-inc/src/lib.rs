@@ -266,6 +266,16 @@ pub enum IncProviderBuildError {
     InvalidLimits,
 }
 
+#[derive(Clone, Debug, Error)]
+pub enum IncNativePushError {
+    #[error("target session is not a known INC session")]
+    UnknownSession,
+    #[error("target session has not subscribed to this topic")]
+    NotSubscribed,
+    #[error("push delivery was refused: {0}")]
+    Push(#[from] ProviderPushError),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IncCensus {
     pub sessions: usize,
@@ -426,6 +436,40 @@ impl IncProvider {
     pub fn census(&self) -> IncCensus {
         let state = self.state.lock();
         census(&state)
+    }
+
+    /// Delivers a native-originated (not component-emitted) `inc.event` push
+    /// to one already-subscribed session. Used by NAP-INTENT dispatch to
+    /// hand a launched/focused handler its invocation payload on the same
+    /// topic convention it declared in its manifest -- reuses `emit`'s exact
+    /// wire envelope so a handler cannot distinguish a native push from a
+    /// component-emitted one.
+    pub fn native_push(
+        &self,
+        target: SessionId,
+        topic: &str,
+        sender: &str,
+        payload: &BoundedJson,
+    ) -> Result<(), IncNativePushError> {
+        let state = self.state.lock();
+        let session = state
+            .sessions
+            .get(&target)
+            .ok_or(IncNativePushError::UnknownSession)?;
+        if !session.ready || !session.subscriptions.contains(topic) {
+            return Err(IncNativePushError::NotSubscribed);
+        }
+        let payload = payload.decode().unwrap_or(Value::Null);
+        let event = Map::from_iter([
+            ("topic".to_owned(), Value::String(topic.to_owned())),
+            ("sender".to_owned(), Value::String(sender.to_owned())),
+            ("payload".to_owned(), payload),
+        ]);
+        session
+            .outbound
+            .push("inc.event", event, None)
+            .map(|_| ())
+            .map_err(IncNativePushError::Push)
     }
 
     /// Re-evaluates dynamic product ACL state without changing the pinned
@@ -2906,6 +2950,66 @@ mod tests {
         assert!(valid_opaque_id(
             &id,
             IncProviderLimits::default().maximum_channel_id_bytes
+        ));
+    }
+
+    #[test]
+    fn native_push_delivers_to_an_already_subscribed_session_with_emits_exact_envelope() {
+        let mut harness = default_harness();
+        harness.open(1, "handler", 'a');
+        harness.dispatch(
+            1,
+            json!({"type":"inc.subscribe","id":"sub-1","topic":"napplet:nip29-group/open"}),
+        );
+        let payload = BoundedJson::from_value(&json!({"group":"abc"}), 4_096).unwrap();
+        harness
+            .provider
+            .native_push(
+                SessionId(1),
+                "napplet:nip29-group/open",
+                "caller-d-tag",
+                &payload,
+            )
+            .unwrap();
+        assert_eq!(
+            harness.drain(1),
+            vec![json!({
+                "type":"inc.event",
+                "topic":"napplet:nip29-group/open",
+                "sender":"caller-d-tag",
+                "payload":{"group":"abc"},
+            })]
+        );
+    }
+
+    #[test]
+    fn native_push_refuses_a_session_that_has_not_subscribed_to_the_topic() {
+        let mut harness = default_harness();
+        harness.open(1, "handler", 'a');
+        let payload = BoundedJson::from_value(&Value::Null, 4_096).unwrap();
+        assert!(matches!(
+            harness.provider.native_push(
+                SessionId(1),
+                "napplet:nip29-group/open",
+                "caller-d-tag",
+                &payload
+            ),
+            Err(IncNativePushError::NotSubscribed)
+        ));
+    }
+
+    #[test]
+    fn native_push_refuses_an_unknown_session() {
+        let harness = default_harness();
+        let payload = BoundedJson::from_value(&Value::Null, 4_096).unwrap();
+        assert!(matches!(
+            harness.provider.native_push(
+                SessionId(99),
+                "napplet:nip29-group/open",
+                "caller-d-tag",
+                &payload
+            ),
+            Err(IncNativePushError::UnknownSession)
         ));
     }
 }

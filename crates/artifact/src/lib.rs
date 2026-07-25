@@ -17,8 +17,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 
+mod archetype;
 mod manifest;
 
+pub use archetype::ArchetypeDeclaration;
 pub use manifest::{
     ArtifactMode, ArtifactSourcePolicy, BlobFetchRequest, BlobFetchResponse, ManifestBlobSource,
     ManifestCoordinate, ManifestError, ManifestEventLimits, ManifestEventVerifier,
