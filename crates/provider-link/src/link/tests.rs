@@ -6,8 +6,9 @@ use nmp_native_runtime_core::{
     ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, ResourceLimits, ResourceTracker,
     Sensitivity,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 
+use super::url::validate_external_url;
 use super::*;
 
 #[derive(Debug, Default)]
