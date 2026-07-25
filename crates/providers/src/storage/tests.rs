@@ -5,10 +5,10 @@ use nmp_native_nap_bridge::{
 };
 use nmp_native_runtime_core::{
     ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, Principal, ResourceClass,
-    ResourceLimits, ResourceTracker, Sensitivity,
+    ResourceLimits, ResourceTracker, Sensitivity, SessionId,
 };
 use nmp_native_runtime_store::StoreLimits;
-use serde_json::json;
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::*;
