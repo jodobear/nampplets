@@ -16,6 +16,8 @@ const EVENT: &[u8] =
 const INDEX: &[u8] =
     include_bytes!("../../../conformance/napplet-corpus/published/good-morning/index.html");
 const AUTHOR: &str = "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5";
+const D_TAG: &str = "good-morning";
+const AGGREGATE_HASH: &str = "828a6df02afd56782ea20f805084acce65c53f7c37554948c1e0a64aa5a2b0a8";
 const DIGEST: &str = "ffd35eea5c84d03cdda74c23e1bbb2c40500f503833503aa688036faa52f3808";
 
 struct FixtureSource(BTreeMap<String, Vec<u8>>);
@@ -438,7 +440,7 @@ fn signed_artifact_crosses_only_as_sealed_handle_and_exact_reads() {
 }
 
 #[test]
-fn pinned_good_morning_installs_rust_owned_permission_profile() {
+fn good_morning_installs_with_exactly_its_own_signed_capability_profile() {
     let temp = TempDir::new().unwrap();
     let controller = controller(&temp);
     let artifact = controller
@@ -446,7 +448,7 @@ fn pinned_good_morning_installs_rust_owned_permission_profile() {
             EVENT.to_vec(),
             ArtifactCoordinate::Named {
                 author: AUTHOR.to_owned(),
-                d_tag: GOOD_MORNING_D_TAG.to_owned(),
+                d_tag: D_TAG.to_owned(),
             },
         )
         .artifact
@@ -461,33 +463,18 @@ fn pinned_good_morning_installs_rust_owned_permission_profile() {
         .permission_review(exact_coordinate(&artifact))
         .review
         .expect("the installed exact build has a permission review");
-    assert_eq!(
-        review
-            .capabilities
-            .iter()
-            .map(|capability| { (capability.domain.as_str(), capability.requirement) })
-            .collect::<Vec<_>>(),
-        vec![
-            ("identity", RuntimePermissionRequirement::Required),
-            ("inc", RuntimePermissionRequirement::Required),
-            ("outbox", RuntimePermissionRequirement::Required),
-            ("resource", RuntimePermissionRequirement::Optional),
-            ("theme", RuntimePermissionRequirement::Optional),
-            ("link", RuntimePermissionRequirement::Optional),
-        ]
+    assert!(
+        review.capabilities.is_empty(),
+        "no runtime special-casing survives install -- the manifest declares no `requires` \
+         tags, so the review has nothing to decide"
     );
-    assert!(!review.launch_permitted);
-    let outbox = review
-        .capabilities
-        .iter()
-        .find(|capability| capability.domain == "outbox")
-        .expect("outbox permission");
-    assert_eq!(outbox.sensitivity, RuntimePermissionSensitivity::Sensitive);
+    assert!(review.launch_permitted);
 
     controller.launch(artifact, RuntimeExecutionProfile::Legacy);
-    assert!(
-        controller.snapshot().sessions.is_empty(),
-        "required compatibility capabilities are enforced before execution"
+    assert_eq!(
+        controller.snapshot().sessions.len(),
+        1,
+        "an artifact with no required capabilities launches unconditionally"
     );
 }
 
@@ -574,25 +561,44 @@ fn permission_review_and_atomic_batch_are_exact_typed_and_restart_safe() {
 }
 
 #[test]
-fn good_morning_outbox_grant_survives_default_profile_restart() {
+fn outbox_grant_survives_default_profile_restart() {
     let temp = TempDir::new().unwrap();
-    let runtime = controller(&temp);
+    let (event, author, digest) = signed_manifest_event(
+        "restart-grant-test",
+        b"<html>restart-grant</html>",
+        vec![
+            vec!["requires".to_owned(), "identity".to_owned()],
+            vec!["requires".to_owned(), "inc".to_owned()],
+            vec!["requires".to_owned(), "outbox".to_owned()],
+        ],
+    );
+    let coordinate = ArtifactCoordinate::Named {
+        author: author.clone(),
+        d_tag: "restart-grant-test".to_owned(),
+    };
+    let runtime = RuntimeController::open(
+        RuntimeConfig {
+            runtime_store_path: temp.path().join("runtime.sqlite3").display().to_string(),
+            nmp_store_path: None,
+            artifact_cache_path: temp.path().join("artifacts").display().to_string(),
+            ..RuntimeConfig::default()
+        },
+        Box::new(FixtureSource(BTreeMap::from([(
+            digest.clone(),
+            b"<html>restart-grant</html>".to_vec(),
+        )]))),
+    )
+    .unwrap();
     let artifact = runtime
-        .verify_artifact(
-            EVENT.to_vec(),
-            ArtifactCoordinate::Named {
-                author: AUTHOR.to_owned(),
-                d_tag: "good-morning".to_owned(),
-            },
-        )
+        .verify_artifact(event.clone(), coordinate.clone())
         .artifact
-        .expect("published fixture verifies");
+        .expect("locally signed fixture verifies");
     runtime.install(Arc::clone(&artifact));
     let coordinate = exact_coordinate(&artifact);
     let review = runtime
         .permission_review(coordinate.clone())
         .review
-        .expect("installed Good Morning has a permission review");
+        .expect("installed napplet has a permission review");
     let update = runtime.apply_permission_decisions(RuntimePermissionDecisionBatch {
         coordinate: coordinate.clone(),
         decisions: review
@@ -600,10 +606,7 @@ fn good_morning_outbox_grant_survives_default_profile_restart() {
             .iter()
             .map(|capability| RuntimePermissionDecisionSelection {
                 domain: capability.domain.clone(),
-                decision: match capability.requirement {
-                    RuntimePermissionRequirement::Required => RuntimeGrantDecision::AllowExactBuild,
-                    RuntimePermissionRequirement::Optional => RuntimeGrantDecision::Denied,
-                },
+                decision: RuntimeGrantDecision::AllowExactBuild,
             })
             .collect(),
     });
@@ -612,22 +615,34 @@ fn good_morning_outbox_grant_survives_default_profile_restart() {
     runtime.close();
     drop(runtime);
 
-    let reopened = controller(&temp);
+    let reopened = RuntimeController::open(
+        RuntimeConfig {
+            runtime_store_path: temp.path().join("runtime.sqlite3").display().to_string(),
+            nmp_store_path: None,
+            artifact_cache_path: temp.path().join("artifacts").display().to_string(),
+            ..RuntimeConfig::default()
+        },
+        Box::new(FixtureSource(BTreeMap::from([(
+            digest,
+            b"<html>restart-grant</html>".to_vec(),
+        )]))),
+    )
+    .unwrap();
     let artifact = reopened
         .verify_artifact(
-            EVENT.to_vec(),
+            event,
             ArtifactCoordinate::Named {
-                author: AUTHOR.to_owned(),
-                d_tag: "good-morning".to_owned(),
+                author,
+                d_tag: "restart-grant-test".to_owned(),
             },
         )
         .artifact
-        .expect("published fixture verifies after restart");
+        .expect("locally signed fixture verifies after restart");
     reopened.install(Arc::clone(&artifact));
     let review = reopened
         .permission_review(coordinate)
         .review
-        .expect("Good Morning review restores after restart");
+        .expect("review restores after restart");
     for domain in ["identity", "inc", "outbox"] {
         let capability = review
             .capabilities
@@ -654,76 +669,6 @@ fn good_morning_outbox_grant_survives_default_profile_restart() {
         serde_json::json!(["identity", "inc", "outbox", "shell"]),
         "the trusted shell must receive the same Rust-negotiated domain set"
     );
-}
-
-#[test]
-fn demo_profile_repairs_a_persisted_denied_outbox_grant() {
-    let temp = TempDir::new().unwrap();
-    let runtime = controller(&temp);
-    let artifact = runtime
-        .verify_artifact(
-            EVENT.to_vec(),
-            ArtifactCoordinate::Named {
-                author: AUTHOR.to_owned(),
-                d_tag: "good-morning".to_owned(),
-            },
-        )
-        .artifact
-        .expect("published fixture verifies");
-    runtime.install(Arc::clone(&artifact));
-    let coordinate = exact_coordinate(&artifact);
-    let review = runtime
-        .permission_review(coordinate.clone())
-        .review
-        .expect("installed Good Morning has a permission review");
-    let denied = runtime.apply_permission_decisions(RuntimePermissionDecisionBatch {
-        coordinate: coordinate.clone(),
-        decisions: review
-            .capabilities
-            .iter()
-            .map(|capability| RuntimePermissionDecisionSelection {
-                domain: capability.domain.clone(),
-                decision: RuntimeGrantDecision::Denied,
-            })
-            .collect(),
-    });
-    assert!(denied.applied);
-    assert!(!denied.review.unwrap().launch_permitted);
-    runtime.close();
-    drop(runtime);
-
-    let demo = RuntimeController::open(
-        RuntimeConfig {
-            runtime_store_path: temp.path().join("runtime.sqlite3").display().to_string(),
-            nmp_store_path: None,
-            artifact_cache_path: temp.path().join("artifacts").display().to_string(),
-            permission_mode: RuntimePermissionMode::DemoPinnedGoodMorning,
-            ..RuntimeConfig::default()
-        },
-        Box::new(FixtureSource(BTreeMap::from([(
-            DIGEST.to_owned(),
-            INDEX.to_vec(),
-        )]))),
-    )
-    .unwrap();
-    let repaired = demo
-        .permission_review(coordinate)
-        .review
-        .expect("demo startup restores the installed exact build review");
-    for domain in ["identity", "inc", "outbox"] {
-        let capability = repaired
-            .capabilities
-            .iter()
-            .find(|capability| capability.domain == domain)
-            .unwrap_or_else(|| panic!("missing required {domain} capability"));
-        assert_eq!(
-            capability.existing_decision,
-            RuntimePermissionExistingDecision::AllowExactBuild,
-            "demo startup must repair persisted denial for {domain}"
-        );
-    }
-    assert!(repaired.launch_permitted);
-    demo.close();
 }
 
 #[test]
@@ -777,19 +722,11 @@ fn installed_library_projects_filter_lifecycle_workspace_and_uninstall() {
     );
 
     controller.launch(Arc::clone(&artifact), RuntimeExecutionProfile::Legacy);
-    assert!(
-        controller.snapshot().sessions.is_empty(),
-        "the pinned required profile must refuse before execution"
+    assert_eq!(
+        controller.snapshot().sessions.len(),
+        1,
+        "an artifact with no required capabilities launches unconditionally"
     );
-    for domain in ["identity", "inc", "outbox"] {
-        controller.set_grant(
-            Arc::clone(&artifact),
-            domain.to_owned(),
-            RuntimeSensitivity::Sensitive,
-            RuntimeGrantDecision::AllowExactBuild,
-        );
-    }
-    controller.launch(Arc::clone(&artifact), RuntimeExecutionProfile::Legacy);
     let session = controller.snapshot().installed_library.builds[0].active_session_ids[0];
     controller.suspend(session);
     assert_eq!(controller.snapshot().sessions[0].state, "suspended");
@@ -852,7 +789,7 @@ fn installed_artifact_reacquisition_reuses_the_live_exact_handle() {
     );
     assert_eq!(confirmation.manifest_author, AUTHOR);
     assert_eq!(confirmation.d_tag.as_deref(), Some("good-morning"));
-    assert_eq!(confirmation.aggregate_hash, GOOD_MORNING_AGGREGATE_HASH);
+    assert_eq!(confirmation.aggregate_hash, AGGREGATE_HASH);
     assert_eq!(
         reopened
             .artifact
@@ -893,7 +830,7 @@ fn persisted_install_reopens_offline_from_the_sealed_cache_after_restart() {
     let confirmation = result.confirmation.expect("exact confirmation");
     assert_eq!(confirmation.manifest_author, AUTHOR);
     assert_eq!(confirmation.d_tag.as_deref(), Some("good-morning"));
-    assert_eq!(confirmation.aggregate_hash, GOOD_MORNING_AGGREGATE_HASH);
+    assert_eq!(confirmation.aggregate_hash, AGGREGATE_HASH);
     assert_eq!(
         result
             .artifact

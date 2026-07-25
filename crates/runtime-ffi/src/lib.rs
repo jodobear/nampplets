@@ -124,25 +124,6 @@ const MAXIMUM_WORKSPACE_FIELD_BYTES: usize = 64 * 1_024;
 const MAXIMUM_WORKSPACE_RECEIPTS: usize = 256;
 const MAXIMUM_WORKSPACE_POINT_SIZE: u16 = 4_096;
 const MAXIMUM_PERMISSION_DECISIONS: usize = 64;
-const GOOD_MORNING_AUTHOR: &str =
-    "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5";
-const GOOD_MORNING_D_TAG: &str = "good-morning";
-const GOOD_MORNING_AGGREGATE_HASH: &str =
-    "828a6df02afd56782ea20f805084acce65c53f7c37554948c1e0a64aa5a2b0a8";
-const GOOD_MORNING_CAPABILITY_PROFILE: &[(&str, CapabilityRequirement)] = &[
-    ("identity", CapabilityRequirement::Required),
-    ("inc", CapabilityRequirement::Required),
-    ("outbox", CapabilityRequirement::Required),
-    ("resource", CapabilityRequirement::Optional),
-    ("theme", CapabilityRequirement::Optional),
-    ("link", CapabilityRequirement::Optional),
-];
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum RuntimePermissionMode {
-    Interactive,
-    DemoPinnedGoodMorning,
-}
 
 uniffi::setup_scaffolding!();
 
@@ -167,7 +148,6 @@ pub struct RuntimeConfig {
     pub maximum_artifact_total_bytes: u64,
     pub maximum_verified_read_bytes: u64,
     pub maximum_blob_sources: u64,
-    pub permission_mode: RuntimePermissionMode,
 }
 
 impl RuntimeConfig {
@@ -253,7 +233,6 @@ impl RuntimeConfig {
             maximum_blob_sources,
             maximum_command_items: maximum_config_items,
             maximum_command_string_bytes: maximum_config_string_bytes,
-            permission_mode: self.permission_mode,
         })
     }
 }
@@ -280,7 +259,6 @@ impl Default for RuntimeConfig {
             maximum_artifact_total_bytes: 32 * 1_024 * 1_024,
             maximum_verified_read_bytes: DEFAULT_MAXIMUM_ARTIFACT_READ_BYTES,
             maximum_blob_sources: 8,
-            permission_mode: RuntimePermissionMode::Interactive,
         }
     }
 }
@@ -304,7 +282,6 @@ struct ValidatedConfig {
     maximum_blob_sources: usize,
     maximum_command_items: usize,
     maximum_command_string_bytes: usize,
-    permission_mode: RuntimePermissionMode,
 }
 
 #[derive(Clone, Debug, thiserror::Error, uniffi::Error)]
@@ -1165,7 +1142,6 @@ pub struct RuntimeController {
     signal: watch::Sender<u64>,
     observers: Arc<AtomicUsize>,
     maximum_observers: usize,
-    permission_mode: RuntimePermissionMode,
     closed: AtomicBool,
 }
 
@@ -1182,18 +1158,13 @@ impl fmt::Debug for RuntimeController {
     }
 }
 
-/// Derives the finite permission inventory exclusively from verified bytes and
-/// Rust-owned compatibility policy.
-///
-/// Signed `requires` tags remain authoritative for general artifacts. The
-/// published Good Morning fixture predates those tags, so its immutable exact
-/// build receives the required/optional profile already pinned by the native
-/// runtime compatibility corpus. Native callers cannot select this profile or
-/// supply capability names.
+/// Derives the finite permission inventory exclusively from the artifact's
+/// own signed `requires` tags. Native callers cannot select this profile or
+/// supply capability names -- what the manifest declares is what it gets.
 pub(crate) fn installation_capability_requests(
     handle: &VerifiedArtifactHandle,
 ) -> Result<Vec<CapabilityRequest>, String> {
-    let mut requests = handle
+    let requests = handle
         .manifest()
         .requirements()
         .map(|domain| {
@@ -1206,18 +1177,6 @@ pub(crate) fn installation_capability_requests(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let is_pinned_good_morning = handle.index().author().as_str() == GOOD_MORNING_AUTHOR
-        && handle.index().d_tag() == Some(GOOD_MORNING_D_TAG)
-        && handle.index().aggregate().as_str() == GOOD_MORNING_AGGREGATE_HASH;
-    if is_pinned_good_morning {
-        debug_assert!(requests.is_empty());
-        for (domain, requirement) in GOOD_MORNING_CAPABILITY_PROFILE {
-            requests.push(CapabilityRequest {
-                capability: Capability::new(*domain).map_err(|error| error.to_string())?,
-                requirement: *requirement,
-            });
-        }
-    }
     if requests.len() > MAXIMUM_PERMISSION_DECISIONS {
         return Err(format!(
             "verified capability profile has {} domains; the maximum is {}",
@@ -1575,16 +1534,8 @@ fn open_runtime_controller(
         signal,
         observers: Arc::new(AtomicUsize::new(0)),
         maximum_observers: config.maximum_observers,
-        permission_mode: config.permission_mode,
         closed: AtomicBool::new(false),
     });
-    // Demo profiles are deliberately permissive for local end-to-end demos.
-    // Re-apply that explicit policy to metadata restored from a prior process
-    // too; otherwise a first run under interactive review can leave a denied
-    // exact-build grant persisted forever, making NAP-OUTBOX appear absent on
-    // the next demo launch. The helper remains a no-op for interactive
-    // profiles and still binds every decision to the restored exact principal.
-    controller.grant_demo_permissions_for_installed_builds();
     Ok(controller)
 }
 

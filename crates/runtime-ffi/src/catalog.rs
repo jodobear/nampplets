@@ -39,11 +39,7 @@ use parking_lot::Mutex;
 use thiserror::Error;
 use tokio::sync::watch;
 
-use super::{
-    CapabilityRequirement, GOOD_MORNING_AGGREGATE_HASH, GOOD_MORNING_AUTHOR,
-    GOOD_MORNING_CAPABILITY_PROFILE, GOOD_MORNING_D_TAG, RuntimePermissionRequirement,
-    VerifiedArtifact,
-};
+use super::{RuntimePermissionRequirement, VerifiedArtifact};
 
 const MAXIMUM_PAGE_ENTRIES: usize = 100;
 const MAXIMUM_PENDING_REVIEWS: usize = 16;
@@ -1018,22 +1014,6 @@ fn project_review(token: &str, review: &ArtifactReview) -> RuntimeCatalogReview 
 fn review_capabilities(
     summary: &nmp_native_catalog_resolver::ArtifactReviewSummary,
 ) -> Vec<RuntimeCatalogCapability> {
-    let (author, d_tag) = coordinate_identity(summary.coordinate());
-    if author == GOOD_MORNING_AUTHOR
-        && d_tag.as_deref() == Some(GOOD_MORNING_D_TAG)
-        && summary.aggregate().as_str() == GOOD_MORNING_AGGREGATE_HASH
-    {
-        return GOOD_MORNING_CAPABILITY_PROFILE
-            .iter()
-            .map(|(domain, requirement)| RuntimeCatalogCapability {
-                domain: (*domain).to_owned(),
-                requirement: match requirement {
-                    CapabilityRequirement::Required => RuntimePermissionRequirement::Required,
-                    CapabilityRequirement::Optional => RuntimePermissionRequirement::Optional,
-                },
-            })
-            .collect();
-    }
     summary
         .requirements()
         .map(|domain| RuntimeCatalogCapability {

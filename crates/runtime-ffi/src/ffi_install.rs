@@ -152,69 +152,7 @@ impl RuntimeController {
             artifact: executable,
         });
         self.register_intent_handler(&principal, &artifact.handle);
-        self.grant_demo_permissions(
-            principal.manifest_author(),
-            principal.d_tag(),
-            principal.aggregate_hash(),
-        );
         bump_signal(&self.signal);
-    }
-
-    /// The explicit demo mode is intentionally permissive so a locally
-    /// verified network napplet can be rendered and exercised end-to-end.
-    /// Interactive production profiles still require the normal exact-build
-    /// permission review.
-    fn grant_demo_permissions(&self, author: &str, d_tag: &str, aggregate_hash: &str) {
-        if self.permission_mode != RuntimePermissionMode::DemoPinnedGoodMorning {
-            return;
-        }
-        let Ok(principal) = Principal::new(author, d_tag, aggregate_hash) else {
-            return;
-        };
-        let Ok(review) = self.app.permission_review(&principal) else {
-            return;
-        };
-        let decisions = review
-            .capabilities
-            .into_iter()
-            .map(|capability| PermissionDecision {
-                capability: capability.capability,
-                decision: capability
-                    .decision_options
-                    .into_iter()
-                    .find(|option| {
-                        option.valid && option.decision == GrantDecision::AllowExactBuild
-                    })
-                    .map_or(GrantDecision::Denied, |option| option.decision),
-            })
-            .collect::<Vec<_>>();
-        if !decisions.is_empty() {
-            self.app.dispatch(PlatformCommand::ApplyPermissionBatch {
-                principal: principal.clone(),
-                decisions,
-            });
-        }
-    }
-
-    pub(crate) fn grant_demo_permissions_for_installed_builds(&self) {
-        if self.permission_mode != RuntimePermissionMode::DemoPinnedGoodMorning {
-            return;
-        }
-        let principals = self
-            .app
-            .snapshot()
-            .library
-            .builds
-            .iter()
-            .map(|view| view.build.principal.clone())
-            .collect::<Vec<_>>();
-        for principal in principals {
-            self.grant_demo_permissions(
-                principal.manifest_author(),
-                principal.d_tag(),
-                principal.aggregate_hash(),
-            );
-        }
     }
 
     /// Applies the Rust-owned, finite installed-library filter. The resulting
