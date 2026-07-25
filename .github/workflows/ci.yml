@@ -242,8 +242,10 @@ jobs:
           test "$(xcodebuild -version | head -n 1)" = "Xcode $(cat .xcode-version)"
           swift --version | grep 'Apple Swift version 6.1'
 
-      - name: Install both macOS Rust standard libraries
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Install macOS and iOS Rust standard libraries
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 
       - name: Test the native package build contract
         run: scripts/tests/test-build-runtime-swift-xcframework.sh
