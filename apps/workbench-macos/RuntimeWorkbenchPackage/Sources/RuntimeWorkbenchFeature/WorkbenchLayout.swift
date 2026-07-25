@@ -224,7 +224,15 @@ public struct WorkbenchCanvasWindow:
 
 public struct WorkbenchLayoutSnapshot: Codable, Equatable, Sendable {
     public static let currentVersion = 2
-    /// Mirrors the Rust workspace schema's persisted slot ceiling.
+    /// A Swift-only UI cap on how many canvas windows `addWindow(_:)` will
+    /// admit in a single session. Rust does not enforce or validate this
+    /// number against the persisted layout: `preferencesJson` is stored and
+    /// restored as an opaque blob (see `RuntimeWorkbenchLayoutStore`), and
+    /// Rust's own slot ceiling (`MAXIMUM_WORKSPACE_SLOTS` in
+    /// `crates/runtime-ffi`) is a separate, independently maintained
+    /// constant that is checked only on save, not on load. This value must
+    /// never be used to discard windows that were already restored from
+    /// persistence -- `normalized()` intentionally does not truncate to it.
     public static let maximumWindowCount = 16
 
     public var version: Int
@@ -450,11 +458,15 @@ public struct WorkbenchLayoutModel: Equatable, Sendable {
 
         var result = candidate
         var seenIDs = Set<WorkbenchWindowID>()
-        result.windows = Array(
-            result.windows
-                .filter { seenIDs.insert($0.id).inserted }
-                .prefix(WorkbenchLayoutSnapshot.maximumWindowCount)
-        )
+        // Only drop windows whose IDs collide (an actual data-integrity
+        // problem: two windows sharing an ID break `Identifiable`-keyed
+        // lookups and dictionary/state keys throughout the canvas). Do NOT
+        // truncate to `maximumWindowCount` here -- that cap is a Swift-only
+        // gate on adding *new* windows in `addWindow(_:)`; enforcing it on
+        // load as well would silently discard a user's persisted windows
+        // with no visible signal. See the doc comment on
+        // `maximumWindowCount` above.
+        result.windows = result.windows.filter { seenIDs.insert($0.id).inserted }
         for index in result.windows.indices {
             result.windows[index].frame = result.windows[index].frame.bounded()
             result.windows[index].stackingOrder = UInt16(index)

@@ -288,6 +288,61 @@ import Testing
     )
 }
 
+@Test func loadingAPersistedLayoutBeyondTheAddCapKeepsEveryWindow() {
+    let windowCount = WorkbenchLayoutSnapshot.maximumWindowCount + 5
+    let windows = (0 ..< windowCount).map { index in
+        WorkbenchCanvasWindow(
+            id: WorkbenchWindowID(rawValue: "persisted-\(index)"),
+            componentID: WorkbenchComponentID(rawValue: "network:\(index)"),
+            title: "Persisted \(index)",
+            frame: .init(
+                x: Double(index * 4),
+                y: Double(index * 4),
+                width: 480,
+                height: 360
+            ),
+            stackingOrder: UInt16(index)
+        )
+    }
+    let snapshot = WorkbenchLayoutSnapshot(
+        mode: .freeform,
+        windows: windows,
+        selectedWindowID: windows.last?.id
+    )
+
+    // normalized() must never silently discard windows that were already
+    // persisted -- `maximumWindowCount` only gates *new* additions via
+    // `addWindow(_:)`, which is exercised separately above.
+    let restored = WorkbenchLayoutModel(snapshot: snapshot)
+
+    #expect(restored.windows.count == windowCount)
+    #expect(
+        Set(restored.windows.map(\.id)) == Set(windows.map(\.id))
+    )
+}
+
+@Test func loadingAPersistedLayoutStillDropsDuplicateWindowIDs() {
+    let duplicated = WorkbenchCanvasWindow(
+        id: WorkbenchWindowID(rawValue: "duplicate"),
+        componentID: WorkbenchComponentID(rawValue: "network:duplicate"),
+        title: "Duplicate A",
+        frame: .init(x: 0, y: 0, width: 480, height: 360),
+        stackingOrder: 0
+    )
+    var duplicateAgain = duplicated
+    duplicateAgain.title = "Duplicate B"
+    let snapshot = WorkbenchLayoutSnapshot(
+        mode: .freeform,
+        windows: [duplicated, duplicateAgain],
+        selectedWindowID: duplicated.id
+    )
+
+    let restored = WorkbenchLayoutModel(snapshot: snapshot)
+
+    #expect(restored.windows.count == 1)
+    #expect(restored.windows.first?.title == "Duplicate A")
+}
+
 @Test func unsupportedPersistedLayoutVersionFallsBackSafely() {
     var snapshot = WorkbenchLayoutSnapshot.workbenchDefault
     snapshot.version = WorkbenchLayoutSnapshot.currentVersion + 1
