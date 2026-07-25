@@ -31,7 +31,8 @@ let package = Package(
         ),
         .testTarget(
             name: "NMPNativeRuntimeAppleTests",
-            dependencies: ["NMPNativeRuntimeApple"]
+            dependencies: ["NMPNativeRuntimeApple"],
+            resources: [.copy("Fixtures")]
         )
     ]
 )

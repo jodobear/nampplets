@@ -87,6 +87,8 @@ public struct TrustedNappletView {
     }
 
     @MainActor
+    private struct SandboxFrameUnavailable: Error {}
+
     public final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         private static let bridgeName = "runtimeBridge"
         private static let bridgeWorld = WKContentWorld.world(name: "io.f7z.nmp.native-runtime.bridge")
@@ -101,6 +103,7 @@ public struct TrustedNappletView {
         private var activeTrustedGeneration: UInt64?
         private var stopped = false
         private weak var currentWebView: WKWebView?
+        private var sandboxFrameInfo: WKFrameInfo?
 
         init(
             artifact: NappletArtifact,
@@ -178,6 +181,20 @@ public struct TrustedNappletView {
                 contentWorld: Self.bridgeWorld
             )
             webView.configuration.userContentController.removeAllUserScripts()
+        }
+
+        /// Diagnostic-only: evaluates script inside the sandboxed napplet
+        /// iframe rather than the trusted outer document. Production code
+        /// never needs this -- native/sandbox communication is entirely
+        /// message-based -- but tooling that inspects a napplet's own
+        /// rendered DOM (e.g. an inspector or an integration test driving a
+        /// real click) has no other way to reach it, since the sandbox's
+        /// opaque origin blocks ordinary `iframe.contentDocument` access.
+        public func evaluateJavaScriptInSandbox(_ script: String) async throws -> Any? {
+            guard let webView = currentWebView, let frame = sandboxFrameInfo else {
+                throw SandboxFrameUnavailable()
+            }
+            return try await webView.evaluateJavaScript(script, in: frame, contentWorld: .page)
         }
 
         public func userContentController(
@@ -293,7 +310,14 @@ public struct TrustedNappletView {
         /// characters before it reaches a user-facing activity string.
         private static func mountFailureReason(_ error: Error) -> String {
             let fallback = "The trusted shell refused the artifact"
-            let detail = (error as NSError).localizedDescription
+            let nsError = error as NSError
+            // `callAsyncJavaScript` reports a thrown mount-time exception as a
+            // bare WKError whose `localizedDescription` is the unhelpful
+            // generic "A JavaScript exception occurred" -- the actual message
+            // (and, often, source location) lives in `userInfo` instead.
+            let detail =
+                (nsError.userInfo["WKJavaScriptExceptionMessage"] as? String)
+                ?? nsError.localizedDescription
             let sanitized = String(
                 detail.unicodeScalars.filter { scalar in
                     !CharacterSet.newlines.contains(scalar)
@@ -326,6 +350,7 @@ public struct TrustedNappletView {
             }
 
             if url.scheme == "about", !isMainFrame {
+                sandboxFrameInfo = navigationAction.targetFrame
                 decisionHandler(.allow)
                 return
             }

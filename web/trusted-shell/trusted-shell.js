@@ -363,7 +363,8 @@
           domain !== "resource" &&
           domain !== "link" &&
           domain !== "outbox" &&
-          domain !== "relay"
+          domain !== "relay" &&
+          domain !== "intent"
         )) {
       throw new Error("The trusted shell cannot project every negotiated domain");
     }
@@ -429,7 +430,11 @@
   addEventListener("error", function (event) {
     var detail = "Uncaught " + (event && event.message ? event.message : "error");
     if (event && event.filename) {
-      detail += " (" + event.filename + ":" + event.lineno + ")";
+      detail += " (" + event.filename + ":" + event.lineno + ":" +
+        (event.colno === undefined ? "?" : event.colno) + ")";
+    }
+    if (event && event.error && event.error.stack) {
+      detail += "\\n" + event.error.stack;
     }
     forwardConsoleEntry("error", [detail]);
   });
@@ -448,6 +453,7 @@
   var readyHandlers = new Set();
   var identityChangedHandlers = new Set();
   var themeChangedHandlers = new Set();
+  var intentChangedHandlers = new Set();
   var configSubscribers = new Set();
   var configSchemaErrorHandlers = new Set();
   var configLastValues = null;
@@ -491,6 +497,7 @@
     var count = readyHandlers.size +
       identityChangedHandlers.size +
       themeChangedHandlers.size +
+      intentChangedHandlers.size +
       configSubscribers.size +
       configSchemaErrorHandlers.size;
     topicStates.forEach(function (state) {
@@ -674,6 +681,14 @@
       handler(message.theme);
     });
   }
+  function dispatchIntentChanged(message) {
+    if (!isObject(message.availability)) return;
+    Array.from(intentChangedHandlers).forEach(function (handler) {
+      try {
+        handler(message.availability);
+      } catch (_) {}
+    });
+  }
   function dispatchConfigValues(message) {
     if (!isObject(message.values)) return;
     configLastValues = message.values;
@@ -850,6 +865,7 @@
     relaySubscriptions.clear();
     identityChangedHandlers.clear();
     themeChangedHandlers.clear();
+    intentChangedHandlers.clear();
     configSubscribers.clear();
     configSchemaErrorHandlers.clear();
     configLastValues = null;
@@ -924,6 +940,10 @@
     }
     if (event.data.type === "relay.closed") {
       dispatchRelayClosed(event.data);
+      return;
+    }
+    if (event.data.type === "intent.changed") {
+      dispatchIntentChanged(event.data);
       return;
     }
     settlePending(event.data);
@@ -1287,6 +1307,94 @@
           }
         );
       }
+    });
+  }
+  if (projectedDomains.indexOf("intent") !== -1) {
+    function intentInvoke(intentRequest) {
+      if (!isObject(intentRequest) || typeof intentRequest.archetype !== "string") {
+        return Promise.reject(new TypeError("intent.invoke requires an archetype"));
+      }
+      return request(
+        "intent.invoke",
+        { request: intentRequest },
+        function (message) {
+          if (Object.prototype.hasOwnProperty.call(message, "result")) {
+            return message.result;
+          }
+          throw new Error(errorMessage(message.error));
+        },
+        "intent.invoke.result",
+        true,
+        null,
+        null,
+        MAX_OUTBOX_REQUEST_TIMEOUT_MILLIS
+      );
+    }
+    function intentOpen(archetype, payload, opts) {
+      if (typeof archetype !== "string") {
+        return Promise.reject(new TypeError("intent.open requires an archetype"));
+      }
+      var fields = { archetype: archetype, action: "open" };
+      if (payload !== undefined) fields.payload = payload;
+      if (isObject(opts)) {
+        Object.keys(opts).forEach(function (key) {
+          if (key !== "archetype" && key !== "action" && key !== "payload") {
+            fields[key] = opts[key];
+          }
+        });
+      }
+      return intentInvoke(fields);
+    }
+    function intentAvailable(archetype) {
+      if (typeof archetype !== "string") {
+        return Promise.reject(new TypeError("intent.available requires an archetype"));
+      }
+      return request(
+        "intent.available",
+        { archetype: archetype },
+        function (message) {
+          if (!isObject(message.availability)) {
+            throw new Error("intent.available.result missing availability");
+          }
+          return message.availability;
+        },
+        "intent.available.result",
+        false,
+        null,
+        null,
+        MAX_OUTBOX_REQUEST_TIMEOUT_MILLIS
+      );
+    }
+    function intentHandlers() {
+      return request(
+        "intent.handlers",
+        {},
+        function (message) {
+          return Array.isArray(message.handlers) ? message.handlers.slice() : [];
+        },
+        "intent.handlers.result",
+        false,
+        null,
+        null,
+        MAX_OUTBOX_REQUEST_TIMEOUT_MILLIS
+      );
+    }
+    function intentOnChanged(handler) {
+      if (typeof handler !== "function") {
+        throw new TypeError("onChanged requires a function");
+      }
+      requireHandlerCapacity();
+      intentChangedHandlers.add(handler);
+      return closeHandle(function () {
+        intentChangedHandlers.delete(handler);
+      });
+    }
+    napplet.intent = Object.freeze({
+      invoke: intentInvoke,
+      open: intentOpen,
+      available: intentAvailable,
+      handlers: intentHandlers,
+      onChanged: intentOnChanged
     });
   }
   if (projectedDomains.indexOf("inc") !== -1) {
@@ -1778,13 +1886,36 @@
       get: function () { return configCurrentSchema; }
     });
     napplet.config = Object.freeze(config);
+    if (configCurrentSchema !== null) {
+      // The manifest-declared schema was extracted from this artifact's own
+      // <meta name="napplet-config-schema"> before untrusted code ran. Native
+      // must have it registered before the napplet's own bootstrap calls
+      // config.subscribe()/config.get(), so the shell submits it here rather
+      // than waiting for (and trusting) the napplet to register its own copy.
+      // This has to wait for the NAP-SHELL handshake (readyPromise) first --
+      // native refuses any request from a mapped session before that
+      // handshake completes, and this runs before the napplet's own code
+      // gets a chance to run at all.
+      readyPromise.then(function () {
+        return config.registerSchema(configCurrentSchema);
+      }).catch(function (error) {
+        forwardConsoleEntry("error", [
+          "napplet.config: automatic schema registration failed: " +
+            (error && error.message ? error.message : String(error))
+        ]);
+      });
+    }
   }
-  Object.defineProperty(window, "napplet", {
-    configurable: false,
-    enumerable: true,
-    writable: false,
-    value: Object.freeze(napplet)
-  });
+  // Published napplets bundle their own \`@napplet/core\`/\`@napplet/nap\`
+  // client, which unconditionally installs its own \`window.napplet\` at
+  // module-load time once it learns the negotiated domains from this same
+  // handshake. A napplet that ships no bundled client still gets a working
+  // \`window.napplet\` immediately; one that does simply supersedes it moments
+  // later over the same wire protocol -- both paths end up talking to
+  // \`forwardToNative\` through \`window.parent.postMessage\`, so allowing the
+  // property to be replaced does not weaken the trust boundary (validation
+  // happens on the envelope contents, not on which object sent it).
+  window.napplet = Object.freeze(napplet);
   parent.postMessage({ type: "shell.ready" }, "*");
 })();`;
   }

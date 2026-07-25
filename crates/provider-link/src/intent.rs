@@ -1021,7 +1021,7 @@ fn validate_invocation(
     if object.keys().any(|field| {
         !matches!(
             field.as_str(),
-            "archetype" | "action" | "convention" | "payload" | "handler" | "behavior"
+            "archetype" | "action" | "convention" | "protocol" | "payload" | "handler" | "behavior"
         )
     }) {
         return Err(invalid(request, "unknown intent request field"));
@@ -1047,7 +1047,14 @@ fn validate_invocation(
         }
         _ => return Err(invalid(request, "`action` is invalid")),
     };
-    let convention = optional_text(request, object, "convention", limits.maximum_text_bytes)?;
+    // The vendored NAP-INTENT spec names this field `convention`, but the
+    // `@napplet/nap` SDK actually deployed by published napplets (whose
+    // `intent.open(archetype, payload, { protocol })` sugar spreads `opts`
+    // directly onto the wire request) sends it as `protocol`. Accept either
+    // spelling so real-world napplets built against that SDK aren't rejected.
+    let convention = optional_text(request, object, "convention", limits.maximum_text_bytes)?.or(
+        optional_text(request, object, "protocol", limits.maximum_text_bytes)?,
+    );
     if convention
         .as_deref()
         .is_some_and(|value| !value.starts_with("napplet:"))
@@ -1550,6 +1557,41 @@ mod tests {
         assert_eq!(result["id"], "invoke-1");
         assert_eq!(result["result"]["handler"], "note-viewer");
         assert_eq!(result["result"]["windowId"], "window-1");
+    }
+
+    #[test]
+    fn protocol_field_is_accepted_as_a_convention_alias() {
+        // Real published napplets are built against the `@napplet/nap` SDK,
+        // whose `intent.open(archetype, payload, { protocol })` sugar sends
+        // the wire field as `protocol`, not the vendored spec's `convention`.
+        let rig = Rig::new(Arc::new(CancelIntentChoice));
+        let handler = principal("note-viewer", 'c');
+        rig.provider
+            .register_handler(handler.clone(), vec![note_declaration()])
+            .unwrap();
+        rig.provider
+            .set_default("note", Some(handler.clone()))
+            .unwrap();
+        let _ = rig.observer.drain(16).unwrap();
+
+        assert_eq!(
+            rig.dispatch(json!({
+                "type":"intent.invoke",
+                "id":"invoke-protocol-1",
+                "request":{
+                    "archetype":"note",
+                    "action":"open",
+                    "protocol":"napplet:note/open",
+                    "payload":{"target":"abc"}
+                }
+            }))
+            .unwrap(),
+            None
+        );
+        let requests = rig.dispatcher.requests.lock();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].handler, handler);
+        drop(requests);
     }
 
     #[test]
