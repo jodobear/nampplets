@@ -44,16 +44,11 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         reopenReview.click()
 
         for domain in ["identity", "inc", "outbox"] {
-            let decision = app.descendants(matching: .any)[
-                "permission-decision-\(domain)"
+            let toggle = app.descendants(matching: .any)[
+                "permission-toggle-\(domain)"
             ]
-            XCTAssertTrue(decision.waitForExistence(timeout: 10))
-            decision.click()
-            let allow = app.descendants(matching: .any)[
-                "permission-\(domain)-allowExactBuild"
-            ]
-            XCTAssertTrue(allow.waitForExistence(timeout: 2))
-            allow.click()
+            XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+            toggle.click()
         }
 
         let confirm = app.descendants(matching: .any)["permission-confirm"]
