@@ -7,8 +7,9 @@ use std::{
     },
 };
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use nmp_native_nap_bridge::{
-    BridgeLimits, DispatchOutcome, InjectionPlan, MemoryActivitySink, ProviderPushLimits,
+    BridgeLimits, DispatchOutcome, InjectionPlan, MemoryActivitySink, Provider, ProviderPushLimits,
     ProviderPushObserver, ProviderRegistry, SessionContext, SourceWindowId,
 };
 use nmp_native_runtime_core::{
