@@ -288,7 +288,7 @@ import Testing
     )
 }
 
-@Test func loadingAPersistedLayoutBeyondTheAddCapKeepsEveryWindow() {
+@Test func loadingAPersistedLayoutBeyondCapacityDropsExcessButReportsIt() {
     let windowCount = WorkbenchLayoutSnapshot.maximumWindowCount + 5
     let windows = (0 ..< windowCount).map { index in
         WorkbenchCanvasWindow(
@@ -310,15 +310,23 @@ import Testing
         selectedWindowID: windows.last?.id
     )
 
-    // normalized() must never silently discard windows that were already
-    // persisted -- `maximumWindowCount` only gates *new* additions via
-    // `addWindow(_:)`, which is exercised separately above.
+    // A layout beyond maximumWindowCount can never be saved back to Rust
+    // (MAXIMUM_WORKSPACE_SLOTS rejects it), so normalized() still caps it --
+    // but it must report the drop instead of discarding it silently.
     let restored = WorkbenchLayoutModel(snapshot: snapshot)
 
-    #expect(restored.windows.count == windowCount)
+    #expect(restored.windows.count == WorkbenchLayoutSnapshot.maximumWindowCount)
+    #expect(restored.windowsDroppedForCapacityOnLoad == 5)
     #expect(
-        Set(restored.windows.map(\.id)) == Set(windows.map(\.id))
+        Set(restored.windows.map(\.id))
+            == Set(windows.prefix(WorkbenchLayoutSnapshot.maximumWindowCount).map(\.id))
     )
+}
+
+@Test func loadingAPersistedLayoutWithinCapacityReportsNoDrops() {
+    let restored = WorkbenchLayoutModel(snapshot: .workbenchDefault)
+
+    #expect(restored.windowsDroppedForCapacityOnLoad == 0)
 }
 
 @Test func loadingAPersistedLayoutStillDropsDuplicateWindowIDs() {

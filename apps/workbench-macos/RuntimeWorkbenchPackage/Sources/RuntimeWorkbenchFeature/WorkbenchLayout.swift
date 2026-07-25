@@ -224,15 +224,15 @@ public struct WorkbenchCanvasWindow:
 
 public struct WorkbenchLayoutSnapshot: Codable, Equatable, Sendable {
     public static let currentVersion = 2
-    /// A Swift-only UI cap on how many canvas windows `addWindow(_:)` will
-    /// admit in a single session. Rust does not enforce or validate this
-    /// number against the persisted layout: `preferencesJson` is stored and
-    /// restored as an opaque blob (see `RuntimeWorkbenchLayoutStore`), and
-    /// Rust's own slot ceiling (`MAXIMUM_WORKSPACE_SLOTS` in
-    /// `crates/runtime-ffi`) is a separate, independently maintained
-    /// constant that is checked only on save, not on load. This value must
-    /// never be used to discard windows that were already restored from
-    /// persistence -- `normalized()` intentionally does not truncate to it.
+    /// Mirrors Rust's real, enforced ceiling: `MAXIMUM_WORKSPACE_SLOTS` in
+    /// `crates/runtime-ffi/src/lib.rs` rejects any `saveWorkspace` call with
+    /// more than 16 slots, and `RuntimeWorkbenchServices.saveLayout` maps
+    /// every window in this snapshot 1:1 onto that slot array -- so a
+    /// layout with more than `maximumWindowCount` windows can never be
+    /// persisted. These two constants are independently maintained and
+    /// must be changed together; if they ever drift, `normalized()`
+    /// dropping windows here is the safety net that keeps the in-memory
+    /// model savable, not the root guarantee.
     public static let maximumWindowCount = 16
 
     public var version: Int
@@ -337,9 +337,17 @@ public struct WorkbenchLayoutSnapshot: Codable, Equatable, Sendable {
 
 public struct WorkbenchLayoutModel: Equatable, Sendable {
     public private(set) var snapshot: WorkbenchLayoutSnapshot
+    /// Count of windows dropped by the most recent `normalized()` call for
+    /// exceeding `maximumWindowCount` (not counting ID-collision drops).
+    /// Nonzero only immediately after `init(snapshot:)` loads a persisted
+    /// layout that exceeded capacity -- callers must surface this, not
+    /// discard it silently.
+    public private(set) var windowsDroppedForCapacityOnLoad: Int
 
     public init(snapshot: WorkbenchLayoutSnapshot = .workbenchDefault) {
-        self.snapshot = Self.normalized(snapshot)
+        let normalized = Self.normalized(snapshot)
+        self.snapshot = normalized.snapshot
+        self.windowsDroppedForCapacityOnLoad = normalized.windowsDroppedForCapacity
     }
 
     public var mode: WorkbenchLayoutMode {
@@ -449,24 +457,31 @@ public struct WorkbenchLayoutModel: Equatable, Sendable {
         }
     }
 
+    /// - Returns: the normalized snapshot, plus the count of windows that
+    ///   had to be dropped purely for exceeding `maximumWindowCount` (i.e.
+    ///   excluding windows dropped for colliding IDs, which are a data
+    ///   integrity fix rather than a capacity refusal). Callers must
+    ///   surface a nonzero count to the user -- see `ContentView`'s use of
+    ///   `layoutPersistenceError` -- rather than discarding it silently.
     private static func normalized(
         _ candidate: WorkbenchLayoutSnapshot
-    ) -> WorkbenchLayoutSnapshot {
+    ) -> (snapshot: WorkbenchLayoutSnapshot, windowsDroppedForCapacity: Int) {
         guard candidate.version == WorkbenchLayoutSnapshot.currentVersion else {
-            return .workbenchDefault
+            return (.workbenchDefault, 0)
         }
 
         var result = candidate
         var seenIDs = Set<WorkbenchWindowID>()
-        // Only drop windows whose IDs collide (an actual data-integrity
+        // Drop windows whose IDs collide first (an actual data-integrity
         // problem: two windows sharing an ID break `Identifiable`-keyed
-        // lookups and dictionary/state keys throughout the canvas). Do NOT
-        // truncate to `maximumWindowCount` here -- that cap is a Swift-only
-        // gate on adding *new* windows in `addWindow(_:)`; enforcing it on
-        // load as well would silently discard a user's persisted windows
-        // with no visible signal. See the doc comment on
-        // `maximumWindowCount` above.
-        result.windows = result.windows.filter { seenIDs.insert($0.id).inserted }
+        // lookups and dictionary/state keys throughout the canvas), then
+        // cap at maximumWindowCount -- which mirrors Rust's real, enforced
+        // MAXIMUM_WORKSPACE_SLOTS ceiling (see the doc comment above), so a
+        // layout that exceeds it can never be saved back to Rust anyway.
+        let deduplicated = result.windows.filter { seenIDs.insert($0.id).inserted }
+        let capped = Array(deduplicated.prefix(WorkbenchLayoutSnapshot.maximumWindowCount))
+        let windowsDroppedForCapacity = deduplicated.count - capped.count
+        result.windows = capped
         for index in result.windows.indices {
             result.windows[index].frame = result.windows[index].frame.bounded()
             result.windows[index].stackingOrder = UInt16(index)
@@ -484,7 +499,7 @@ public struct WorkbenchLayoutModel: Equatable, Sendable {
         if result.selectedWindowID == nil {
             result.selectedWindowID = result.windows.last?.id
         }
-        return result
+        return (result, windowsDroppedForCapacity)
     }
 }
 

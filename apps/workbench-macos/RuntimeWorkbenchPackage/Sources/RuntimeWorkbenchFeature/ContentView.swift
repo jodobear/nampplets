@@ -126,12 +126,17 @@ public struct ContentView: View {
             let restored = try resolvedLayoutStore.loadLayout(
                 workspaceID: Self.workspaceID
             )
-            _layout = State(
-                initialValue: WorkbenchLayoutModel(
-                    snapshot: restored ?? .workbenchDefault
-                )
+            let loadedLayout = WorkbenchLayoutModel(
+                snapshot: restored ?? .workbenchDefault
             )
-            _layoutPersistenceError = State(initialValue: nil)
+            _layout = State(initialValue: loadedLayout)
+            _layoutPersistenceError = State(
+                initialValue: loadedLayout.windowsDroppedForCapacityOnLoad > 0
+                    ? "\(loadedLayout.windowsDroppedForCapacityOnLoad) window(s) "
+                        + "beyond the \(WorkbenchLayoutSnapshot.maximumWindowCount)-window "
+                        + "workspace capacity were not restored."
+                    : nil
+            )
         } catch {
             _layout = State(initialValue: WorkbenchLayoutModel())
             _layoutPersistenceError = State(
