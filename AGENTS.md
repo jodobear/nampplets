@@ -62,6 +62,15 @@ schema, or lifecycle state machine. Coordinate changes at the owning boundary.
 - Legacy compatibility becomes green before the private surface extension may
   be described as supported.
 
+## Behavior scenarios
+
+- `docs/bdd-guidelines.md` is the living spec for strict Given/When/Then
+  scenario coverage: which crates/packages are in scope, tooling
+  (`cucumber` for Rust, Quick/Nimble for Swift), and how scenarios relate
+  to the existing test suites. Read it before adding or changing scenario
+  coverage; harden it as adoption expands rather than treating it as
+  settled.
+
 ## Git workflow
 
 - Always make changes in a dedicated git worktree, never in the base checkout.

@@ -18,8 +18,13 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+cucumber.workspace = true
 nmp-native-test-harness = { path = "../test-harness" }
 tempfile.workspace = true
+
+[[test]]
+name = "bdd"
+harness = false
 
 [lints]
 workspace = true
