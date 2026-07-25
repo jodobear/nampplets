@@ -23,7 +23,7 @@ pub use manifest::{
     ArtifactMode, ArtifactSourcePolicy, BlobFetchRequest, BlobFetchResponse, ManifestBlobSource,
     ManifestCoordinate, ManifestError, ManifestEventLimits, ManifestEventVerifier,
     SignedArtifactResolver, VerifiedArtifactHandle, VerifiedArtifactIndex,
-    VerifiedArtifactIndexEntry, VerifiedManifest,
+    VerifiedArtifactIndexEntry, VerifiedManifest, reopen_verified_artifact,
 };
 
 pub const INDEX_PATH: &str = "/index.html";
@@ -351,6 +351,14 @@ impl FileArtifactCache {
             root,
             commit_lock: Mutex::new(()),
         })
+    }
+
+    /// Reconstructs a previously committed `CachedArtifact` from disk alone,
+    /// re-hashing every blob against its recorded digest. No network access
+    /// and no fresh `VerifiedFile` set is required; this is the offline half
+    /// of reopening an already-installed exact build in a new process.
+    pub fn reopen(&self, aggregate: &Sha256Digest) -> Result<CachedArtifact, ArtifactError> {
+        inspect_cached_artifact(&self.root.join(aggregate.as_str()), aggregate, None)
     }
 }
 

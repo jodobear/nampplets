@@ -167,6 +167,9 @@ impl ManifestEventVerifier {
         if !event.verify_signature() {
             return Err(ManifestError::InvalidEventSignature);
         }
+        let signed_event_json: Arc<[u8]> = serde_json::to_vec(event)
+            .map_err(ManifestError::EventJson)?
+            .into();
 
         let kind = event.kind.as_u16();
         if ![NAPPLET_KIND_SNAPSHOT, NAPPLET_KIND_ROOT, NAPPLET_KIND_NAMED].contains(&kind) {
@@ -360,6 +363,7 @@ impl ManifestEventVerifier {
             kind,
             d_tag,
             aggregate: manifest.aggregate.clone(),
+            signed_event_json,
             artifact: manifest,
             mode,
             requirements: requirements.into(),
@@ -439,6 +443,7 @@ pub struct VerifiedManifest {
     kind: u16,
     d_tag: Option<Arc<str>>,
     aggregate: Sha256Digest,
+    signed_event_json: Arc<[u8]>,
     artifact: ArtifactManifest,
     mode: ArtifactMode,
     requirements: Arc<[Arc<str>]>,
@@ -467,6 +472,15 @@ impl VerifiedManifest {
 
     pub fn aggregate(&self) -> &Sha256Digest {
         &self.aggregate
+    }
+
+    /// The exact signed event bytes this manifest was verified from, in
+    /// canonical NIP-01 JSON. Retained so a caller can persist enough to
+    /// re-verify and reopen this exact build later without a second network
+    /// fetch of an event that may since have been superseded by a
+    /// republished `d` tag.
+    pub fn signed_event_json(&self) -> &[u8] {
+        &self.signed_event_json
     }
 
     pub fn mode(&self) -> ArtifactMode {
@@ -997,6 +1011,28 @@ impl VerifiedArtifactHandle {
     ) -> Result<Vec<u8>, ArtifactError> {
         self.cached.read_verified(logical_path, maximum_bytes)
     }
+}
+
+/// Reopens one already-installed exact build entirely from previously
+/// retained local state: the exact signed manifest event bytes captured at
+/// original install time (see `VerifiedManifest::signed_event_json`) and the
+/// sealed artifact bytes already committed to `cache`. No network access.
+///
+/// Re-verifies the signature and coordinate exactly as a fresh install
+/// would, so a corrupted or substituted `event_json` is refused the same
+/// way as any other invalid manifest. Callers that need the reopened
+/// build to also match a specific previously-installed identity (author,
+/// d tag, aggregate, capability inventory) must check that separately
+/// against the returned handle's `index()`.
+pub fn reopen_verified_artifact(
+    verifier: &ManifestEventVerifier,
+    event_json: &[u8],
+    coordinate: &ManifestCoordinate,
+    cache: &FileArtifactCache,
+) -> Result<VerifiedArtifactHandle, ManifestError> {
+    let manifest = verifier.verify_json(event_json, coordinate)?;
+    let cached = cache.reopen(manifest.aggregate())?;
+    VerifiedArtifactHandle::new(manifest, cached).map_err(ManifestError::Artifact)
 }
 
 #[derive(Debug, Error)]

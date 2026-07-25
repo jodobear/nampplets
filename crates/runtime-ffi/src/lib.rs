@@ -18,11 +18,13 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use base64::Engine;
 use nmp::EngineConfig;
 use nmp_native_artifact::{
     ArtifactLimits, ArtifactMode, ArtifactSourcePolicy, BlobFetchRequest, BlobFetchResponse,
-    BlobSourceError, FileArtifactCache, ManifestBlobSource, ManifestCoordinate,
+    BlobSourceError, FileArtifactCache, ManifestBlobSource, ManifestCoordinate, ManifestError,
     ManifestEventLimits, ManifestEventVerifier, SignedArtifactResolver, VerifiedArtifactHandle,
+    reopen_verified_artifact,
 };
 use nmp_native_nap_bridge::{BridgeLimits, Provider};
 use nmp_native_nmp_adapter::{
@@ -86,6 +88,12 @@ pub use diagnostics::{
 const DEFAULT_MAXIMUM_CONFIG_STRING_BYTES: u64 = 16 * 1_024;
 const DEFAULT_MAXIMUM_CONFIG_ITEMS: u64 = 64;
 const DEFAULT_MAXIMUM_MANIFEST_BYTES: u64 = 256 * 1_024;
+// Must fit the base64 of a `DEFAULT_MAXIMUM_MANIFEST_BYTES` signed event
+// (~1.34x inflation) plus the small surrounding metadata fields, and stay
+// under `runtime-store`'s own `StoreLimits::maximum_value_bytes` (512 KiB
+// default) so a large-but-valid manifest never fails at the store instead
+// of here with a clear reason.
+const MAXIMUM_INSTALLED_MANIFEST_METADATA_BYTES: usize = 512 * 1_024;
 const DEFAULT_MAXIMUM_ARTIFACT_READ_BYTES: u64 = 8 * 1_024 * 1_024;
 const DEFAULT_MAXIMUM_OBSERVERS: u64 = 8;
 const DEFAULT_MAXIMUM_BOUNDARY_EVENTS: u64 = 256;
@@ -1876,15 +1884,19 @@ impl RuntimeController {
         }
     }
 
-    /// Reopens one installed exact build from its retained verifier handle.
+    /// Reopens one installed exact build.
     ///
     /// Native supplies only the exact library coordinate. Rust checks the
-    /// unfiltered persistent installation and returns the already-attached
-    /// immutable handle only when its signed event, coordinate, aggregate, and
-    /// capability inventory still match. After process restart this fails
-    /// closed until the artifact owner exposes an exact persistent-cache reopen
-    /// seam; this boundary never resolves a newer replaceable manifest as a
-    /// substitute for the installed event.
+    /// unfiltered persistent installation and returns a handle only when its
+    /// signed event, coordinate, aggregate, and capability inventory still
+    /// match. If this process already holds the verified handle from a
+    /// prior install or reopen, that handle is reused directly. Otherwise
+    /// (typically: first reopen after a process restart) this reconstructs
+    /// it entirely from local state -- the exact signed manifest event bytes
+    /// retained at original install time, re-verified, and the sealed
+    /// artifact bytes already committed to the local artifact cache. No
+    /// network access, and this never resolves a newer replaceable manifest
+    /// as a substitute for the installed event.
     ///
     /// This call is blocking and must be invoked away from a native UI thread.
     pub fn reacquire_installed_artifact(
@@ -1941,15 +1953,28 @@ impl RuntimeController {
             };
         };
         let retained_handle = { self.artifacts.lock().get(&principal).cloned() };
-        let Some(handle) = retained_handle else {
-            return RuntimeCatalogConfirmationResult {
-                confirmation: None,
-                artifact: None,
-                failure: Some(runtime_catalog_failure(
-                    "artifact-handle-unavailable",
-                    "the installed exact bytes are not retained in this runtime process",
-                )),
-            };
+        let handle = match retained_handle {
+            Some(handle) => handle,
+            None => match self.reopen_sealed_artifact(&principal, &installed) {
+                Ok(handle) => {
+                    self.artifacts
+                        .lock()
+                        .insert(principal.clone(), Arc::clone(&handle));
+                    let executable: Arc<dyn ExecutableArtifact> = handle.clone();
+                    self.app.dispatch(PlatformCommand::InstallVerified {
+                        build: installed.clone(),
+                        artifact: executable,
+                    });
+                    handle
+                }
+                Err(failure) => {
+                    return RuntimeCatalogConfirmationResult {
+                        confirmation: None,
+                        artifact: None,
+                        failure: Some(failure),
+                    };
+                }
+            },
         };
         let artifact = match self.verified_installed_artifact(&installed, handle) {
             Ok(artifact) => artifact,
@@ -2189,14 +2214,21 @@ impl RuntimeController {
                 ArtifactMode::ExternalAssets => "external-assets",
             },
             "paths": artifact.handle.index().entries().len(),
+            // Retained so `reacquire_installed_artifact` can reopen this
+            // exact build after a process restart by re-verifying the same
+            // signed event against the sealed cache, with no network fetch
+            // and no risk of silently accepting a since-republished event.
+            "signed_event_b64": base64::engine::general_purpose::STANDARD
+                .encode(artifact.handle.manifest().signed_event_json()),
         });
-        let metadata = match BoundedJson::from_value(&metadata, 256 * 1_024) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                self.record_refusal("manifest-metadata", error.to_string());
-                return;
-            }
-        };
+        let metadata =
+            match BoundedJson::from_value(&metadata, MAXIMUM_INSTALLED_MANIFEST_METADATA_BYTES) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    self.record_refusal("manifest-metadata", error.to_string());
+                    return;
+                }
+            };
         let title: Arc<str> = Arc::from(
             artifact
                 .handle
@@ -2957,6 +2989,65 @@ impl RuntimeController {
             ));
         }
         Ok(artifact)
+    }
+
+    /// Reconstructs a verified artifact handle purely from local state: the
+    /// exact signed manifest event bytes retained in `installed`'s metadata
+    /// at original install time, and the sealed artifact bytes already
+    /// committed to `self.artifact_cache`. No network access. Re-verifies
+    /// the event signature exactly as a fresh install would, so a corrupted
+    /// or substituted retained event is refused the same way any other
+    /// invalid manifest would be.
+    fn reopen_sealed_artifact(
+        &self,
+        principal: &Principal,
+        installed: &InstalledBuild,
+    ) -> Result<Arc<VerifiedArtifactHandle>, RuntimeCatalogFailure> {
+        let metadata: serde_json::Value =
+            serde_json::from_str(installed.manifest_metadata.as_str()).map_err(|error| {
+                runtime_catalog_failure(
+                    "installed-manifest-event-unavailable",
+                    format!("installed manifest metadata is invalid JSON: {error}"),
+                )
+            })?;
+        let signed_event_b64 = metadata
+            .get("signed_event_b64")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                runtime_catalog_failure(
+                    "installed-manifest-event-unavailable",
+                    "this build was installed before offline reopen was supported; reinstall it once to enable reopening after a restart",
+                )
+            })?;
+        let event_json = base64::engine::general_purpose::STANDARD
+            .decode(signed_event_b64)
+            .map_err(|error| {
+                runtime_catalog_failure(
+                    "installed-manifest-event-unavailable",
+                    format!("retained signed event is not valid base64: {error}"),
+                )
+            })?;
+        let coordinate = ManifestCoordinate::named(principal.manifest_author(), principal.d_tag())
+            .map_err(|error| {
+                runtime_catalog_failure("invalid-exact-build-coordinate", error.to_string())
+            })?;
+        let verifier = ManifestEventVerifier::new(ManifestEventLimits {
+            maximum_event_bytes: self.maximum_manifest_bytes,
+            ..ManifestEventLimits::default()
+        })
+        .map_err(|error| runtime_catalog_failure("invalid-limits", error.to_string()))?;
+        let handle =
+            reopen_verified_artifact(&verifier, &event_json, &coordinate, &self.artifact_cache)
+                .map_err(|error| match error {
+                    ManifestError::Artifact(_) => {
+                        runtime_catalog_failure("sealed-bytes-unavailable", error.to_string())
+                    }
+                    _ => runtime_catalog_failure(
+                        "installed-manifest-event-unavailable",
+                        error.to_string(),
+                    ),
+                })?;
+        Ok(Arc::new(handle))
     }
 
     fn refusal(&self, code: impl Into<String>, detail: impl Into<String>) -> RuntimeRefusal {
@@ -4810,7 +4901,7 @@ mod tests {
     }
 
     #[test]
-    fn persisted_install_without_a_live_handle_fails_closed_after_restart() {
+    fn persisted_install_reopens_offline_from_the_sealed_cache_after_restart() {
         let temp = TempDir::new().unwrap();
         let runtime = controller(&temp);
         let artifact = runtime
@@ -4829,15 +4920,71 @@ mod tests {
         drop(runtime);
 
         let reopened = controller(&temp);
-        let result = reopened.reacquire_installed_artifact(coordinate);
         assert_eq!(
             reopened.snapshot().installed_library.builds[0].availability,
             RuntimeInstalledBuildAvailability::MetadataOnly
         );
+        let result = reopened.reacquire_installed_artifact(coordinate);
+        assert!(result.failure.is_none());
+        let confirmation = result.confirmation.expect("exact confirmation");
+        assert_eq!(confirmation.manifest_author, AUTHOR);
+        assert_eq!(confirmation.d_tag.as_deref(), Some("good-morning"));
+        assert_eq!(confirmation.aggregate_hash, GOOD_MORNING_AGGREGATE_HASH);
+        assert_eq!(
+            result
+                .artifact
+                .expect("opaque artifact")
+                .handle
+                .read_verified(nmp_native_artifact::INDEX_PATH, INDEX.len())
+                .unwrap(),
+            INDEX
+        );
+        // No network fetch happened -- this is offline reopen from the
+        // sealed cache -- and the runtime's own live handle map now has the
+        // reconstructed artifact attached, same as after a fresh install.
+        assert_eq!(
+            reopened.snapshot().installed_library.builds[0].availability,
+            RuntimeInstalledBuildAvailability::SealedExactBytesReady
+        );
+    }
+
+    #[test]
+    fn reacquire_refuses_a_legacy_install_with_no_retained_signed_event() {
+        let temp = TempDir::new().unwrap();
+        let runtime = controller(&temp);
+        let artifact = runtime
+            .verify_artifact(
+                EVENT.to_vec(),
+                ArtifactCoordinate::Named {
+                    author: AUTHOR.to_owned(),
+                    d_tag: "good-morning".to_owned(),
+                },
+            )
+            .artifact
+            .expect("fixture verifies");
+        runtime.install(Arc::clone(&artifact));
+        let coordinate = exact_coordinate(&artifact);
+        // Simulate a build installed before offline reopen was supported:
+        // its persisted manifest metadata has no retained signed event.
+        let mut legacy_build = runtime
+            .runtime_store
+            .installed_builds()
+            .unwrap()
+            .into_iter()
+            .find(|build| build.principal.manifest_author() == AUTHOR)
+            .expect("installed build");
+        legacy_build.manifest_metadata =
+            BoundedJson::from_value(&serde_json::json!({"event_id": "legacy"}), 4_096).unwrap();
+        runtime.runtime_store.install(&legacy_build).unwrap();
+        runtime.close();
+        drop(runtime);
+
+        let reopened = controller(&temp);
+        let result = reopened.reacquire_installed_artifact(coordinate);
         assert!(result.artifact.is_none());
         assert_eq!(
             result.failure.expect("typed refusal").code,
-            "artifact-handle-unavailable"
+            "installed-manifest-event-unavailable"
         );
     }
 

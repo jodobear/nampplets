@@ -18,6 +18,7 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
+base64.workspace = true
 nmp.workspace = true
 nmp-native-artifact = { path = "../artifact" }
 nmp-native-catalog-resolver = { path = "../catalog-resolver" }

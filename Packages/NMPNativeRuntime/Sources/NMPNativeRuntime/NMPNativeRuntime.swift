@@ -662,15 +662,19 @@ public protocol RuntimeControllerProtocol: AnyObject, Sendable {
     func permissionReview(coordinate: RuntimeExactBuildCoordinate)  -> RuntimePermissionReviewResult
 
     /**
-     * Reopens one installed exact build from its retained verifier handle.
+     * Reopens one installed exact build.
      *
      * Native supplies only the exact library coordinate. Rust checks the
-     * unfiltered persistent installation and returns the already-attached
-     * immutable handle only when its signed event, coordinate, aggregate, and
-     * capability inventory still match. After process restart this fails
-     * closed until the artifact owner exposes an exact persistent-cache reopen
-     * seam; this boundary never resolves a newer replaceable manifest as a
-     * substitute for the installed event.
+     * unfiltered persistent installation and returns a handle only when its
+     * signed event, coordinate, aggregate, and capability inventory still
+     * match. If this process already holds the verified handle from a
+     * prior install or reopen, that handle is reused directly. Otherwise
+     * (typically: first reopen after a process restart) this reconstructs
+     * it entirely from local state -- the exact signed manifest event bytes
+     * retained at original install time, re-verified, and the sealed
+     * artifact bytes already committed to the local artifact cache. No
+     * network access, and this never resolves a newer replaceable manifest
+     * as a substitute for the installed event.
      *
      * This call is blocking and must be invoked away from a native UI thread.
      */
@@ -1139,15 +1143,19 @@ open func permissionReview(coordinate: RuntimeExactBuildCoordinate) -> RuntimePe
 }
 
     /**
-     * Reopens one installed exact build from its retained verifier handle.
+     * Reopens one installed exact build.
      *
      * Native supplies only the exact library coordinate. Rust checks the
-     * unfiltered persistent installation and returns the already-attached
-     * immutable handle only when its signed event, coordinate, aggregate, and
-     * capability inventory still match. After process restart this fails
-     * closed until the artifact owner exposes an exact persistent-cache reopen
-     * seam; this boundary never resolves a newer replaceable manifest as a
-     * substitute for the installed event.
+     * unfiltered persistent installation and returns a handle only when its
+     * signed event, coordinate, aggregate, and capability inventory still
+     * match. If this process already holds the verified handle from a
+     * prior install or reopen, that handle is reused directly. Otherwise
+     * (typically: first reopen after a process restart) this reconstructs
+     * it entirely from local state -- the exact signed manifest event bytes
+     * retained at original install time, re-verified, and the sealed
+     * artifact bytes already committed to the local artifact cache. No
+     * network access, and this never resolves a newer replaceable manifest
+     * as a substitute for the installed event.
      *
      * This call is blocking and must be invoked away from a native UI thread.
      */
@@ -11670,7 +11678,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_permission_review() != 34440) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_reacquire_installed_artifact() != 18436) {
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_reacquire_installed_artifact() != 38634) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_read_verified() != 14937) {
