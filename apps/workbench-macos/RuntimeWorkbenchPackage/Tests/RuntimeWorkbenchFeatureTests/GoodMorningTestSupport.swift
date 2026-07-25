@@ -21,21 +21,26 @@ func installApproveAndLaunchGoodMorning(
     guard result.refusal == nil, let review = result.review else {
         throw GoodMorningTestSupportError.missingReview
     }
-    let update = profile.native.applyPermissionDecisions(
-        NativeRuntimePermissionDecisionBatch(
-            coordinate: installed.permissionCoordinate,
-            decisions: review.capabilities.map {
-                NativeRuntimePermissionDecisionSelection(
-                    domain: $0.domain,
-                    decision: $0.requirement == .required
-                        ? .allowExactBuild
-                        : .denied
-                )
-            }
+    // The published Good Morning fixture declares no `requires` tags, so
+    // there is nothing to decide -- applying an empty decision batch is
+    // itself refused by Rust. Only decide when the review has capabilities.
+    if !review.capabilities.isEmpty {
+        let update = profile.native.applyPermissionDecisions(
+            NativeRuntimePermissionDecisionBatch(
+                coordinate: installed.permissionCoordinate,
+                decisions: review.capabilities.map {
+                    NativeRuntimePermissionDecisionSelection(
+                        domain: $0.domain,
+                        decision: $0.requirement == .required
+                            ? .allowExactBuild
+                            : .denied
+                    )
+                }
+            )
         )
-    )
-    guard update.applied, update.refusal == nil else {
-        throw GoodMorningTestSupportError.permissionRefused
+        guard update.applied, update.refusal == nil else {
+            throw GoodMorningTestSupportError.permissionRefused
+        }
     }
     return try profile.native.launchInstalled(installed)
 }

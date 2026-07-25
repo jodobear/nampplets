@@ -54,7 +54,8 @@ use nmp_native_providers::{
 use nmp_native_runtime_app::{
     AppLimits, AppSnapshot, ExecutableArtifact, InstalledBuildAvailability, KernelClock,
     PermissionDecision, PermissionPlatformAvailability, PermissionReviewView, PlatformCommand,
-    PlatformEvent, ProviderOperationId, RuntimeApp, RuntimeAppConfig, WorkspaceView,
+    PlatformEvent, ProviderOperationId, ReceiptDeliveryState, RuntimeApp, RuntimeAppConfig,
+    WorkspaceView,
 };
 use nmp_native_runtime_core::{
     BoundedJson, Capability, CapabilityRequest, CapabilityRequirement, ExecutionProfile,
@@ -933,9 +934,16 @@ pub struct RuntimeBindingSnapshot {
     pub revision: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RuntimeReceiptStatus {
+    Pending,
+    Delivered,
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct RuntimeReceiptSnapshot {
     pub receipt_id: String,
+    pub status: RuntimeReceiptStatus,
     pub delivery: String,
     pub latest_state_json: Option<String>,
 }
@@ -1850,6 +1858,12 @@ impl RuntimeController {
                 .iter()
                 .map(|receipt| RuntimeReceiptSnapshot {
                     receipt_id: receipt.receipt_id.0.to_string(),
+                    status: match receipt.delivery {
+                        ReceiptDeliveryState::Observing | ReceiptDeliveryState::NotFound => {
+                            RuntimeReceiptStatus::Pending
+                        }
+                        ReceiptDeliveryState::Closed => RuntimeReceiptStatus::Delivered,
+                    },
                     delivery: format!("{:?}", receipt.delivery).to_ascii_lowercase(),
                     latest_state_json: receipt
                         .latest

@@ -143,97 +143,19 @@ final class RuntimeNappletSessionTests: XCTestCase {
         let review = try XCTUnwrap(
             profile.permissionReview(for: reacquired.permissionCoordinate).review
         )
-        XCTAssertEqual(
-            review.capabilities.map(\.domain),
-            ["identity", "inc", "outbox", "resource", "theme", "link"]
-        )
-        XCTAssertEqual(
-            review.capabilities.map(\.requirement),
-            [.required, .required, .required, .optional, .optional, .optional]
-        )
-
-        XCTAssertThrowsError(try profile.launchInstalled(reacquired)) { error in
-            guard case RuntimeNappletOpenError.launchRefused = error else {
-                return XCTFail("Expected Rust launch refusal, got \(error)")
-            }
-        }
-        XCTAssertTrue(profile.snapshotForTesting.sessions.isEmpty)
-
-        let update = profile.applyPermissionDecisions(
-            NativeRuntimePermissionDecisionBatch(
-                coordinate: reacquired.permissionCoordinate,
-                decisions: review.capabilities.map {
-                    NativeRuntimePermissionDecisionSelection(
-                        domain: $0.domain,
-                        decision: $0.requirement == .required
-                            ? .allowExactBuild
-                            : .denied
-                    )
-                }
-            )
-        )
-        XCTAssertTrue(update.applied)
-        XCTAssertTrue(update.review?.launchPermitted == true)
-        XCTAssertNil(update.refusal)
         XCTAssertTrue(
-            profile.snapshotForTesting.sessions.isEmpty,
-            "applying permissions must never launch"
+            review.capabilities.isEmpty,
+            "the published fixture declares no `requires` tags, so there is nothing to review"
         )
+        XCTAssertTrue(review.launchPermitted)
 
         let launched = try profile.launchInstalled(reacquired)
         XCTAssertEqual(
             launched.negotiatedDomains,
-            ["identity", "inc", "outbox", "shell"]
+            ["shell"],
+            "an artifact with no required capabilities only negotiates the foundational shell"
         )
         launched.runtimeSession?.stop()
-    }
-
-    func testDemoPinnedGoodMorningAutoGrantsAndNegotiatesOutbox() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "runtime-apple-demo-pinned-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        defer { try? FileManager.default.removeItem(at: root) }
-        let fixture = repositoryRoot().appendingPathComponent(
-            "conformance/napplet-corpus/published/good-morning",
-            isDirectory: true
-        )
-        let event = try Data(contentsOf: fixture.appendingPathComponent("event.json"))
-        let index = try Data(contentsOf: fixture.appendingPathComponent("index.html"))
-        let profile = try NativeRuntimeProfile.open(
-            configuration: NativeRuntimeProfileConfiguration(
-                storageRoot: root,
-                permissionMode: .demoPinnedGoodMorning
-            )
-        )
-        defer { profile.close() }
-
-        let installed = try profile.installSignedNamed(
-            title: "Good Morning Demo",
-            eventJSON: event,
-            author: author,
-            dTag: "good-morning",
-            blobsBySHA256: [indexDigest: index]
-        )
-        let review = try XCTUnwrap(
-            profile.permissionReview(for: installed.permissionCoordinate).review
-        )
-        XCTAssertTrue(review.launchPermitted)
-        XCTAssertTrue(
-            review.capabilities.filter {
-                if case .available = $0.platformAvailability { return true }
-                return false
-            }.allSatisfy {
-                $0.existingDecision == .allowExactBuild
-            },
-            "demo mode must grant every available pinned Good Morning capability"
-        )
-
-        let launched = try profile.launchInstalled(installed)
-        XCTAssertTrue(launched.negotiatedDomains.contains("outbox"))
-        XCTAssertTrue(launched.negotiatedDomains.contains("identity"))
-        XCTAssertTrue(launched.negotiatedDomains.contains("inc"))
     }
 
     @MainActor
@@ -252,8 +174,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
         let index = try Data(contentsOf: fixture.appendingPathComponent("index.html"))
         let profile = try NativeRuntimeProfile.open(
             configuration: NativeRuntimeProfileConfiguration(
-                storageRoot: root,
-                permissionMode: .demoPinnedGoodMorning
+                storageRoot: root
             )
         )
         defer { profile.close() }
@@ -265,14 +186,14 @@ final class RuntimeNappletSessionTests: XCTestCase {
         XCTAssertTrue(registration.accepted)
         XCTAssertTrue(profile.activateLocalAccount(handle: handle).accepted)
 
-        let installed = try profile.installSignedNamed(
+        let launched = try profile.openSignedNamed(
             title: "Good Morning Shell Write",
             eventJSON: event,
             author: author,
             dTag: "good-morning",
-            blobsBySHA256: [indexDigest: index]
+            blobsBySHA256: [indexDigest: index],
+            grantDomains: requiredGoodMorningDomains
         )
-        let launched = try profile.launchInstalled(installed)
         let artifact = NappletArtifact(
             title: "Outbox bridge probe",
             reader: InMemoryVerifiedArtifactReader(files: [
@@ -387,8 +308,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
         )
         let profile = try NativeRuntimeProfile.open(
             configuration: NativeRuntimeProfileConfiguration(
-                storageRoot: root,
-                permissionMode: .demoPinnedGoodMorning
+                storageRoot: root
             )
         )
         defer { profile.close() }
@@ -400,14 +320,14 @@ final class RuntimeNappletSessionTests: XCTestCase {
         XCTAssertTrue(registration.accepted)
         XCTAssertTrue(profile.activateLocalAccount(handle: handle).accepted)
 
-        let installed = try profile.installSignedNamed(
+        let launched = try profile.openSignedNamed(
             title: "Good Morning Receipt",
             eventJSON: event,
             author: author,
             dTag: "good-morning",
-            blobsBySHA256: [indexDigest: index]
+            blobsBySHA256: [indexDigest: index],
+            grantDomains: requiredGoodMorningDomains
         )
-        let launched = try profile.launchInstalled(installed)
         let artifact = NappletArtifact(
             title: "Outbox receipt probe",
             reader: InMemoryVerifiedArtifactReader(files: [
@@ -1008,6 +928,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
         snapshot.receipts = [
             RuntimeReceiptSnapshot(
                 receiptId: "receipt-1",
+                status: .pending,
                 delivery: "pending",
                 latestStateJson: #"{"status":"queued"}"#
             )

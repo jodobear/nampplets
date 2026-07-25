@@ -196,7 +196,6 @@ public struct NativeRuntimeProfileConfiguration: Sendable {
     public let fallbackRelays: [String]
     public let allowedLocalRelayHosts: [String]
     public let accountPersistence: NativeRuntimeAccountPersistence
-    public let permissionMode: NativeRuntimePermissionMode
 
     public init(
         storageRoot: URL,
@@ -204,8 +203,7 @@ public struct NativeRuntimeProfileConfiguration: Sendable {
         appRelays: [String] = [],
         fallbackRelays: [String] = [],
         allowedLocalRelayHosts: [String] = [],
-        accountPersistence: NativeRuntimeAccountPersistence = .transient,
-        permissionMode: NativeRuntimePermissionMode = .interactive
+        accountPersistence: NativeRuntimeAccountPersistence = .transient
     ) {
         self.storageRoot = storageRoot
         self.indexerRelays = indexerRelays
@@ -213,7 +211,6 @@ public struct NativeRuntimeProfileConfiguration: Sendable {
         self.fallbackRelays = fallbackRelays
         self.allowedLocalRelayHosts = allowedLocalRelayHosts
         self.accountPersistence = accountPersistence
-        self.permissionMode = permissionMode
     }
 }
 
@@ -530,11 +527,13 @@ public final class NativeRuntimePendingWriteObservation: @unchecked Sendable {
 /// NMP remains the sole owner of delivery state and canonical event rows.
 public struct NativeRuntimeReceipt: Sendable, Identifiable {
     public let id: String
+    public let status: NativeRuntimeReceiptStatus
     public let delivery: String
     public let latestStateJSON: String?
 
     fileprivate init(_ receipt: RuntimeReceiptSnapshot) {
         id = receipt.receiptId
+        status = receipt.status
         delivery = receipt.delivery
         latestStateJSON = receipt.latestStateJson
     }
@@ -836,8 +835,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
                 maximumArtifactFileBytes: Self.maximumReadBytes,
                 maximumArtifactTotalBytes: 32 * 1_024 * 1_024,
                 maximumVerifiedReadBytes: Self.maximumReadBytes,
-                maximumBlobSources: 8,
-                permissionMode: configuration.permissionMode
+                maximumBlobSources: 8
             ),
             artifactSource: source,
             appearanceSource: appearanceSource,

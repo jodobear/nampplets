@@ -625,16 +625,6 @@ public protocol RuntimeControllerProtocol: AnyObject, Sendable {
      */
     func decideProviderWrite(operationId: UInt64, approve: Bool)
 
-    /**
-     * The explicit demo mode is intentionally permissive so a locally
-     * verified network napplet can be rendered and exercised end-to-end.
-     * Interactive production profiles still require the normal exact-build
-     * permission review.
-     */
-    func grantDemoPermissions(author: String, dTag: String, aggregateHash: String)
-
-    func grantDemoPermissionsForInstalledBuilds()
-
     func install(artifact: VerifiedArtifact)
 
     func launch(artifact: VerifiedArtifact, profile: RuntimeExecutionProfile)
@@ -1052,27 +1042,6 @@ open func decideProviderWrite(operationId: UInt64, approve: Bool)  {try! rustCal
     uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_decide_provider_write(self.uniffiClonePointer(),
         FfiConverterUInt64.lower(operationId),
         FfiConverterBool.lower(approve),$0
-    )
-}
-}
-
-    /**
-     * The explicit demo mode is intentionally permissive so a locally
-     * verified network napplet can be rendered and exercised end-to-end.
-     * Interactive production profiles still require the normal exact-build
-     * permission review.
-     */
-open func grantDemoPermissions(author: String, dTag: String, aggregateHash: String)  {try! rustCall() {
-    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_grant_demo_permissions(self.uniffiClonePointer(),
-        FfiConverterString.lower(author),
-        FfiConverterString.lower(dTag),
-        FfiConverterString.lower(aggregateHash),$0
-    )
-}
-}
-
-open func grantDemoPermissionsForInstalledBuilds()  {try! rustCall() {
-    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_grant_demo_permissions_for_installed_builds(self.uniffiClonePointer(),$0
     )
 }
 }
@@ -4305,11 +4274,10 @@ public struct RuntimeConfig {
     public var maximumArtifactTotalBytes: UInt64
     public var maximumVerifiedReadBytes: UInt64
     public var maximumBlobSources: UInt64
-    public var permissionMode: RuntimePermissionMode
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(runtimeStorePath: String, nmpStorePath: String?, artifactCachePath: String, indexerRelays: [String], appRelays: [String], fallbackRelays: [String], allowedLocalRelayHosts: [String], maximumNmpRelays: UInt64, maximumBridgeWorkers: UInt64, maximumObservers: UInt64, maximumBoundaryEvents: UInt64, maximumConfigItems: UInt64, maximumConfigStringBytes: UInt64, maximumManifestBytes: UInt64, maximumArtifactFiles: UInt64, maximumArtifactFileBytes: UInt64, maximumArtifactTotalBytes: UInt64, maximumVerifiedReadBytes: UInt64, maximumBlobSources: UInt64, permissionMode: RuntimePermissionMode) {
+    public init(runtimeStorePath: String, nmpStorePath: String?, artifactCachePath: String, indexerRelays: [String], appRelays: [String], fallbackRelays: [String], allowedLocalRelayHosts: [String], maximumNmpRelays: UInt64, maximumBridgeWorkers: UInt64, maximumObservers: UInt64, maximumBoundaryEvents: UInt64, maximumConfigItems: UInt64, maximumConfigStringBytes: UInt64, maximumManifestBytes: UInt64, maximumArtifactFiles: UInt64, maximumArtifactFileBytes: UInt64, maximumArtifactTotalBytes: UInt64, maximumVerifiedReadBytes: UInt64, maximumBlobSources: UInt64) {
         self.runtimeStorePath = runtimeStorePath
         self.nmpStorePath = nmpStorePath
         self.artifactCachePath = artifactCachePath
@@ -4329,7 +4297,6 @@ public struct RuntimeConfig {
         self.maximumArtifactTotalBytes = maximumArtifactTotalBytes
         self.maximumVerifiedReadBytes = maximumVerifiedReadBytes
         self.maximumBlobSources = maximumBlobSources
-        self.permissionMode = permissionMode
     }
 }
 
@@ -4397,9 +4364,6 @@ extension RuntimeConfig: Equatable, Hashable {
         if lhs.maximumBlobSources != rhs.maximumBlobSources {
             return false
         }
-        if lhs.permissionMode != rhs.permissionMode {
-            return false
-        }
         return true
     }
 
@@ -4423,7 +4387,6 @@ extension RuntimeConfig: Equatable, Hashable {
         hasher.combine(maximumArtifactTotalBytes)
         hasher.combine(maximumVerifiedReadBytes)
         hasher.combine(maximumBlobSources)
-        hasher.combine(permissionMode)
     }
 }
 
@@ -4454,8 +4417,7 @@ public struct FfiConverterTypeRuntimeConfig: FfiConverterRustBuffer {
                 maximumArtifactFileBytes: FfiConverterUInt64.read(from: &buf),
                 maximumArtifactTotalBytes: FfiConverterUInt64.read(from: &buf),
                 maximumVerifiedReadBytes: FfiConverterUInt64.read(from: &buf),
-                maximumBlobSources: FfiConverterUInt64.read(from: &buf),
-                permissionMode: FfiConverterTypeRuntimePermissionMode.read(from: &buf)
+                maximumBlobSources: FfiConverterUInt64.read(from: &buf)
         )
     }
 
@@ -4479,7 +4441,6 @@ public struct FfiConverterTypeRuntimeConfig: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.maximumArtifactTotalBytes, into: &buf)
         FfiConverterUInt64.write(value.maximumVerifiedReadBytes, into: &buf)
         FfiConverterUInt64.write(value.maximumBlobSources, into: &buf)
-        FfiConverterTypeRuntimePermissionMode.write(value.permissionMode, into: &buf)
     }
 }
 
@@ -5857,13 +5818,15 @@ public func FfiConverterTypeRuntimeProviderUpdate_lower(_ value: RuntimeProvider
 
 public struct RuntimeReceiptSnapshot {
     public var receiptId: String
+    public var status: RuntimeReceiptStatus
     public var delivery: String
     public var latestStateJson: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(receiptId: String, delivery: String, latestStateJson: String?) {
+    public init(receiptId: String, status: RuntimeReceiptStatus, delivery: String, latestStateJson: String?) {
         self.receiptId = receiptId
+        self.status = status
         self.delivery = delivery
         self.latestStateJson = latestStateJson
     }
@@ -5879,6 +5842,9 @@ extension RuntimeReceiptSnapshot: Equatable, Hashable {
         if lhs.receiptId != rhs.receiptId {
             return false
         }
+        if lhs.status != rhs.status {
+            return false
+        }
         if lhs.delivery != rhs.delivery {
             return false
         }
@@ -5890,6 +5856,7 @@ extension RuntimeReceiptSnapshot: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(receiptId)
+        hasher.combine(status)
         hasher.combine(delivery)
         hasher.combine(latestStateJson)
     }
@@ -5905,6 +5872,7 @@ public struct FfiConverterTypeRuntimeReceiptSnapshot: FfiConverterRustBuffer {
         return
             try RuntimeReceiptSnapshot(
                 receiptId: FfiConverterString.read(from: &buf),
+                status: FfiConverterTypeRuntimeReceiptStatus.read(from: &buf),
                 delivery: FfiConverterString.read(from: &buf),
                 latestStateJson: FfiConverterOptionString.read(from: &buf)
         )
@@ -5912,6 +5880,7 @@ public struct FfiConverterTypeRuntimeReceiptSnapshot: FfiConverterRustBuffer {
 
     public static func write(_ value: RuntimeReceiptSnapshot, into buf: inout [UInt8]) {
         FfiConverterString.write(value.receiptId, into: &buf)
+        FfiConverterTypeRuntimeReceiptStatus.write(value.status, into: &buf)
         FfiConverterString.write(value.delivery, into: &buf)
         FfiConverterOptionString.write(value.latestStateJson, into: &buf)
     }
@@ -8912,76 +8881,6 @@ extension RuntimePermissionExistingDecision: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
-public enum RuntimePermissionMode {
-
-    case interactive
-    case demoPinnedGoodMorning
-}
-
-
-#if compiler(>=6)
-extension RuntimePermissionMode: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeRuntimePermissionMode: FfiConverterRustBuffer {
-    typealias SwiftType = RuntimePermissionMode
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimePermissionMode {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-
-        case 1: return .interactive
-
-        case 2: return .demoPinnedGoodMorning
-
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: RuntimePermissionMode, into buf: inout [UInt8]) {
-        switch value {
-
-
-        case .interactive:
-            writeInt(&buf, Int32(1))
-
-
-        case .demoPinnedGoodMorning:
-            writeInt(&buf, Int32(2))
-
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeRuntimePermissionMode_lift(_ buf: RustBuffer) throws -> RuntimePermissionMode {
-    return try FfiConverterTypeRuntimePermissionMode.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeRuntimePermissionMode_lower(_ value: RuntimePermissionMode) -> RustBuffer {
-    return FfiConverterTypeRuntimePermissionMode.lower(value)
-}
-
-
-extension RuntimePermissionMode: Equatable, Hashable {}
-
-
-
-
-
-
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
-
 public enum RuntimePermissionPlatformAvailability {
 
     case available
@@ -9203,6 +9102,76 @@ public func FfiConverterTypeRuntimePermissionSensitivity_lower(_ value: RuntimeP
 
 
 extension RuntimePermissionSensitivity: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeReceiptStatus {
+
+    case pending
+    case delivered
+}
+
+
+#if compiler(>=6)
+extension RuntimeReceiptStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeReceiptStatus: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeReceiptStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeReceiptStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .pending
+
+        case 2: return .delivered
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeReceiptStatus, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .pending:
+            writeInt(&buf, Int32(1))
+
+
+        case .delivered:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptStatus_lift(_ buf: RustBuffer) throws -> RuntimeReceiptStatus {
+    return try FfiConverterTypeRuntimeReceiptStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptStatus_lower(_ value: RuntimeReceiptStatus) -> RustBuffer {
+    return FfiConverterTypeRuntimeReceiptStatus.lower(value)
+}
+
+
+extension RuntimeReceiptStatus: Equatable, Hashable {}
 
 
 
@@ -11856,12 +11825,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_decide_provider_write() != 21107) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_grant_demo_permissions() != 45570) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_grant_demo_permissions_for_installed_builds() != 40720) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_install() != 32984) {
