@@ -105,6 +105,9 @@ schema, or lifecycle state machine. Coordinate changes at the owning boundary.
   and the pull request has been published (even if it is still awaiting CI or
   review) — do not hold a worktree open "just in case" while a PR sits
   unmerged. Do not leave finished worktrees lying around.
+- Before ending a session or handing off in-progress work, tag `@chief-of-staff`
+  in the mosaico channel. Do this first when leaving a worktree behind, hitting
+  a blocker, or stopping with a PR still unmerged.
 
 ## Required gates
 
