@@ -1,3 +1,4 @@
+use nmp_native_runtime_core::{Capability, GrantDecision};
 use tempfile::TempDir;
 
 use super::*;
