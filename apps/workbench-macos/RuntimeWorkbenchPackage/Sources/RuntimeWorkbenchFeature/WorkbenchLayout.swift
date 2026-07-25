@@ -350,6 +350,15 @@ public struct WorkbenchLayoutModel: Equatable, Sendable {
         self.windowsDroppedForCapacityOnLoad = normalized.windowsDroppedForCapacity
     }
 
+    /// User-facing message for `windowsDroppedForCapacityOnLoad`, or nil if
+    /// nothing was dropped. Callers must surface this rather than discard it.
+    public var capacityWarningMessage: String? {
+        guard windowsDroppedForCapacityOnLoad > 0 else { return nil }
+        return "\(windowsDroppedForCapacityOnLoad) window(s) beyond the "
+            + "\(WorkbenchLayoutSnapshot.maximumWindowCount)-window workspace "
+            + "capacity were not restored."
+    }
+
     public var mode: WorkbenchLayoutMode {
         snapshot.mode
     }
@@ -479,7 +488,13 @@ public struct WorkbenchLayoutModel: Equatable, Sendable {
         // MAXIMUM_WORKSPACE_SLOTS ceiling (see the doc comment above), so a
         // layout that exceeds it can never be saved back to Rust anyway.
         let deduplicated = result.windows.filter { seenIDs.insert($0.id).inserted }
-        let capped = Array(deduplicated.prefix(WorkbenchLayoutSnapshot.maximumWindowCount))
+        // Drop from the front, not the back: `bringToFront` assigns the
+        // highest `stackingOrder` (and this same normalization assigns
+        // `stackingOrder` from array position below), so later array
+        // positions are the more recently focused windows. `suffix` keeps
+        // those; `prefix` would silently discard whatever the user looked
+        // at most recently and keep the stalest windows instead.
+        let capped = Array(deduplicated.suffix(WorkbenchLayoutSnapshot.maximumWindowCount))
         let windowsDroppedForCapacity = deduplicated.count - capped.count
         result.windows = capped
         for index in result.windows.indices {

@@ -317,9 +317,12 @@ import Testing
 
     #expect(restored.windows.count == WorkbenchLayoutSnapshot.maximumWindowCount)
     #expect(restored.windowsDroppedForCapacityOnLoad == 5)
+    // The most recently focused windows sit at the end of the array (later
+    // array position mirrors higher stackingOrder / more recent focus), so
+    // dropping for capacity must discard from the front, keeping the suffix.
     #expect(
         Set(restored.windows.map(\.id))
-            == Set(windows.prefix(WorkbenchLayoutSnapshot.maximumWindowCount).map(\.id))
+            == Set(windows.suffix(WorkbenchLayoutSnapshot.maximumWindowCount).map(\.id))
     )
 }
 

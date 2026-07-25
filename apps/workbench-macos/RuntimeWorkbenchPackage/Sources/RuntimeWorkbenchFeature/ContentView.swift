@@ -126,17 +126,12 @@ public struct ContentView: View {
             let restored = try resolvedLayoutStore.loadLayout(
                 workspaceID: Self.workspaceID
             )
-            let loadedLayout = WorkbenchLayoutModel(
-                snapshot: restored ?? .workbenchDefault
+            _layout = State(
+                initialValue: WorkbenchLayoutModel(
+                    snapshot: restored ?? .workbenchDefault
+                )
             )
-            _layout = State(initialValue: loadedLayout)
-            _layoutPersistenceError = State(
-                initialValue: loadedLayout.windowsDroppedForCapacityOnLoad > 0
-                    ? "\(loadedLayout.windowsDroppedForCapacityOnLoad) window(s) "
-                        + "beyond the \(WorkbenchLayoutSnapshot.maximumWindowCount)-window "
-                        + "workspace capacity were not restored."
-                    : nil
-            )
+            _layoutPersistenceError = State(initialValue: nil)
         } catch {
             _layout = State(initialValue: WorkbenchLayoutModel())
             _layoutPersistenceError = State(
@@ -754,10 +749,10 @@ public struct ContentView: View {
             Image(systemName: activitySymbol)
                 .foregroundStyle(activityColor)
             Text(activity)
-            if let layoutPersistenceError {
+            if let layoutNotice = layoutPersistenceError ?? layout.capacityWarningMessage {
                 Divider()
                     .frame(height: 16)
-                Label(layoutPersistenceError, systemImage: "externaldrive.badge.exclamationmark")
+                Label(layoutNotice, systemImage: "externaldrive.badge.exclamationmark")
                     .foregroundStyle(.orange)
             }
             Spacer()
