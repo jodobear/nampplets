@@ -494,6 +494,11 @@ impl VerifiedManifest {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RedirectPolicy {
+    Deny,
+}
+
 #[derive(Clone, Debug)]
 pub struct ArtifactSourcePolicy {
     accept_manifest_https: bool,
@@ -664,6 +669,7 @@ pub struct BlobFetchRequest {
     digest: Sha256Digest,
     candidates: Arc<[Arc<str>]>,
     maximum_bytes: usize,
+    redirect_policy: RedirectPolicy,
 }
 
 impl BlobFetchRequest {
@@ -681,6 +687,10 @@ impl BlobFetchRequest {
 
     pub fn maximum_bytes(&self) -> usize {
         self.maximum_bytes
+    }
+
+    pub fn redirect_policy(&self) -> RedirectPolicy {
+        self.redirect_policy
     }
 }
 
@@ -835,6 +845,7 @@ impl<'a> PolicyCheckedBlobSource<'a> {
                     digest: path.sha256.clone(),
                     candidates: candidates.into(),
                     maximum_bytes,
+                    redirect_policy: RedirectPolicy::Deny,
                 },
             );
         }
@@ -856,16 +867,6 @@ impl BlobSource for PolicyCheckedBlobSource<'_> {
                 reason: "fetch request digest differs from the verified manifest".to_owned(),
             });
         }
-        // The blob source (`SafeManifestBlobSource` for the Rust HTTPS
-        // transport) owns provenance: it is the layer that actually resolves
-        // DNS, connects, and follows any redirect, and it revalidates every
-        // hop against the HTTPS-only / credential-free / public-address
-        // policy before this call ever sees a response. This boundary does
-        // not re-pin `source_url` to the original candidate list, because
-        // content correctness is independent of which approved-policy URL
-        // produced the bytes: every file is hash-verified against the
-        // manifest-pinned digest below, and the full artifact is
-        // aggregate-verified afterward.
         let response = self.source.fetch(request)?;
         if response.redirect_location.is_some() || (300..400).contains(&response.status) {
             return Err(BlobSourceError {
@@ -875,6 +876,15 @@ impl BlobSource for PolicyCheckedBlobSource<'_> {
         if response.status != 200 {
             return Err(BlobSourceError {
                 reason: format!("blob source returned HTTP {}", response.status),
+            });
+        }
+        if !request
+            .candidates
+            .iter()
+            .any(|candidate| candidate.as_ref() == response.source_url)
+        {
+            return Err(BlobSourceError {
+                reason: "blob response came from an unapproved source URL".to_owned(),
             });
         }
         Ok(response.body)
@@ -1343,53 +1353,28 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_redirect_response_is_refused_before_commit() {
-        let temp = TempDir::new().unwrap();
-        let cache = FileArtifactCache::open(temp.path()).unwrap();
-        let source = FixtureSource {
-            response: FixtureResponse::Redirect,
-        };
-        let resolver = SignedArtifactResolver::new(
-            ManifestEventVerifier::pinned(),
-            ArtifactLimits::default(),
-            ArtifactSourcePolicy::manifest_https_only(8).unwrap(),
-            &source,
-            &cache,
-        )
-        .unwrap();
-        assert!(matches!(
-            resolver.resolve_json(PUBLISHED_EVENT, &coordinate()),
-            Err(ManifestError::Artifact(ArtifactError::Source { .. }))
-        ));
-        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
-    }
-
-    #[test]
-    fn a_response_reporting_a_different_source_url_commits_once_its_hash_matches() {
-        // Provenance is not re-pinned to the original candidate list here:
-        // the blob source already vetted whatever URL it fetched from
-        // (see `SafeManifestBlobSource`), and every file is hash-verified
-        // against the manifest-pinned digest below regardless of origin.
-        let temp = TempDir::new().unwrap();
-        let cache = FileArtifactCache::open(temp.path()).unwrap();
-        let source = FixtureSource {
-            response: FixtureResponse::WrongSource(PUBLISHED_INDEX.to_vec()),
-        };
-        let resolver = SignedArtifactResolver::new(
-            ManifestEventVerifier::pinned(),
-            ArtifactLimits::default(),
-            ArtifactSourcePolicy::manifest_https_only(8).unwrap(),
-            &source,
-            &cache,
-        )
-        .unwrap();
-        let handle = resolver
-            .resolve_json(PUBLISHED_EVENT, &coordinate())
+    fn redirects_and_unapproved_response_sources_are_refused_before_commit() {
+        for response in [
+            FixtureResponse::Redirect,
+            FixtureResponse::WrongSource(PUBLISHED_INDEX.to_vec()),
+        ] {
+            let temp = TempDir::new().unwrap();
+            let cache = FileArtifactCache::open(temp.path()).unwrap();
+            let source = FixtureSource { response };
+            let resolver = SignedArtifactResolver::new(
+                ManifestEventVerifier::pinned(),
+                ArtifactLimits::default(),
+                ArtifactSourcePolicy::manifest_https_only(8).unwrap(),
+                &source,
+                &cache,
+            )
             .unwrap();
-        assert_eq!(
-            handle.read_verified(INDEX_PATH, 4 * 1_024 * 1_024).unwrap(),
-            PUBLISHED_INDEX
-        );
+            assert!(matches!(
+                resolver.resolve_json(PUBLISHED_EVENT, &coordinate()),
+                Err(ManifestError::Artifact(ArtifactError::Source { .. }))
+            ));
+            assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
+        }
     }
 
     #[test]

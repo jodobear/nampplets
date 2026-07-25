@@ -21,7 +21,7 @@ mod manifest;
 
 pub use manifest::{
     ArtifactMode, ArtifactSourcePolicy, BlobFetchRequest, BlobFetchResponse, ManifestBlobSource,
-    ManifestCoordinate, ManifestError, ManifestEventLimits, ManifestEventVerifier,
+    ManifestCoordinate, ManifestError, ManifestEventLimits, ManifestEventVerifier, RedirectPolicy,
     SignedArtifactResolver, VerifiedArtifactHandle, VerifiedArtifactIndex,
     VerifiedArtifactIndexEntry, VerifiedManifest,
 };
