@@ -350,32 +350,24 @@
     }
   }
 
-  const PROJECTABLE_DOMAINS = Object.freeze([
-    "shell",
-    "storage",
-    "identity",
-    "inc",
-    "theme",
-    "config",
-    "resource",
-    "link",
-    "outbox",
-    "relay"
-  ]);
-
   function compatibilityPreludeSource(domains, initialConfigSchema) {
     const requested = domains === undefined ? ["shell"] : domains;
-    if (!Array.isArray(requested)) {
+    if (!Array.isArray(requested) ||
+        requested.some((domain) =>
+          domain !== "shell" &&
+          domain !== "storage" &&
+          domain !== "identity" &&
+          domain !== "inc" &&
+          domain !== "theme" &&
+          domain !== "config" &&
+          domain !== "resource" &&
+          domain !== "link" &&
+          domain !== "outbox" &&
+          domain !== "relay"
+        )) {
       throw new Error("The trusted shell cannot project every negotiated domain");
     }
-    // Native negotiation already restricts `domains` to registered
-    // providers (see RuntimeApp::launch), so every entry here should
-    // already be projectable. A domain outside PROJECTABLE_DOMAINS still
-    // degrades honestly -- dropped rather than aborting the whole mount --
-    // matching how `resource`/`link` already stay absent until their native
-    // executors are ready instead of being simulated.
-    const projected = requested.filter((domain) => PROJECTABLE_DOMAINS.indexOf(domain) !== -1);
-    const projectedDomains = Array.from(new Set(["shell"].concat(projected))).sort();
+    const projectedDomains = Array.from(new Set(["shell"].concat(requested))).sort();
     const configSchema = isPlainObject(initialConfigSchema)
       ? initialConfigSchema
       : null;
