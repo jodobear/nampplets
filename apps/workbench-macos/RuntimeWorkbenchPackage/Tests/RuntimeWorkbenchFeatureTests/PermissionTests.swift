@@ -6,16 +6,13 @@ import Testing
     let manager = RecordingPermissionManager(snapshot: permissionSnapshot())
     let model = PermissionReviewSheetModel(manager: manager)
     let identity = model.review.capabilities[0]
-    let initialDiffs = model.diffs
 
     model.select(.allowExactBuild, for: identity)
     #expect(model.selection(for: identity) == .allowExactBuild)
-    #expect(model.diffs.first?.requestedDecision == .allowExactBuild)
 
     model.cancel()
 
     #expect(model.selection(for: identity) == identity.requestedDecision)
-    #expect(model.diffs == initialDiffs)
     #expect(manager.submissions.isEmpty)
 }
 
@@ -31,7 +28,6 @@ import Testing
 
     model.select(.allowExactBuild, for: model.review.capabilities[0])
     model.select(.allowSession, for: model.review.capabilities[1])
-    #expect(model.diffs.map(\.domain) == ["identity", "outbox"])
     await model.confirm()
 
     #expect(manager.submissions.count == 1)

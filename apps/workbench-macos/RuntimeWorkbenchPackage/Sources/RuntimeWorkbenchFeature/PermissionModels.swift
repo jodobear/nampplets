@@ -291,42 +291,6 @@ public struct PermissionCapabilityReview: Identifiable, Equatable, Sendable {
     }
 }
 
-public struct PermissionDecisionDiff: Identifiable, Equatable, Sendable {
-    public let domain: String
-    public let existingDecision: PermissionExistingDecision
-    public let requestedDecision: PermissionRequestedDecision
-
-    public var id: String {
-        domain
-    }
-
-    public var isChange: Bool {
-        switch (existingDecision, requestedDecision) {
-        case (.denied, .deny),
-             (.askEveryTime, .askEveryTime),
-             (.allowSession, .allowSession),
-             (.allowExactBuild, .allowExactBuild):
-            false
-        case (.managed, _),
-             (.denied, _),
-             (.askEveryTime, _),
-             (.allowSession, _),
-             (.allowExactBuild, _):
-            true
-        }
-    }
-
-    public init(
-        domain: String,
-        existingDecision: PermissionExistingDecision,
-        requestedDecision: PermissionRequestedDecision
-    ) {
-        self.domain = domain
-        self.existingDecision = existingDecision
-        self.requestedDecision = requestedDecision
-    }
-}
-
 public struct PermissionReview: Equatable, Sendable {
     public let principal: PermissionExactBuildPrincipal
     public let publisherDisplayName: String?

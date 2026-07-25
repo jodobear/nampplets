@@ -60,20 +60,6 @@ final class PermissionReviewSheetModel {
             && invalidSelections.isEmpty
     }
 
-    var diffs: [PermissionDecisionDiff] {
-        review.capabilities.compactMap { capability in
-            guard let selection = selections[capability.domain] else {
-                return nil
-            }
-            let diff = PermissionDecisionDiff(
-                domain: capability.domain,
-                existingDecision: capability.existingDecision,
-                requestedDecision: selection
-            )
-            return diff.isChange ? diff : nil
-        }
-    }
-
     func selection(
         for capability: PermissionCapabilityReview
     ) -> PermissionRequestedDecision? {
