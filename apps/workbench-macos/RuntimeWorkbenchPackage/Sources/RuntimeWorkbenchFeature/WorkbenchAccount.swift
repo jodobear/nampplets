@@ -72,10 +72,10 @@ public enum WorkbenchAccountAvailability: Equatable, Sendable {
     case unavailable(reason: String)
 }
 
-/// Screen-shaped account state. The Rust-backed adapter remains its owner.
+/// Screen-shaped account state. The Rust-backed adapter remains its owner,
+/// including the account-count ceiling (nmp-adapter's MAX_PROFILE_ACCOUNTS) --
+/// this type does not re-derive or enforce a count limit. See issue #115.
 public struct WorkbenchAccountSnapshot: Equatable, Sendable {
-    public static let maximumAccountCount = 32
-
     public let availability: WorkbenchAccountAvailability
     public let accounts: [WorkbenchStoredAccount]
     public let activeHandle: WorkbenchAccountHandle?
@@ -97,9 +97,6 @@ public struct WorkbenchAccountSnapshot: Equatable, Sendable {
         activeHandle: WorkbenchAccountHandle?,
         errorMessage: String? = nil
     ) {
-        guard accounts.count <= Self.maximumAccountCount else {
-            return nil
-        }
         if let activeHandle {
             guard accounts.contains(where: { $0.handle == activeHandle }) else {
                 return nil
