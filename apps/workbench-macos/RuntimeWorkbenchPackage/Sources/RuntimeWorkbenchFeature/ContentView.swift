@@ -749,10 +749,10 @@ public struct ContentView: View {
             Image(systemName: activitySymbol)
                 .foregroundStyle(activityColor)
             Text(activity)
-            if let layoutPersistenceError {
+            if let layoutNotice = layoutPersistenceError ?? layout.capacityWarningMessage {
                 Divider()
                     .frame(height: 16)
-                Label(layoutPersistenceError, systemImage: "externaldrive.badge.exclamationmark")
+                Label(layoutNotice, systemImage: "externaldrive.badge.exclamationmark")
                     .foregroundStyle(.orange)
             }
             Spacer()

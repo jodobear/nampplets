@@ -288,6 +288,72 @@ import Testing
     )
 }
 
+@Test func loadingAPersistedLayoutBeyondCapacityDropsExcessButReportsIt() {
+    let windowCount = WorkbenchLayoutSnapshot.maximumWindowCount + 5
+    let windows = (0 ..< windowCount).map { index in
+        WorkbenchCanvasWindow(
+            id: WorkbenchWindowID(rawValue: "persisted-\(index)"),
+            componentID: WorkbenchComponentID(rawValue: "network:\(index)"),
+            title: "Persisted \(index)",
+            frame: .init(
+                x: Double(index * 4),
+                y: Double(index * 4),
+                width: 480,
+                height: 360
+            ),
+            stackingOrder: UInt16(index)
+        )
+    }
+    let snapshot = WorkbenchLayoutSnapshot(
+        mode: .freeform,
+        windows: windows,
+        selectedWindowID: windows.last?.id
+    )
+
+    // A layout beyond maximumWindowCount can never be saved back to Rust
+    // (MAXIMUM_WORKSPACE_SLOTS rejects it), so normalized() still caps it --
+    // but it must report the drop instead of discarding it silently.
+    let restored = WorkbenchLayoutModel(snapshot: snapshot)
+
+    #expect(restored.windows.count == WorkbenchLayoutSnapshot.maximumWindowCount)
+    #expect(restored.windowsDroppedForCapacityOnLoad == 5)
+    // The most recently focused windows sit at the end of the array (later
+    // array position mirrors higher stackingOrder / more recent focus), so
+    // dropping for capacity must discard from the front, keeping the suffix.
+    #expect(
+        Set(restored.windows.map(\.id))
+            == Set(windows.suffix(WorkbenchLayoutSnapshot.maximumWindowCount).map(\.id))
+    )
+}
+
+@Test func loadingAPersistedLayoutWithinCapacityReportsNoDrops() {
+    let restored = WorkbenchLayoutModel(snapshot: .workbenchDefault)
+
+    #expect(restored.windowsDroppedForCapacityOnLoad == 0)
+}
+
+@Test func loadingAPersistedLayoutStillDropsDuplicateWindowIDs() {
+    let duplicated = WorkbenchCanvasWindow(
+        id: WorkbenchWindowID(rawValue: "duplicate"),
+        componentID: WorkbenchComponentID(rawValue: "network:duplicate"),
+        title: "Duplicate A",
+        frame: .init(x: 0, y: 0, width: 480, height: 360),
+        stackingOrder: 0
+    )
+    var duplicateAgain = duplicated
+    duplicateAgain.title = "Duplicate B"
+    let snapshot = WorkbenchLayoutSnapshot(
+        mode: .freeform,
+        windows: [duplicated, duplicateAgain],
+        selectedWindowID: duplicated.id
+    )
+
+    let restored = WorkbenchLayoutModel(snapshot: snapshot)
+
+    #expect(restored.windows.count == 1)
+    #expect(restored.windows.first?.title == "Duplicate A")
+}
+
 @Test func unsupportedPersistedLayoutVersionFallsBackSafely() {
     var snapshot = WorkbenchLayoutSnapshot.workbenchDefault
     snapshot.version = WorkbenchLayoutSnapshot.currentVersion + 1
