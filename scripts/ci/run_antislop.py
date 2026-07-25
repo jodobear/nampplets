@@ -80,7 +80,7 @@ TRUSTED_SHELL_FILES = frozenset(
     }
 )
 TRUSTED_SHELL_SHA256 = (
-    "7beacc45c8b99320dbfd4571c2cede910c0c9e3b793e8204fe415932ef5d3187"
+    "ad306946e7a0eb4437ccb5f6c8251ec0e35dbaeb718fe323aef1e5d8c7e0d59e"
 )
 
 
