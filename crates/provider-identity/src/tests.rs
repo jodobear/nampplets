@@ -10,6 +10,7 @@ use nmp_native_runtime_core::{
 };
 
 use super::*;
+use crate::types::MAX_SAFE_JSON_INTEGER;
 
 #[derive(Debug)]
 struct FakeObservation {
