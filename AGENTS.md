@@ -76,6 +76,12 @@ schema, or lifecycle state machine. Coordinate changes at the owning boundary.
 - Grants bind to `(manifest author, dTag, aggregateHash)`.
 - Legacy compatibility becomes green before the private surface extension may
   be described as supported.
+- Hash-gated artifact acquisition (see "Redirected artifact acquisition" in
+  `docs/compatibility.md`) follows redirects intentionally. The manifest's
+  signature over the SHA-256 path/aggregate hashes *is* the provenance; once
+  bytes hash-match, which host they came from is not a security property to
+  re-litigate. Read that section before flagging redirect-following as a
+  provenance regression.
 
 ## Behavior scenarios
 
