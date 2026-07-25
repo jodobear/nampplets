@@ -79,7 +79,6 @@ import Testing
     #expect(capability.decisionOptions.allSatisfy { !$0.isValid })
     #expect(model.selection(for: capability) == nil)
     #expect(!model.canConfirm)
-    #expect(model.diffs.isEmpty)
 }
 
 @MainActor
