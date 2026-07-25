@@ -116,6 +116,33 @@ final class PermissionReviewSheetModel {
         transientIssue = nil
     }
 
+    /// Selects, for every capability the runtime lets the user decide, the
+    /// broadest decision Rust has already validated as available -- never a
+    /// decision this model invents. Managed capabilities (no
+    /// `requestedDecision`) are untouched; they carry no user-selectable
+    /// option at all. This is the one-tap "just let me try it" path: the
+    /// Rust-requested default is `askEveryTime`, which can never satisfy
+    /// launch, so confirming un-edited defaults previously looked like it
+    /// worked and then silently failed to launch.
+    func selectAllRecommended() {
+        for capability in review.capabilities {
+            guard capability.requestedDecision != nil else {
+                continue
+            }
+            let broadest = [.allowExactBuild, .allowSession, .deny]
+                .compactMap { decision in
+                    capability.decisionOptions.first {
+                        $0.decision == decision && $0.isValid
+                    }
+                }
+                .first
+            if let broadest {
+                selections[capability.domain] = broadest.decision
+            }
+        }
+        transientIssue = nil
+    }
+
     func confirm() async {
         guard canConfirm else {
             return
@@ -127,6 +154,11 @@ final class PermissionReviewSheetModel {
             )
             return
         }
+        // Managed capabilities offer no `requestedDecision` and never appear
+        // in `selections`; only decidable capabilities must be fully covered.
+        let decidableCount = review.capabilities
+            .filter { $0.requestedDecision != nil }
+            .count
         guard
             let batch = PermissionDecisionBatch(
                 principal: review.principal,
@@ -140,7 +172,7 @@ final class PermissionReviewSheetModel {
                     )
                 }
             ),
-            batch.decisions.count == review.capabilities.count
+            batch.decisions.count == decidableCount
         else {
             transientIssue = PermissionReviewIssue(
                 title: "Permission review is incomplete",
@@ -166,6 +198,17 @@ final class PermissionReviewSheetModel {
 
     private var invalidSelections: [String] {
         review.capabilities.compactMap { capability in
+            guard capability.requestedDecision != nil else {
+                // Managed capabilities carry no user-selectable option. A
+                // required one the host has locked out of every valid
+                // decision can never launch, so it still blocks
+                // confirmation; a merely optional one never does.
+                let hostLockedOut = capability.decisionOptions
+                    .allSatisfy { !$0.isValid }
+                return capability.requirement == .required && hostLockedOut
+                    ? capability.domain
+                    : nil
+            }
             guard
                 let selected = selection(for: capability),
                 capability.option(for: selected)?.isValid == true
@@ -216,7 +259,8 @@ public struct PermissionReviewSheet: View {
                     )
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Confirm Decisions") {
+                    Button("Allow and Continue") {
+                        model.selectAllRecommended()
                         Task {
                             await model.confirm()
                             if model.isApplied {
@@ -228,7 +272,8 @@ public struct PermissionReviewSheet: View {
                     .disabled(!model.canConfirm)
                     .accessibilityIdentifier("permission-confirm")
                     .accessibilityHint(
-                        "Saves this bounded permission batch without launching the napplet"
+                        "Allows every capability this napplet can be granted, at the "
+                            + "broadest scope available, and saves the decision"
                     )
                 }
             }
@@ -254,15 +299,7 @@ public struct PermissionReviewSheet: View {
                         ?? model.review.principal.manifestAuthorPublicKey
                 )
                 identityRow(
-                    label: "Public key",
-                    value: model.review.principal.manifestAuthorPublicKey
-                )
-                identityRow(
-                    label: "dTag",
-                    value: model.review.principal.dTag
-                )
-                identityRow(
-                    label: "Exact build hash",
+                    label: "Build",
                     value: model.review.principal.aggregateHash
                 )
             }
@@ -296,13 +333,6 @@ public struct PermissionReviewSheet: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             } else {
-                Text(
-                    "Required capabilities must be permitted for the napplet to run. "
-                        + "Optional capabilities may be denied and degrade honestly."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
                 ForEach(model.review.capabilities) { capability in
                     capabilityCard(capability)
                 }
@@ -327,33 +357,19 @@ public struct PermissionReviewSheet: View {
                 sensitivityBadge(capability.sensitivity)
             }
 
-            Text(capability.rationale)
-                .font(.callout)
-
-            availabilityRow(capability.platformAvailability)
-
-            if !capability.dependencies.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Dependencies")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(capability.dependencies) { dependency in
-                        Label {
-                            Text("\(dependency.domain): \(dependency.reason)")
-                        } icon: {
-                            Image(systemName: "arrow.triangle.branch")
-                        }
-                        .font(.caption)
-                    }
-                }
+            if capability.platformAvailability != .available {
+                availabilityRow(capability.platformAvailability)
             }
 
-            Divider()
-
-            LabeledContent(
-                "Current decision",
-                value: capability.existingDecision.title
-            )
+            if !capability.dependencies.isEmpty {
+                Label(
+                    "Also needs: "
+                        + capability.dependencies.map(\.domain).joined(separator: ", "),
+                    systemImage: "arrow.triangle.branch"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
 
             if capability.requestedDecision == nil {
                 lockedManagedDecision(capability)
