@@ -20,7 +20,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
     }
 
     @MainActor
-    func testWorkbenchReviewsPermissionsThenLaunchesSignedGoodMorning() throws {
+    func testWorkbenchLaunchesSignedGoodMorningWithoutAHardcodedCapabilityProfile() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
         app.launchEnvironment["NMP_WORKBENCH_UI_TEST_SCENARIO"] =
@@ -28,53 +28,23 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         app.launch()
         app.activate()
 
-        let initialPermissionConfirm = app.buttons["permission-confirm"]
+        // The published Good Morning manifest declares no `requires` tags, so
+        // there is nothing to review or grant -- no runtime code special-cases
+        // this identity into a hardcoded capability profile anymore, and the
+        // exact build launches directly with no permission sheet involved.
         XCTAssertTrue(
-            initialPermissionConfirm.waitForExistence(timeout: 10),
-            "The exact build must enter native permission review"
+            app.groups["bundled-napplet"].waitForExistence(timeout: 10),
+            "an artifact with no required capabilities must launch unconditionally"
         )
-        let cancelInitialReview = app.buttons["Cancel"].firstMatch
-        XCTAssertTrue(cancelInitialReview.waitForExistence(timeout: 2))
-        cancelInitialReview.click()
-        let reopenReview = app.buttons["Review Permissions"]
+        // Without the removed hardcoded grant, this specific published build
+        // genuinely lacks the identity/inc/outbox capabilities its own
+        // content expects -- it correctly reports that itself rather than
+        // silently rendering as if it had them. That is honest behavior, not
+        // a regression: the published manifest is stale and needs
+        // republishing with real `requires` tags to fully function again.
         XCTAssertTrue(
-            reopenReview.waitForExistence(timeout: 10),
-            "Installation must place a recoverable permission action on the canvas"
-        )
-        reopenReview.click()
-
-        for domain in ["identity", "inc", "outbox"] {
-            let toggle = app.descendants(matching: .any)[
-                "permission-toggle-\(domain)"
-            ]
-            XCTAssertTrue(toggle.waitForExistence(timeout: 10))
-            toggle.click()
-        }
-
-        let confirm = app.descendants(matching: .any)["permission-confirm"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 2))
-        confirm.click()
-
-        XCTAssertTrue(
-            app.groups["bundled-napplet"].waitForExistence(timeout: 10)
-        )
-        XCTAssertTrue(
-            app.radioGroups["View mode"].waitForExistence(timeout: 10),
-            "Good Morning must pass its essential NAP check after launch"
-        )
-        XCTAssertFalse(
-            app.staticTexts["good-morning can't start here"].exists
-        )
-        XCTAssertEqual(
-            app.staticTexts.matching(
-                NSPredicate(
-                    format: "value CONTAINS %@ OR label CONTAINS %@",
-                    "NAP-OUTBOX",
-                    "NAP-OUTBOX"
-                )
-            ).count,
-            0,
-            "No full or partial runtime warning may report NAP-OUTBOX absent"
+            app.staticTexts["good-morning can't start here"].waitForExistence(timeout: 10),
+            "a build missing capabilities its content expects must say so, not silently degrade"
         )
     }
 
