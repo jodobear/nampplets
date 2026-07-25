@@ -548,6 +548,51 @@ fn permission_review_is_exact_bounded_and_required_denial_blocks_launch() {
 }
 
 #[test]
+fn required_capability_with_no_registered_provider_does_not_block_launch() {
+    // A manifest may `requires` a domain from the wider known vocabulary
+    // that this runtime build has no provider for at all (no descriptor,
+    // `PermissionPlatformAvailability::Unknown`). Such a domain can never
+    // receive a decision, so treating it as launch-blocking would make the
+    // napplet permanently unlaunchable. Launch must drop it and proceed
+    // with every domain it can actually grant.
+    let rig = Rig::new(false);
+    let exact = principal('c');
+    let missing = Capability::new("missing").unwrap();
+    rig.install_with_requests(
+        exact.clone(),
+        vec![
+            request(canary(), CapabilityRequirement::Required),
+            request(missing.clone(), CapabilityRequirement::Required),
+        ],
+    );
+    rig.allow_runtime(exact.clone());
+
+    rig.app.dispatch(PlatformCommand::Launch {
+        principal: exact.clone(),
+        profile: ExecutionProfile::Legacy,
+        required_domains: BTreeSet::from([canary(), missing.clone()]),
+    });
+
+    let snapshot = rig.app.snapshot();
+    let session = snapshot
+        .sessions
+        .last()
+        .expect("launch succeeds without the unregistered domain");
+    let domains = &snapshot
+        .session_domains
+        .iter()
+        .find(|view| view.session == session.id)
+        .unwrap()
+        .domains;
+    assert!(domains.contains(&canary()));
+    assert!(!domains.contains(&missing));
+    assert!(snapshot.recent_activity.iter().any(|fact| {
+        fact.operation.as_ref() == "required-domain-unavailable"
+            && fact.outcome.as_ref() == "missing"
+    }));
+}
+
+#[test]
 fn permission_batch_revokes_live_work_without_overwriting_ask_every_time() {
     let rig = Rig::new(true);
     let exact = principal('b');

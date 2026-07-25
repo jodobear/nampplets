@@ -3382,12 +3382,19 @@ fn project_requested_grant_decision(decision: GrantDecision) -> Option<RuntimeGr
 }
 
 fn project_permission_review(review: PermissionReviewView) -> RuntimePermissionReviewSnapshot {
+    // A Required capability with no registered provider on this runtime
+    // build can never receive a decision (permission_decision_policy forces
+    // it to Denied with every option invalid), so it must not permanently
+    // block launch the way a genuinely available-but-denied capability does.
+    // Launch drops such domains instead of injecting them; see
+    // `RuntimeApp::launch`.
     let launch_permitted = review.capabilities.iter().all(|capability| {
         capability.requirement != CapabilityRequirement::Required
-            || (matches!(
+            || !matches!(
                 capability.platform_availability,
                 PermissionPlatformAvailability::Available
-            ) && capability.current_decision.allows_without_prompt())
+            )
+            || capability.current_decision.allows_without_prompt()
     });
     RuntimePermissionReviewSnapshot {
         coordinate: RuntimeExactBuildCoordinate {
