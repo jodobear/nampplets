@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
+import stat
 import subprocess
 import sys
+import tempfile
 
 
 ANTISLOP_VERSION = "0.3.0"
+MAX_SOURCE_BYTES = 1024 * 1024
 SOURCE_EXTENSIONS = frozenset(
     {
         ".bash",
@@ -23,17 +27,24 @@ SOURCE_EXTENSIONS = frozenset(
         ".fish",
         ".go",
         ".h",
+        ".hs",
         ".hpp",
         ".java",
         ".js",
         ".jsx",
         ".kt",
         ".kts",
+        ".lua",
         ".mjs",
+        ".pl",
+        ".pm",
         ".php",
         ".py",
+        ".r",
+        ".R",
         ".rb",
         ".rs",
+        ".scala",
         ".sh",
         ".swift",
         ".ts",
@@ -59,13 +70,17 @@ EXCLUDED_FILES = frozenset(
 
 # The 0.3.0 JavaScript AST heuristic treats every `return null` as a stub.
 # These byte-identical trusted-shell sources use null as a bounded protocol
-# result and return a generated compatibility prelude. Keep all non-stub
-# AntiSlop categories active for them.
+# result and return a generated compatibility prelude. Stub suppression is
+# permitted only for the exact reviewed bytes; all non-stub categories remain
+# active, and any shell change must deliberately update this fingerprint.
 TRUSTED_SHELL_FILES = frozenset(
     {
         "platforms/apple/Sources/NMPNativeRuntimeApple/Resources/TrustedShell/trusted-shell.js",
         "web/trusted-shell/trusted-shell.js",
     }
+)
+TRUSTED_SHELL_SHA256 = (
+    "7beacc45c8b99320dbfd4571c2cede910c0c9e3b793e8204fe415932ef5d3187"
 )
 
 
@@ -108,9 +123,33 @@ def tracked_sources(repository: Path) -> list[str]:
                 )
             continue
         source = repository / path
-        if source.is_symlink() or not source.is_file():
+        metadata = source.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
             raise RuntimeError(f"tracked source is not a regular file: {path}")
+        if metadata.st_size > MAX_SOURCE_BYTES:
+            raise RuntimeError(
+                f"tracked source exceeds {MAX_SOURCE_BYTES}-byte limit: {path}"
+            )
         selected.append(path)
+    return selected
+
+
+def trusted_shell_sources(repository: Path, sources: list[str]) -> list[str]:
+    selected = sorted(path for path in sources if path in TRUSTED_SHELL_FILES)
+    expected = sorted(TRUSTED_SHELL_FILES)
+    if selected != expected:
+        raise RuntimeError(
+            "tracked trusted-shell source set changed: "
+            f"expected {expected!r}, got {selected!r}"
+        )
+
+    for path in selected:
+        actual = hashlib.sha256((repository / path).read_bytes()).hexdigest()
+        if actual != TRUSTED_SHELL_SHA256:
+            raise RuntimeError(
+                f"trusted-shell source fingerprint changed: {path}: "
+                f"expected {TRUSTED_SHELL_SHA256}, got {actual}"
+            )
     return selected
 
 
@@ -128,9 +167,27 @@ def verify_version(binary: str, repository: Path) -> None:
         raise RuntimeError(f"expected {expected!r}, got {actual!r}")
 
 
+def materialize_builtin_config(
+    binary: str, repository: Path, directory: Path
+) -> Path:
+    result = subprocess.run(
+        [binary, "--print-config"],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if not result.stdout.strip():
+        raise RuntimeError("AntiSlop built-in configuration is empty")
+    config = directory / f"antislop-{ANTISLOP_VERSION}.toml"
+    config.write_text(result.stdout, encoding="utf-8")
+    return config
+
+
 def scan(
     binary: str,
     repository: Path,
+    config: Path,
     label: str,
     paths: list[str],
     *options: str,
@@ -142,6 +199,8 @@ def scan(
     result = subprocess.run(
         [
             binary,
+            "--config",
+            str(config),
             "--extensions",
             ",".join(sorted(SOURCE_EXTENSIONS)),
             *options,
@@ -160,18 +219,25 @@ def main() -> int:
     verify_version(args.binary, repository)
 
     sources = tracked_sources(repository)
-    trusted_shell = sorted(path for path in sources if path in TRUSTED_SHELL_FILES)
+    trusted_shell = trusted_shell_sources(repository, sources)
     regular = sorted(path for path in sources if path not in TRUSTED_SHELL_FILES)
 
-    regular_status = scan(args.binary, repository, "first-party", regular)
-    shell_status = scan(
-        args.binary,
-        repository,
-        "trusted-shell",
-        trusted_shell,
-        "--disable",
-        "stub",
-    )
+    with tempfile.TemporaryDirectory(prefix="nampplets-antislop-") as directory:
+        config = materialize_builtin_config(
+            args.binary, repository, Path(directory)
+        )
+        regular_status = scan(
+            args.binary, repository, config, "first-party", regular
+        )
+        shell_status = scan(
+            args.binary,
+            repository,
+            config,
+            "trusted-shell",
+            trusted_shell,
+            "--disable",
+            "stub",
+        )
     return 1 if regular_status or shell_status else 0
 
 
