@@ -240,6 +240,11 @@ public struct ContentView: View {
                     handleNativeAction(action)
                 }
             }
+            profile.native.setIntentActivationHandler { request in
+                Task { @MainActor in
+                    handleIntentActivation(request)
+                }
+            }
             guard
                 ProcessInfo.processInfo.environment[
                     "NMP_WORKBENCH_UI_TEST_SCENARIO"
@@ -322,6 +327,7 @@ public struct ContentView: View {
             pendingLayoutSave?.cancel()
             persistLayoutImmediately()
             profile?.native.setIncActionHandler(nil)
+            profile?.native.setIntentActivationHandler(nil)
         }
         #if os(macOS)
         .frame(minWidth: 1_050, minHeight: 660)
@@ -1341,6 +1347,39 @@ public struct ContentView: View {
         )
         isInspectorPresented = true
         activity = "\(notice.title) from \(window.title)"
+    }
+
+    /// Handles a NAP-INTENT "create (if needed) and bring to front" signal.
+    /// Unlike `handleNativeAction`, this may fire before any window for the
+    /// handler exists yet -- `prepareInstalledArtifact` already contains the
+    /// exact "focus if open, otherwise install and launch" branch this
+    /// needs, so it is reused as-is rather than duplicated here.
+    @MainActor
+    private func handleIntentActivation(
+        _ request: NativeIntentActivationHandlerRequest
+    ) {
+        guard let profile else {
+            activity = "Refused: the application runtime profile is unavailable"
+            return
+        }
+        let identity = WorkbenchExactBuildIdentity(
+            manifestAuthor: request.manifestAuthor,
+            dTag: request.dTag,
+            aggregateHash: request.aggregateHash
+        )
+        guard let installed = profile.installedCatalogArtifact(for: identity) else {
+            activity = "Refused: intent handler napplet is not installed"
+            return
+        }
+        do {
+            try prepareInstalledArtifact(
+                installed,
+                identity: identity,
+                deferPermissionPresentation: true
+            )
+        } catch {
+            activity = "Refused: \(error.localizedDescription)"
+        }
     }
 
     /// Pushes onto the full-window navigation stack when a different napplet

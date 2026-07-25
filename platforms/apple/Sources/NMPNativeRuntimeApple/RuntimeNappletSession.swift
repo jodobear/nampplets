@@ -749,6 +749,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     private let appearanceSource: PlatformAppearanceSource
     private let settingsExecutor: PlatformSettingsExecutor
     private let incActionExecutor: MacOSIncActionExecutor
+    private let intentActivationExecutor: MacOSIntentActivationExecutor
     private let accountVault: (any NativeAccountVault)?
     private let lock = NSLock()
     private let accountLock = NSLock()
@@ -791,6 +792,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         let appearanceSource = PlatformAppearanceSource()
         let settingsExecutor = PlatformSettingsExecutor()
         let incActionExecutor = MacOSIncActionExecutor()
+        let intentActivationExecutor = MacOSIntentActivationExecutor()
         let accountVault: (any NativeAccountVault)?
         if let injectedAccountVault {
             accountVault = injectedAccountVault
@@ -840,7 +842,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
             artifactSource: source,
             appearanceSource: appearanceSource,
             settingsExecutor: settingsExecutor,
-            incActionExecutor: incActionExecutor
+            incActionExecutor: incActionExecutor,
+            intentActivationExecutor: intentActivationExecutor
         )
         appearanceSource.bind(controller: controller)
         settingsExecutor.bind(controller: controller)
@@ -850,6 +853,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
             appearanceSource: appearanceSource,
             settingsExecutor: settingsExecutor,
             incActionExecutor: incActionExecutor,
+            intentActivationExecutor: intentActivationExecutor,
             accountVault: accountVault
         )
         profile.restorePersistedAccounts()
@@ -868,6 +872,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         appearanceSource: PlatformAppearanceSource,
         settingsExecutor: PlatformSettingsExecutor,
         incActionExecutor: MacOSIncActionExecutor,
+        intentActivationExecutor: MacOSIntentActivationExecutor,
         accountVault: (any NativeAccountVault)?
     ) {
         self.controller = controller
@@ -875,6 +880,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         self.appearanceSource = appearanceSource
         self.settingsExecutor = settingsExecutor
         self.incActionExecutor = incActionExecutor
+        self.intentActivationExecutor = intentActivationExecutor
         self.accountVault = accountVault
         let revision = controller.snapshot().revision
         lastActivityRevision = revision
@@ -1245,6 +1251,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         appearanceSource.close()
         settingsExecutor.close()
         incActionExecutor.close()
+        intentActivationExecutor.close()
         controller.close()
         accountLock.unlock()
     }
@@ -1256,6 +1263,16 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         _ handler: NativeWorkbenchActionHandler?
     ) {
         incActionExecutor.setHandler(handler)
+    }
+
+    /// Installs or removes the application-owned NAP-INTENT activation
+    /// handler: "create (if needed) and bring to front the window for this
+    /// handler." Delivery occurs on the main dispatch queue and may fire
+    /// before any session/window for the handler exists yet.
+    public func setIntentActivationHandler(
+        _ handler: NativeIntentActivationHandler?
+    ) {
+        intentActivationExecutor.setHandler(handler)
     }
 
     public func accountSnapshot() -> NativeRuntimeAccountUpdate {
