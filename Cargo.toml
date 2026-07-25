@@ -25,6 +25,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 base64 = "0.22.1"
+cucumber = "0.21.1"
 hex = "0.4.3"
 getrandom = "0.3.3"
 nmp = { git = "https://github.com/pablof7z/nmp.git", rev = "005dc2a5f12aa414961b313d05ebb021934e385c" }
