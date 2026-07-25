@@ -1,16 +1,28 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
+};
 
 use nmp_native_nap_bridge::{
-    BridgeLimits, MemoryActivitySink, ProviderPushObserver, ProviderRegistry, SessionContext,
-    SourceWindowId,
+    BridgeLimits, MemoryActivitySink, Provider, ProviderError, ProviderPushObserver,
+    ProviderRegistry, ProviderRequest, SessionContext, SourceWindowId,
 };
 use nmp_native_runtime_core::{
-    Cancellation, ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, ResourceClass,
-    ResourceLimits, ResourceTracker, Sensitivity,
+    BoundedJson, Cancellation, Capability, ExecutionProfile, GrantDecision, GrantLedger,
+    GrantLimits, Principal, ResourceClass, ResourceLimits, ResourceTracker, Sensitivity, SessionId,
 };
+use parking_lot::Mutex;
+use serde_json::{Value, json};
 
 use super::*;
-use crate::types::MAX_SAFE_JSON_INTEGER;
+use crate::{
+    types::MAX_SAFE_JSON_INTEGER,
+    validate::{validate_evidence, validate_value},
+    wire::encode_identity_value,
+};
 
 #[derive(Debug)]
 struct FakeObservation {
