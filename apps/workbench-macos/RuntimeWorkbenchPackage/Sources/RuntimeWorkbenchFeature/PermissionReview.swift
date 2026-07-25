@@ -179,7 +179,7 @@ final class PermissionReviewSheetModel {
 
 public struct PermissionReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var model: PermissionReviewSheetModel
+    @State var model: PermissionReviewSheetModel
 
     @MainActor
     public init(manager: any PermissionReviewManaging) {
@@ -190,17 +190,24 @@ public struct PermissionReviewSheet: View {
 
     public var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    exactBuildIdentity
-                    Divider()
-                    capabilityReview
-                    if let issue = model.issue {
-                        Divider()
-                        issueView(issue)
+            ScrollViewReader { proxy in
+                VStack(spacing: 0) {
+                    if isUITestScrollHookEnabled {
+                        scrollAnchorRow(proxy: proxy)
+                    }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            exactBuildIdentity
+                            Divider()
+                            capabilityReview
+                            if let issue = model.issue {
+                                Divider()
+                                issueView(issue)
+                            }
+                        }
+                        .padding(24)
                     }
                 }
-                .padding(24)
             }
             .navigationTitle("Review Permissions")
             .toolbar {
@@ -305,6 +312,7 @@ public struct PermissionReviewSheet: View {
 
                 ForEach(model.review.capabilities) { capability in
                     capabilityCard(capability)
+                        .id(capability.domain)
                 }
             }
         }

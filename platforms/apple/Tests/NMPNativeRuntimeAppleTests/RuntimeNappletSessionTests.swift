@@ -5,9 +5,9 @@ import WebKit
 @testable import NMPNativeRuntimeApple
 
 final class RuntimeNappletSessionTests: XCTestCase {
-    private let author =
+    let author =
         "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5"
-    private let indexDigest =
+    let indexDigest =
         "ffd35eea5c84d03cdda74c23e1bbb2c40500f503833503aa688036faa52f3808"
     private let requiredGoodMorningDomains = ["identity", "inc", "outbox"]
 
@@ -1190,7 +1190,7 @@ final class RuntimeNappletSessionTests: XCTestCase {
         XCTAssertNil(NativeSettingsDocument.decode(invalid))
     }
 
-    private func repositoryRoot() -> URL {
+    func repositoryRoot() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()

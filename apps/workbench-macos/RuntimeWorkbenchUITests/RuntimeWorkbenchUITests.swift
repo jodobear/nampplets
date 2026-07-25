@@ -5,6 +5,10 @@ final class RuntimeWorkbenchUITests: XCTestCase {
     private static let liveCatalogOptInMarker =
         "/tmp/nampplets-run-live-catalog-ui-test"
     private static let maximumLiveReviewAttempts = 8
+    static let uiTestSigningSecret =
+        String(repeating: "0", count: 63) + "1"
+    static let uiTestSigningPublicKey =
+        "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
@@ -36,6 +40,12 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         let cancelInitialReview = app.buttons["Cancel"].firstMatch
         XCTAssertTrue(cancelInitialReview.waitForExistence(timeout: 2))
         cancelInitialReview.click()
+        XCTAssertTrue(
+            waitForNonexistence(of: initialPermissionConfirm, timeout: 10)
+        )
+
+        registerAndActivateDeterministicAccount(in: app)
+
         let reopenReview = app.buttons["Review Permissions"]
         XCTAssertTrue(
             reopenReview.waitForExistence(timeout: 10),
@@ -44,21 +54,24 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         reopenReview.click()
 
         for domain in ["identity", "inc", "outbox"] {
-            let decision = app.descendants(matching: .any)[
-                "permission-decision-\(domain)"
-            ]
-            XCTAssertTrue(decision.waitForExistence(timeout: 10))
-            decision.click()
+            let decision = scrollPermissionDecisionIntoView(
+                domain: domain,
+                in: app
+            )
             let allow = app.descendants(matching: .any)[
                 "permission-\(domain)-allowExactBuild"
             ]
-            XCTAssertTrue(allow.waitForExistence(timeout: 2))
+            XCTAssertTrue(openDecisionMenu(decision, revealing: allow))
             allow.click()
         }
 
         let confirm = app.descendants(matching: .any)["permission-confirm"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 2))
         confirm.click()
+        XCTAssertTrue(
+            waitForNonexistence(of: confirm, timeout: 20),
+            "The Good Morning exact permission batch must apply before launch"
+        )
 
         XCTAssertTrue(
             app.groups["bundled-napplet"].waitForExistence(timeout: 10)
@@ -84,7 +97,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
     }
 
     @MainActor
-    func testLiveCatalogOpensVerifiedNetworkNappletReview() throws {
+    func testLiveCatalogInstallsAndMountsVerifiedNetworkNapplet() throws {
         try XCTSkipUnless(
             Self.liveCatalogTestIsEnabled,
             "The live relay-backed catalog journey is opt-in. Set "
@@ -122,7 +135,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         let search = app.textFields["Search napplet catalog"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.click()
-        search.typeText("Chesslet")
+        search.typeText("STL Preview")
         app.buttons["Search"].click()
 
         let catalogEntries = app.buttons.matching(identifier: "catalog-entry")
@@ -191,48 +204,64 @@ final class RuntimeWorkbenchUITests: XCTestCase {
             "At least one bounded network candidate should complete exact verified installation"
         )
 
-        let renderedNapplet = app.groups["bundled-napplet"]
-        if renderedNapplet.waitForExistence(timeout: 30) {
-            XCTAssertTrue(
-                app.groups["napplet-canvas"].exists,
-                "A safely launchable network build must render inside the native canvas"
-            )
-            XCTAssertFalse(
-                app.descendants(matching: .any)
-                    .matching(
-                        NSPredicate(
-                            format: "label BEGINSWITH %@ OR value BEGINSWITH %@",
-                            "Refused:",
-                            "Refused:"
-                        )
-                    )
-                    .firstMatch
-                    .exists,
-                "The selected real build must not be reported as refused after rendering"
-            )
-            return
-        }
-
-        // Do not approve any capability for a network napplet in this test.
-        // Reaching Rust's exact permission review proves installation and is
-        // the furthest safe point when launch requires new grants.
         let permissionConfirm = app.buttons["permission-confirm"]
         XCTAssertTrue(
             permissionConfirm.waitForExistence(timeout: 10),
-            "An installed build that cannot launch grant-free must enter exact permission review"
+            "The installed STL Preview build must enter exact permission review"
         )
         XCTAssertTrue(
             permissionConfirm.isHittable,
             "Permission review must be visibly presented after the catalog closes"
         )
-        let cancelReview = app.buttons["Cancel"].firstMatch
-        XCTAssertTrue(cancelReview.waitForExistence(timeout: 2))
-        cancelReview.click()
+
+        for domain in ["inc", "link", "resource", "theme"] {
+            let decision = scrollPermissionDecisionIntoView(
+                domain: domain,
+                in: app,
+                message: "The \(domain) decision must be reachable in the native review"
+            )
+            let allow = app.descendants(matching: .any)[
+                "permission-\(domain)-allowExactBuild"
+            ]
+            XCTAssertTrue(
+                openDecisionMenu(decision, revealing: allow),
+                "The runtime must offer an exact-build grant for \(domain)"
+            )
+            allow.click()
+        }
+
+        XCTAssertTrue(permissionConfirm.isEnabled)
+        permissionConfirm.click()
         XCTAssertTrue(
-            app.buttons["Review Permissions"].waitForExistence(
-                timeout: 10
-            ),
-            "The verified installation must remain as a recoverable canvas window"
+            waitForNonexistence(of: permissionConfirm, timeout: 20),
+            "The exact permission batch must apply before launch"
+        )
+
+        XCTAssertTrue(
+            app.groups["bundled-napplet"].waitForExistence(timeout: 30),
+            "The verified public artifact must create a trusted napplet surface"
+        )
+        XCTAssertTrue(
+            app.staticTexts["Waiting for an STL to preview..."]
+                .waitForExistence(timeout: 30),
+            "The signed public napplet's own DOM must mount and pass its NAP-INC readiness check"
+        )
+        XCTAssertTrue(
+            app.groups["napplet-canvas"].exists,
+            "The mounted public napplet must remain inside the native canvas"
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)
+                .matching(
+                    NSPredicate(
+                        format: "label BEGINSWITH %@ OR value BEGINSWITH %@",
+                        "Refused:",
+                        "Refused:"
+                    )
+                )
+                .firstMatch
+                .exists,
+            "The installed public build must not be reported as refused"
         )
     }
 
@@ -245,33 +274,4 @@ final class RuntimeWorkbenchUITests: XCTestCase {
             )
     }
 
-    @MainActor
-    private func dismissCatalogReview(in app: XCUIApplication) {
-        let cancel = app.buttons.matching(identifier: "Cancel").firstMatch
-        guard cancel.waitForExistence(timeout: 2), cancel.isHittable else {
-            return
-        }
-        cancel.click()
-        _ = waitForNonexistence(
-            of: app.buttons[
-                "catalog-install-exact-build"
-            ],
-            timeout: 5
-        )
-    }
-
-    @MainActor
-    private func waitForNonexistence(
-        of element: XCUIElement,
-        timeout: TimeInterval
-    ) -> Bool {
-        let expectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"),
-            object: element
-        )
-        return XCTWaiter.wait(
-            for: [expectation],
-            timeout: timeout
-        ) == .completed
-    }
 }

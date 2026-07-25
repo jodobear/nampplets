@@ -1155,13 +1155,4 @@ fn usize_to_u64(value: usize) -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn initial_feed_snapshot_is_connecting_instead_of_terminally_empty() {
-        let frame = connecting_catalog_frame();
-        assert!(frame.candidates.is_empty());
-        assert_eq!(frame.window_load, WindowLoad::Requesting);
-    }
-}
+mod tests;
