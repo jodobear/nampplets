@@ -142,6 +142,9 @@ public struct TrustedNappletView {
             )
 
             let webView = WKWebView(frame: .zero, configuration: configuration)
+            #if DEBUG
+            webView.isInspectable = true
+            #endif
             currentWebView = webView
             webView.navigationDelegate = self
             webView.underPageBackgroundColor = .clear
@@ -273,10 +276,36 @@ public struct TrustedNappletView {
                     self.onActivity(.mounted)
                 } catch {
                     if !self.stopped {
-                        self.onActivity(.refused(reason: "The trusted shell refused the artifact"))
+                        self.onActivity(.refused(reason: Self.mountFailureReason(error)))
                     }
                 }
             }
+        }
+
+        private static let maxMountFailureDetailBytes = 256
+
+        /// `callAsyncJavaScript` surfaces a thrown mount-time exception (for
+        /// example the trusted shell rejecting a negotiated domain it cannot
+        /// project) only through this error. The detail is untrusted —
+        /// `configuration["artifactHTML"]` is attacker-controlled and parsed
+        /// during mount — so it is bounded and stripped of control
+        /// characters before it reaches a user-facing activity string.
+        private static func mountFailureReason(_ error: Error) -> String {
+            let fallback = "The trusted shell refused the artifact"
+            let detail = (error as NSError).localizedDescription
+            let sanitized = String(
+                detail.unicodeScalars.filter { scalar in
+                    !CharacterSet.newlines.contains(scalar)
+                        && !CharacterSet.controlCharacters.contains(scalar)
+                }
+            )
+            guard !sanitized.isEmpty else {
+                return fallback
+            }
+            let bounded = sanitized.utf8.count > maxMountFailureDetailBytes
+                ? String(decoding: Array(sanitized.utf8.prefix(maxMountFailureDetailBytes)), as: UTF8.self)
+                : sanitized
+            return "\(fallback): \(bounded)"
         }
 
         public func webView(

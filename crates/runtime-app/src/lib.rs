@@ -1604,9 +1604,29 @@ impl RuntimeApp {
             self.refuse_store(state, Some(principal), None, error, now);
             return;
         }
+        let advertised_domains = self.bridge.advertised_domains();
+        let (grantable_domains, unavailable_domains): (BTreeSet<Capability>, BTreeSet<Capability>) =
+            required_domains
+                .into_iter()
+                .partition(|domain| advertised_domains.contains(domain));
+        if !unavailable_domains.is_empty() {
+            let dropped = unavailable_domains
+                .iter()
+                .map(Capability::as_str)
+                .collect::<Vec<_>>()
+                .join(",");
+            self.record_activity(
+                state,
+                &principal,
+                "capability",
+                "required-domain-unavailable",
+                &dropped,
+                now,
+            );
+        }
         let plan = match self
             .bridge
-            .negotiate(&principal, profile, &required_domains)
+            .negotiate(&principal, profile, &grantable_domains)
         {
             Ok(plan) => plan,
             Err(error) => {
