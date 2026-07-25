@@ -1,4 +1,3 @@
-
 use std::{
     collections::BTreeMap,
     fs,
@@ -1674,25 +1673,37 @@ fn intent_invoke_launches_a_registered_handler_and_delivers_the_payload_via_inc(
     assert_eq!(event["sender"], "nip29-groups-test");
     assert_eq!(event["payload"], serde_json::json!({"group": "abc"}));
 
+    // `intent.invoke.result` is delivered asynchronously as a provider push
+    // to the caller's session (mirroring `inc.event` above), not as a
+    // synchronous `EnvelopeHandled` response to the original `intent.invoke`
+    // call -- `IntentProvider::invoke` returns immediately with no response
+    // and only pushes the result once `complete()` runs.
     let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let events = controller.app.events_after(0).events;
-        if events.iter().any(|event| {
-            matches!(&event.event, PlatformEvent::EnvelopeHandled {
-                    response: Some(response),
-                    ..
-                } if response.decode().ok().and_then(|value| value.get("type").cloned())
-                    == Some(Value::String("intent.invoke.result".to_owned())))
-        }) {
-            break;
+    let result = loop {
+        if let Some(result) = controller
+            .app
+            .events_after(0)
+            .events
+            .into_iter()
+            .find_map(|event| match event.event {
+                PlatformEvent::ProviderPush {
+                    session, envelope, ..
+                } if session == SessionId(caller_session)
+                    && envelope.decode().ok()?.get("type")? == "intent.invoke.result" =>
+                {
+                    envelope.decode().ok()
+                }
+                _ => None,
+            })
+        {
+            break result;
         }
         assert!(
             Instant::now() < deadline,
             "caller never received intent.invoke.result"
         );
         thread::sleep(Duration::from_millis(20));
-    }
-    let result = response_of_type(&controller, "intent.invoke.result");
+    };
     assert_eq!(result["id"], "invoke-1");
     assert_eq!(result["result"]["ok"], true);
     assert_eq!(result["result"]["handled"], true);
