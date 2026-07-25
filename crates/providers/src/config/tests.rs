@@ -1,4 +1,3 @@
-
 use nmp_native_nap_bridge::{
     ActivitySink, BridgeLimits, ProviderActivity, ProviderPushObserver, ProviderRegistry,
     SessionContext, SourceWindowId,
