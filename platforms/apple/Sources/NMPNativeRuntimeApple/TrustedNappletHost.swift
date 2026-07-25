@@ -66,6 +66,7 @@ public enum TrustedNappletActivity: Sendable, Equatable {
     case request(type: String)
     case refused(reason: String)
     case crashed
+    case consoleEntry(level: String, message: String)
 }
 
 public struct TrustedNappletView {
@@ -351,10 +352,27 @@ public struct TrustedNappletView {
             return candidate.resolvingSymlinksInPath().standardizedFileURL == trustedShellURL
         }
 
+        /// `debug.console` mirrors the sandboxed napplet iframe's own
+        /// console/error output for the Napplet Inspector. It is diagnostic
+        /// only -- native reports it straight to `onActivity` and never
+        /// forwards it to Rust, since it carries no NAP domain authority and
+        /// isn't part of the verified envelope protocol.
+        private static let consoleMessageType = "debug.console"
+
         private func route(
             messageType: String,
             encodedEnvelope: Data
         ) {
+            if messageType == Self.consoleMessageType {
+                if let envelope = try? JSONSerialization.jsonObject(with: encodedEnvelope)
+                    as? [String: Any],
+                    let level = envelope["level"] as? String,
+                    let message = envelope["message"] as? String
+                {
+                    onActivity(.consoleEntry(level: level, message: message))
+                }
+                return
+            }
             onActivity(.request(type: messageType))
             artifact.runtimeSession?.mappedEnvelope(encodedEnvelope)
         }

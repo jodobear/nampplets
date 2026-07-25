@@ -386,6 +386,60 @@
   var MAX_RESOURCE_MIME_BYTES = 256;
   var MAX_LINK_URL_BYTES = 8 * 1024;
   var MAX_LINK_LABEL_BYTES = 4 * 1024;
+  var MAX_CONSOLE_MESSAGE_CHARS = 4000;
+  var MAX_CONSOLE_ENTRIES = 500;
+  var consoleEntriesForwarded = 0;
+  function forwardConsoleEntry(level, parts) {
+    if (consoleEntriesForwarded >= MAX_CONSOLE_ENTRIES) {
+      return;
+    }
+    consoleEntriesForwarded += 1;
+    var text;
+    try {
+      text = Array.prototype.map.call(parts, function (value) {
+        if (typeof value === "string") return value;
+        if (value instanceof Error) return value.stack || value.message || String(value);
+        try {
+          return JSON.stringify(value);
+        } catch (_) {
+          return String(value);
+        }
+      }).join(" ");
+    } catch (_) {
+      text = "<unprintable console arguments>";
+    }
+    if (text.length > MAX_CONSOLE_MESSAGE_CHARS) {
+      text = text.slice(0, MAX_CONSOLE_MESSAGE_CHARS) + "…";
+    }
+    try {
+      parent.postMessage({ type: "debug.console", level: level, message: text }, "*");
+    } catch (_) {
+      // Best effort only -- a console mirror must never itself throw.
+    }
+  }
+  ["log", "info", "warn", "error", "debug"].forEach(function (level) {
+    var original = console[level];
+    console[level] = function () {
+      forwardConsoleEntry(level, arguments);
+      if (typeof original === "function") {
+        original.apply(console, arguments);
+      }
+    };
+  });
+  addEventListener("error", function (event) {
+    var detail = "Uncaught " + (event && event.message ? event.message : "error");
+    if (event && event.filename) {
+      detail += " (" + event.filename + ":" + event.lineno + ")";
+    }
+    forwardConsoleEntry("error", [detail]);
+  });
+  addEventListener("unhandledrejection", function (event) {
+    var reason = event && event.reason;
+    var detail = reason instanceof Error
+      ? (reason.stack || reason.message)
+      : String(reason);
+    forwardConsoleEntry("error", ["Unhandled rejection: " + detail]);
+  });
   var projectedDomains = Object.freeze(${JSON.stringify(projectedDomains)});
   var nextRequest = 1;
   var pending = new Map();

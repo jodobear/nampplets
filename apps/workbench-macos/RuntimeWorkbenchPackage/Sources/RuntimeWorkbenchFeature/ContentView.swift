@@ -5,6 +5,7 @@ import SwiftUI
 private enum InspectorTab: String, CaseIterable, Identifiable {
     case overview
     case relays
+    case console
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
         switch self {
         case .overview: "Overview"
         case .relays: "Relays"
+        case .console: "Console"
         }
     }
 }
@@ -40,6 +42,7 @@ public struct ContentView: View {
         [WorkbenchExactBuildIdentity: NappletArtifact] = [:]
     @State private var reacquiringIdentity: WorkbenchExactBuildIdentity?
     @State private var launchingIdentity: WorkbenchExactBuildIdentity?
+    @State private var consoleLog = NappletConsoleLog()
     @State private var layout: WorkbenchLayoutModel
     @State private var fullWindowRootID: WorkbenchWindowID?
     @State private var fullWindowPath: [WorkbenchWindowID] = []
@@ -130,6 +133,9 @@ public struct ContentView: View {
 
     public var body: some View {
         platformBody
+            .task {
+                await autoReopenInstalledNapplets()
+            }
             .sheet(isPresented: $isAccountSheetPresented) {
             WorkbenchAccountSheet(manager: accountManager)
         }
@@ -630,6 +636,8 @@ public struct ContentView: View {
                 inspectorOverviewTab
             case .relays:
                 inspectorRelaysTab
+            case .console:
+                inspectorConsoleTab
             }
 
             Spacer()
@@ -708,6 +716,18 @@ public struct ContentView: View {
     }
 
     @ViewBuilder
+    private var inspectorConsoleTab: some View {
+        let identity = layout.selectedWindow?.exactBuild
+        NappletConsoleTabView(
+            entries: consoleLog.entries(for: identity)
+        ) {
+            if let identity {
+                consoleLog.clear(for: identity)
+            }
+        }
+    }
+
+    @ViewBuilder
     private var inspectorRelaysTab: some View {
         if let profile {
             RelayDiagnosticsInspectorView(
@@ -752,7 +772,7 @@ public struct ContentView: View {
             let identity = window.exactBuild,
             let artifact = runningArtifacts[identity]
         {
-            nappletSurface(artifact, title: window.title)
+            nappletSurface(artifact, title: window.title, identity: identity)
         } else if
             let identity = window.exactBuild,
             launchingIdentity == identity || reacquiringIdentity == identity
@@ -810,7 +830,8 @@ public struct ContentView: View {
     @ViewBuilder
     private func nappletSurface(
         _ artifact: NappletArtifact,
-        title: String
+        title: String,
+        identity: WorkbenchExactBuildIdentity
     ) -> some View {
         TrustedNappletView(artifact: artifact) { event in
             switch event {
@@ -824,6 +845,8 @@ public struct ContentView: View {
                 activity = "Refused: \(reason)"
             case .crashed:
                 activity = "\(title) WebView crashed"
+            case .consoleEntry(let level, let message):
+                consoleLog.append(level: level, message: message, for: identity)
             }
         }
         .accessibilityIdentifier("bundled-napplet")
@@ -986,36 +1009,60 @@ public struct ContentView: View {
     private func reacquireInstalledArtifact(
         _ identity: WorkbenchExactBuildIdentity
     ) {
-        guard let profile else {
-            activity = "Refused: the application runtime profile is unavailable"
-            return
-        }
         guard
             reacquiringIdentity != identity,
             launchingIdentity != identity
         else {
             return
         }
+        Task {
+            await performReacquire(identity)
+        }
+    }
+
+    @MainActor
+    private func performReacquire(
+        _ identity: WorkbenchExactBuildIdentity
+    ) async {
+        guard let profile else {
+            activity = "Refused: the application runtime profile is unavailable"
+            return
+        }
         reacquiringIdentity = identity
         activity = "Reopening installed exact build"
-        Task {
-            let result = await Task.detached {
-                profile.reacquireInstalledArtifact(for: identity)
-            }.value
-            reacquiringIdentity = nil
-            switch result {
-            case let .refused(failure):
-                activity = "Refused: \(failure.code): \(failure.detail)"
-            case let .installed(installation):
-                do {
-                    try prepareInstalledArtifact(
-                        installation.installedArtifact,
-                        identity: identity
-                    )
-                } catch {
-                    activity = "Refused: \(error.localizedDescription)"
-                }
+        let result = await Task.detached {
+            profile.reacquireInstalledArtifact(for: identity)
+        }.value
+        reacquiringIdentity = nil
+        switch result {
+        case let .refused(failure):
+            activity = "Refused: \(failure.code): \(failure.detail)"
+        case let .installed(installation):
+            do {
+                try prepareInstalledArtifact(
+                    installation.installedArtifact,
+                    identity: identity
+                )
+            } catch {
+                activity = "Refused: \(error.localizedDescription)"
             }
+        }
+    }
+
+    /// Reopens every restored canvas window's installed napplet automatically
+    /// on launch, so a restart lands on running napplets instead of "Napplet
+    /// is not running" placeholders the user has to click through one at a
+    /// time. Runs each reopen to completion before starting the next since
+    /// `reacquiringIdentity`/`launchingIdentity` track only one in-flight
+    /// operation at a time.
+    @MainActor
+    private func autoReopenInstalledNapplets() async {
+        guard profile != nil else { return }
+        var seen = Set<WorkbenchExactBuildIdentity>()
+        for identity in layout.windows.compactMap(\.exactBuild) {
+            guard seen.insert(identity).inserted else { continue }
+            guard runningArtifacts[identity] == nil else { continue }
+            await performReacquire(identity)
         }
     }
 
