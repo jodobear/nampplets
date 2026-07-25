@@ -14,6 +14,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
+    thread,
     time::Duration,
 };
 
@@ -42,6 +43,10 @@ pub struct ResolverLimits {
     pub maximum_url_bytes: usize,
     pub maximum_source_label_bytes: usize,
     pub maximum_reason_bytes: usize,
+    /// Redirect hops followed per candidate before acquisition refuses. Each
+    /// hop target is revalidated with the same HTTPS-only, credential-free,
+    /// public-address policy as the original candidate URL.
+    pub maximum_redirect_hops: usize,
 }
 
 impl Default for ResolverLimits {
@@ -56,6 +61,7 @@ impl Default for ResolverLimits {
             maximum_url_bytes: 2_048,
             maximum_source_label_bytes: 256,
             maximum_reason_bytes: 512,
+            maximum_redirect_hops: 5,
         }
     }
 }
@@ -71,6 +77,7 @@ impl ResolverLimits {
             || self.maximum_url_bytes == 0
             || self.maximum_source_label_bytes == 0
             || self.maximum_reason_bytes == 0
+            || self.maximum_redirect_hops == 0
         {
             return Err(ResolveError::InvalidLimits);
         }
@@ -379,11 +386,6 @@ impl HttpsFetchRequest {
     pub fn maximum_bytes(&self) -> usize {
         self.maximum_bytes
     }
-
-    /// Redirect following is always forbidden for artifact acquisition.
-    pub fn follow_redirects(&self) -> bool {
-        false
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -577,6 +579,8 @@ pub enum AcquisitionRefusal {
     AddressLimit { actual: usize, maximum: usize },
     #[error("redirect was refused")]
     Redirect,
+    #[error("redirect exceeded the maximum of {maximum} hops")]
+    TooManyRedirects { maximum: usize },
     #[error("effective response URL differs from the exact requested candidate")]
     SourceConfusion,
     #[error("response is {actual} bytes; the maximum is {maximum}")]
@@ -631,7 +635,7 @@ impl RustHttpsAcquisitionConfig {
 /// original URL hostname so TLS certificate validation and SNI are preserved.
 pub struct RustHttpsAcquisitionPort {
     config: RustHttpsAcquisitionConfig,
-    runtime: tokio::runtime::Runtime,
+    runtime: Option<tokio::runtime::Runtime>,
     admission: Arc<HttpsAdmission>,
 }
 
@@ -657,9 +661,24 @@ impl RustHttpsAcquisitionPort {
             .map_err(|error| HttpsPortError::new(error.to_string()))?;
         Ok(Self {
             config,
-            runtime,
+            runtime: Some(runtime),
             admission: Arc::new(HttpsAdmission::new(config.maximum_in_flight)),
         })
+    }
+}
+
+impl Drop for RustHttpsAcquisitionPort {
+    /// Tokio refuses to synchronously shut down a runtime from a thread that
+    /// is itself executing inside another runtime's async context (observed
+    /// when the last handle to this port is released from the FFI
+    /// observation thread). Shutting the runtime down on a fresh, bare
+    /// thread avoids that panic regardless of which thread drops this port.
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            let _ = thread::Builder::new()
+                .name("nampplets-artifact-https-shutdown".to_owned())
+                .spawn(move || drop(runtime));
+        }
     }
 }
 
@@ -688,7 +707,11 @@ impl HttpsAcquisitionPort for RustHttpsAcquisitionPort {
     ) -> Result<Arc<dyn HttpsAcquisitionOperation>, HttpsPortError> {
         let permit = self.admission.reserve()?;
         let config = self.config;
-        let task = self.runtime.spawn(async move {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .expect("runtime is only taken by Drop, after which the port is unreachable");
+        let task = runtime.spawn(async move {
             let result = rust_https_fetch(request, config).await;
             completion.resolve(result);
             drop(permit);
@@ -813,8 +836,9 @@ async fn rust_https_fetch_inner(
     let status = response.status().as_u16();
     let redirect_location = response
         .headers()
-        .contains_key(reqwest::header::LOCATION)
-        .then(|| Arc::<str>::from(""));
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .map(Arc::<str>::from);
     let maximum_with_probe =
         request
             .maximum_bytes
@@ -1627,8 +1651,16 @@ impl SafeManifestBlobSource {
 }
 
 impl ManifestBlobSource for SafeManifestBlobSource {
+    /// Every candidate, and every redirect hop it leads to, is refetched
+    /// through the same HTTPS-only / credential-free / public-address /
+    /// effective-URL policy. A redirect never substitutes a location that
+    /// bypasses that policy; it only ever advances to another location this
+    /// policy has independently approved. Hops are capped by
+    /// `maximum_redirect_hops` so a redirect chain cannot loop or stall
+    /// acquisition indefinitely. Content is still sealed only after its
+    /// bytes hash-match the manifest-pinned digest, independent of origin.
     fn fetch(&self, request: &BlobFetchRequest) -> Result<BlobFetchResponse, BlobSourceError> {
-        for candidate in request.candidate_urls() {
+        'candidates: for candidate in request.candidate_urls() {
             if self.cancellation.is_cancelled() {
                 return Err(self.refuse(
                     request.logical_path(),
@@ -1636,145 +1668,182 @@ impl ManifestBlobSource for SafeManifestBlobSource {
                     AcquisitionRefusal::Cancelled,
                 ));
             }
-            let validated = match validate_candidate(candidate, self.limits.maximum_url_bytes) {
+            let mut current_url = match validate_candidate(candidate, self.limits.maximum_url_bytes)
+            {
                 Ok(url) => url,
                 Err(reason) => {
                     return Err(self.refuse(request.logical_path(), candidate, reason));
                 }
             };
-            let raw_request = HttpsFetchRequest {
-                url: Arc::from(candidate),
-                maximum_bytes: request.maximum_bytes(),
-            };
-            let completion = HttpsAcquisitionCompletion::pending();
-            let operation = match self.transport.start_fetch(raw_request, completion.clone()) {
-                Ok(operation) => operation,
-                Err(HttpsPortError::Refused { reason }) => {
-                    return Err(self.refuse(request.logical_path(), candidate, reason));
-                }
-                Err(HttpsPortError::Saturated { maximum }) => {
+            let mut hops = 0usize;
+            loop {
+                let current = current_url.as_str().to_owned();
+                let raw_request = HttpsFetchRequest {
+                    url: Arc::from(current.as_str()),
+                    maximum_bytes: request.maximum_bytes(),
+                };
+                let completion = HttpsAcquisitionCompletion::pending();
+                let operation = match self.transport.start_fetch(raw_request, completion.clone()) {
+                    Ok(operation) => operation,
+                    Err(HttpsPortError::Refused { reason }) => {
+                        return Err(self.refuse(request.logical_path(), &current, reason));
+                    }
+                    Err(HttpsPortError::Saturated { maximum }) => {
+                        return Err(self.refuse(
+                            request.logical_path(),
+                            &current,
+                            AcquisitionRefusal::ExecutorSaturated { maximum },
+                        ));
+                    }
+                    Err(HttpsPortError::Transport { reason }) => {
+                        let reason = bounded_reason(reason, self.limits.maximum_reason_bytes);
+                        self.record(
+                            request.logical_path(),
+                            &current,
+                            AcquisitionOutcome::TransportFailed { reason },
+                        )?;
+                        continue 'candidates;
+                    }
+                };
+                let response_result = completion.wait(&self.cancellation);
+                operation.cancel();
+                let response = match response_result {
+                    Ok(response) => response,
+                    Err(HttpsWaitError::Cancelled) => {
+                        return Err(self.refuse(
+                            request.logical_path(),
+                            &current,
+                            AcquisitionRefusal::Cancelled,
+                        ));
+                    }
+                    Err(HttpsWaitError::Port(HttpsPortError::Refused { reason })) => {
+                        return Err(self.refuse(request.logical_path(), &current, reason));
+                    }
+                    Err(HttpsWaitError::Port(HttpsPortError::Saturated { maximum })) => {
+                        return Err(self.refuse(
+                            request.logical_path(),
+                            &current,
+                            AcquisitionRefusal::ExecutorSaturated { maximum },
+                        ));
+                    }
+                    Err(HttpsWaitError::CancellationSaturated { maximum }) => {
+                        return Err(self.refuse(
+                            request.logical_path(),
+                            &current,
+                            AcquisitionRefusal::CancellationCapacity { maximum },
+                        ));
+                    }
+                    Err(HttpsWaitError::Port(HttpsPortError::Transport { reason })) => {
+                        let reason = bounded_reason(reason, self.limits.maximum_reason_bytes);
+                        self.record(
+                            request.logical_path(),
+                            &current,
+                            AcquisitionOutcome::TransportFailed { reason },
+                        )?;
+                        continue 'candidates;
+                    }
+                    Err(HttpsWaitError::Closed) => {
+                        self.record(
+                            request.logical_path(),
+                            &current,
+                            AcquisitionOutcome::TransportFailed {
+                                reason: Arc::from("HTTPS operation closed without a result"),
+                            },
+                        )?;
+                        continue 'candidates;
+                    }
+                };
+                if self.cancellation.is_cancelled() {
                     return Err(self.refuse(
                         request.logical_path(),
-                        candidate,
-                        AcquisitionRefusal::ExecutorSaturated { maximum },
-                    ));
-                }
-                Err(HttpsPortError::Transport { reason }) => {
-                    let reason = bounded_reason(reason, self.limits.maximum_reason_bytes);
-                    self.record(
-                        request.logical_path(),
-                        candidate,
-                        AcquisitionOutcome::TransportFailed { reason },
-                    )?;
-                    continue;
-                }
-            };
-            let response_result = completion.wait(&self.cancellation);
-            operation.cancel();
-            let response = match response_result {
-                Ok(response) => response,
-                Err(HttpsWaitError::Cancelled) => {
-                    return Err(self.refuse(
-                        request.logical_path(),
-                        candidate,
+                        &current,
                         AcquisitionRefusal::Cancelled,
                     ));
                 }
-                Err(HttpsWaitError::Port(HttpsPortError::Refused { reason })) => {
-                    return Err(self.refuse(request.logical_path(), candidate, reason));
+                if let Err(reason) = validate_resolved_addresses(
+                    &response.resolved_addresses,
+                    self.limits.maximum_resolved_addresses,
+                ) {
+                    return Err(self.refuse(request.logical_path(), &current, reason));
                 }
-                Err(HttpsWaitError::Port(HttpsPortError::Saturated { maximum })) => {
-                    return Err(self.refuse(
-                        request.logical_path(),
-                        candidate,
-                        AcquisitionRefusal::ExecutorSaturated { maximum },
-                    ));
-                }
-                Err(HttpsWaitError::CancellationSaturated { maximum }) => {
-                    return Err(self.refuse(
-                        request.logical_path(),
-                        candidate,
-                        AcquisitionRefusal::CancellationCapacity { maximum },
-                    ));
-                }
-                Err(HttpsWaitError::Port(HttpsPortError::Transport { reason })) => {
-                    let reason = bounded_reason(reason, self.limits.maximum_reason_bytes);
-                    self.record(
-                        request.logical_path(),
-                        candidate,
-                        AcquisitionOutcome::TransportFailed { reason },
-                    )?;
+                if response.redirect_location.is_some() || (300..400).contains(&response.status) {
+                    if hops >= self.limits.maximum_redirect_hops {
+                        return Err(self.refuse(
+                            request.logical_path(),
+                            &current,
+                            AcquisitionRefusal::TooManyRedirects {
+                                maximum: self.limits.maximum_redirect_hops,
+                            },
+                        ));
+                    }
+                    let Some(location) = response.redirect_location.as_deref() else {
+                        return Err(self.refuse(
+                            request.logical_path(),
+                            &current,
+                            AcquisitionRefusal::Redirect,
+                        ));
+                    };
+                    let next_url = match current_url.join(location) {
+                        Ok(url) => url,
+                        Err(_) => {
+                            return Err(self.refuse(
+                                request.logical_path(),
+                                &current,
+                                AcquisitionRefusal::InvalidCandidate,
+                            ));
+                        }
+                    };
+                    current_url = match validate_candidate(
+                        next_url.as_str(),
+                        self.limits.maximum_url_bytes,
+                    ) {
+                        Ok(url) => url,
+                        Err(reason) => {
+                            return Err(self.refuse(request.logical_path(), &current, reason));
+                        }
+                    };
+                    hops += 1;
                     continue;
                 }
-                Err(HttpsWaitError::Closed) => {
+                if response.effective_url.as_ref() != current.as_str() {
+                    return Err(self.refuse(
+                        request.logical_path(),
+                        &current,
+                        AcquisitionRefusal::SourceConfusion,
+                    ));
+                }
+                if response.body.len() > request.maximum_bytes() {
+                    return Err(self.refuse(
+                        request.logical_path(),
+                        &current,
+                        AcquisitionRefusal::Oversize {
+                            actual: response.body.len(),
+                            maximum: request.maximum_bytes(),
+                        },
+                    ));
+                }
+                if response.status != 200 {
                     self.record(
                         request.logical_path(),
-                        candidate,
-                        AcquisitionOutcome::TransportFailed {
-                            reason: Arc::from("HTTPS operation closed without a result"),
+                        &current,
+                        AcquisitionOutcome::HttpStatus {
+                            status: response.status,
                         },
                     )?;
-                    continue;
+                    continue 'candidates;
                 }
-            };
-            if self.cancellation.is_cancelled() {
-                return Err(self.refuse(
-                    request.logical_path(),
-                    candidate,
-                    AcquisitionRefusal::Cancelled,
-                ));
-            }
-            if let Err(reason) = validate_resolved_addresses(
-                &response.resolved_addresses,
-                self.limits.maximum_resolved_addresses,
-            ) {
-                return Err(self.refuse(request.logical_path(), candidate, reason));
-            }
-            if response.redirect_location.is_some() || (300..400).contains(&response.status) {
-                return Err(self.refuse(
-                    request.logical_path(),
-                    candidate,
-                    AcquisitionRefusal::Redirect,
-                ));
-            }
-            if response.effective_url.as_ref() != validated.as_str() {
-                return Err(self.refuse(
-                    request.logical_path(),
-                    candidate,
-                    AcquisitionRefusal::SourceConfusion,
-                ));
-            }
-            if response.body.len() > request.maximum_bytes() {
-                return Err(self.refuse(
-                    request.logical_path(),
-                    candidate,
-                    AcquisitionRefusal::Oversize {
-                        actual: response.body.len(),
-                        maximum: request.maximum_bytes(),
-                    },
-                ));
-            }
-            if response.status != 200 {
                 self.record(
                     request.logical_path(),
-                    candidate,
-                    AcquisitionOutcome::HttpStatus {
-                        status: response.status,
+                    &current,
+                    AcquisitionOutcome::Succeeded {
+                        bytes: response.body.len(),
                     },
                 )?;
-                continue;
+                return Ok(BlobFetchResponse::ok(
+                    current,
+                    Box::new(Cursor::new(response.body)),
+                ));
             }
-            self.record(
-                request.logical_path(),
-                candidate,
-                AcquisitionOutcome::Succeeded {
-                    bytes: response.body.len(),
-                },
-            )?;
-            return Ok(BlobFetchResponse::ok(
-                candidate,
-                Box::new(Cursor::new(response.body)),
-            ));
         }
         Err(self.refuse(
             request.logical_path(),
@@ -2008,6 +2077,8 @@ mod tests {
     enum TransportMode {
         Good,
         Redirect,
+        RedirectOnce,
+        RedirectToPrivate,
         Private,
         Confused,
         Oversize,
@@ -2032,7 +2103,7 @@ mod tests {
             request: HttpsFetchRequest,
             completion: HttpsAcquisitionCompletion,
         ) -> Result<Arc<dyn HttpsAcquisitionOperation>, HttpsPortError> {
-            self.calls.fetch_add(1, Ordering::Relaxed);
+            let call_number = self.calls.fetch_add(1, Ordering::Relaxed) + 1;
             let (effective, status, redirect, addresses, body) = match self.mode {
                 TransportMode::Good => (
                     Arc::from(request.url()),
@@ -2045,6 +2116,27 @@ mod tests {
                     Arc::from(request.url()),
                     302,
                     Some(Arc::from("https://evil.example/blob")),
+                    Arc::from([PUBLIC_ADDRESS]),
+                    Arc::<[u8]>::from([]),
+                ),
+                TransportMode::RedirectOnce if call_number == 1 => (
+                    Arc::from(request.url()),
+                    302,
+                    Some(Arc::from("https://mirror.example/blob")),
+                    Arc::from([PUBLIC_ADDRESS]),
+                    Arc::<[u8]>::from([]),
+                ),
+                TransportMode::RedirectOnce => (
+                    Arc::from(request.url()),
+                    200,
+                    None,
+                    Arc::from([PUBLIC_ADDRESS]),
+                    Arc::<[u8]>::from(INDEX),
+                ),
+                TransportMode::RedirectToPrivate => (
+                    Arc::from(request.url()),
+                    302,
+                    Some(Arc::from("https://127.0.0.1/blob")),
                     Arc::from([PUBLIC_ADDRESS]),
                     Arc::<[u8]>::from([]),
                 ),
@@ -2174,7 +2266,8 @@ mod tests {
     #[test]
     fn redirect_private_dns_source_confusion_and_oversize_fail_before_retention() {
         let cases = [
-            (TransportMode::Redirect, "redirect"),
+            (TransportMode::Redirect, "hops"),
+            (TransportMode::RedirectToPrivate, "public address"),
             (TransportMode::Private, "public address"),
             (TransportMode::Confused, "effective response URL"),
             (TransportMode::Oversize, "maximum"),
@@ -2197,6 +2290,24 @@ mod tests {
                 ));
             });
         }
+    }
+
+    #[test]
+    fn redirect_to_a_revalidated_public_https_target_is_followed() {
+        let fixture = Fixture::new(TransportMode::RedirectOnce);
+        fixture.with_resolver(|resolver| {
+            let online = resolver
+                .resolve(&Fixture::coordinate(), &CancellationToken::default())
+                .expect("a redirect to a policy-approved target is followed");
+            assert_eq!(
+                online
+                    .handle()
+                    .read_verified(INDEX_PATH, 4 * 1_024 * 1_024)
+                    .expect("sealed bytes"),
+                INDEX
+            );
+        });
+        assert_eq!(fixture.transport.calls.load(Ordering::Relaxed), 2);
     }
 
     #[test]

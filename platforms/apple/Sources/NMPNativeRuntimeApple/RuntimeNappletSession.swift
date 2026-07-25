@@ -1796,10 +1796,10 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         let previousCatalogRevision = lastCatalogSnapshot.revision
         let previousPendingWriteRevision = lastPendingWriteRevision
         let previousReceiptRevision = lastReceiptRevision
-        lastActivityRevision = frame.snapshot.revision
-        lastLibraryRevision = frame.snapshot.revision
-        lastPendingWriteRevision = frame.snapshot.revision
-        lastReceiptRevision = frame.snapshot.revision
+        lastActivityRevision = max(lastActivityRevision, frame.snapshot.revision)
+        lastLibraryRevision = max(lastLibraryRevision, frame.snapshot.revision)
+        lastPendingWriteRevision = max(lastPendingWriteRevision, frame.snapshot.revision)
+        lastReceiptRevision = max(lastReceiptRevision, frame.snapshot.revision)
         if frame.catalog.revision >= previousCatalogRevision {
             lastCatalogSnapshot = frame.catalog
         }
