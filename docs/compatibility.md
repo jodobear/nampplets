@@ -58,6 +58,16 @@ Unsafe targets, unapproved redirect statuses, missing locations, a sixth hop,
 source confusion, deadline/byte exhaustion, and verification failure are
 typed, observable refusals.
 
+This is content addressing: the SHA-256 path hashes and aggregate hash are
+themselves inside the signed manifest event, so the manifest's signature is
+the provenance. Once bytes hash-match, which host or hop they physically
+came from is not a security property to defend — that is precisely what
+content addressing means. Do not re-litigate this as a "verify origin, not
+just hash" regression; the hop/address/DNS-rebinding checks above exist to
+bound *network egress and SSRF exposure* during acquisition, not to
+re-establish origin trust that the hash already provides. See PR #62 and the
+discussion on PR #76 (closed: "redirect following is intentional").
+
 ### NAP-SHELL
 
 The pinned NAP registry defines `shell.ready` and `shell.init`. The pinned
