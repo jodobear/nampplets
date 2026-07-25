@@ -59,6 +59,61 @@ import Testing
 }
 
 @MainActor
+@Test
+func accountManagerRendersRustsFullSnapshotAtCapacityWithoutDiscardingIt()
+    async throws
+{
+    let root = temporaryRuntimeRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let profile = try WorkbenchRuntimeProfile.open(storageRoot: root)
+    defer { profile.close() }
+    let manager = RuntimeWorkbenchAccountManager(profile: profile)
+
+    for secret in 1 ... WorkbenchAccountSnapshot.maximumAccountCount {
+        await manager.register(secret: String(format: "%064x", secret))
+    }
+
+    // Rust's own registry capacity is exhausted, but the accounts it already
+    // accepted must still be rendered as-is: no Swift-side re-check should
+    // override the snapshot with a fabricated "unavailable" state.
+    #expect(
+        manager.snapshot().accounts.count ==
+            WorkbenchAccountSnapshot.maximumAccountCount
+    )
+    guard case .available = manager.snapshot().availability else {
+        Issue.record(
+            "A full but valid Rust snapshot must remain available, not be overridden"
+        )
+        return
+    }
+
+    await manager.registerReadOnly(
+        publicIdentity:
+            "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5"
+    )
+
+    // The capacity refusal is Rust's own typed failure, rendered verbatim;
+    // it must not be replaced by a Swift-fabricated message, and the
+    // already-registered accounts must remain intact.
+    #expect(
+        manager.snapshot().errorMessage?.contains(
+            "The account registry is full at \(WorkbenchAccountSnapshot.maximumAccountCount) entries."
+        ) == true
+    )
+    #expect(
+        manager.snapshot().accounts.count ==
+            WorkbenchAccountSnapshot.maximumAccountCount
+    )
+    guard case .available = manager.snapshot().availability else {
+        Issue.record(
+            "A capacity refusal on a subsequent mutation must not erase the existing accounts"
+        )
+        return
+    }
+}
+
+@MainActor
 @Test func nativeLayoutAdapterRestoresWorkspaceAcrossProfileRestart() throws {
     let root = temporaryRuntimeRoot()
     defer { try? FileManager.default.removeItem(at: root) }
