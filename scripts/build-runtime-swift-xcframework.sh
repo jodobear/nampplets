@@ -70,7 +70,8 @@ library=libnmp_native_runtime_ffi.a
 arm_target=aarch64-apple-darwin
 x86_target=x86_64-apple-darwin
 ios_device_target=aarch64-apple-ios
-ios_sim_target=aarch64-apple-ios-sim
+ios_sim_arm_target=aarch64-apple-ios-sim
+ios_sim_x86_target=x86_64-apple-ios
 deployment_target=${MACOSX_DEPLOYMENT_TARGET:-13.0}
 ios_deployment_target=${IPHONEOS_DEPLOYMENT_TARGET:-17.0}
 target_value=${CARGO_TARGET_DIR:-target}
@@ -121,10 +122,27 @@ if [[ "$ios_enabled" == true ]]; then
     cargo build -p "$crate" --locked --release --target "$ios_device_target"
   ios_device_library=$target_dir/$ios_device_target/release/$library
 
-  echo "== build iOS Simulator Rust library =="
+  echo "== build arm64 iOS Simulator Rust library =="
   IPHONEOS_DEPLOYMENT_TARGET=$ios_deployment_target \
-    cargo build -p "$crate" --locked --release --target "$ios_sim_target"
-  ios_sim_library=$target_dir/$ios_sim_target/release/$library
+    cargo build -p "$crate" --locked --release --target "$ios_sim_arm_target"
+  ios_sim_arm_library=$target_dir/$ios_sim_arm_target/release/$library
+
+  ios_sim_library=$ios_sim_arm_library
+  ios_sim_architectures=arm64
+  if [[ "$mode" == universal ]]; then
+    echo "== build x86_64 iOS Simulator Rust library =="
+    IPHONEOS_DEPLOYMENT_TARGET=$ios_deployment_target \
+      cargo build -p "$crate" --locked --release --target "$ios_sim_x86_target"
+    ios_sim_x86_library=$target_dir/$ios_sim_x86_target/release/$library
+
+    mkdir -p "$staging/ios-simulator"
+    ios_sim_library=$staging/ios-simulator/$library
+    lipo -create \
+      "$ios_sim_arm_library" \
+      "$ios_sim_x86_library" \
+      -output "$ios_sim_library"
+    ios_sim_architectures="arm64 x86_64"
+  fi
 fi
 
 echo "== generate UniFFI Swift source and C module =="
@@ -159,7 +177,7 @@ xcframework_platforms="macOS ($architectures)"
 if [[ "$ios_enabled" == true ]]; then
   xcframework_libraries+=(-library "$ios_device_library" -headers "$headers")
   xcframework_libraries+=(-library "$ios_sim_library" -headers "$headers")
-  xcframework_platforms+=", iOS ($ios_device_target), iOS Simulator ($ios_sim_target)"
+  xcframework_platforms+=", iOS ($ios_device_target), iOS Simulator ($ios_sim_architectures)"
 fi
 
 echo "== create XCFramework ($xcframework_platforms) =="
@@ -169,25 +187,38 @@ xcodebuild -create-xcframework \
   -output "$xcframework"
 
 echo "== validate packaged architectures and generated binding =="
-read -r -a packaged_architectures <<<"$(lipo -archs "$packaged_library")"
+validate_architectures() {
+  local label=$1
+  local archive=$2
+  shift 2
+  local expected_architectures=("$@")
+  local actual_architectures=()
+  local expected
+
+  read -r -a actual_architectures <<<"$(lipo -archs "$archive")"
+  for expected in "${expected_architectures[@]}"; do
+    if [[ ! " ${actual_architectures[*]} " =~ [[:space:]]${expected}[[:space:]] ]]; then
+      echo "error: $label library is missing architecture $expected" >&2
+      exit 1
+    fi
+  done
+  if [[ "${#actual_architectures[@]}" -ne "${#expected_architectures[@]}" ]]; then
+    echo "error: $label library has unexpected architectures: ${actual_architectures[*]}" >&2
+    exit 1
+  fi
+  printf '%s: %s\n' "$label" "${actual_architectures[*]}"
+}
+
 expected_architectures=(arm64)
 if [[ "$mode" == universal ]]; then
   expected_architectures+=(x86_64)
 fi
-for expected in "${expected_architectures[@]}"; do
-  if [[ ! " ${packaged_architectures[*]} " =~ [[:space:]]${expected}[[:space:]] ]]; then
-    echo "error: packaged library is missing architecture $expected" >&2
-    exit 1
-  fi
-done
-if [[ "${#packaged_architectures[@]}" -ne "${#expected_architectures[@]}" ]]; then
-  echo "error: packaged library has unexpected architectures: ${packaged_architectures[*]}" >&2
-  exit 1
-fi
-printf '%s\n' "${packaged_architectures[*]}"
+validate_architectures "macOS" "$packaged_library" "${expected_architectures[@]}"
 if [[ "$ios_enabled" == true ]]; then
   test -s "$ios_device_library"
   test -s "$ios_sim_library"
+  validate_architectures "iOS device" "$ios_device_library" arm64
+  validate_architectures "iOS Simulator" "$ios_sim_library" "${expected_architectures[@]}"
 fi
 test -s "$packaged_swift"
 test -s "$xcframework/Info.plist"

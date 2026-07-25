@@ -249,6 +249,7 @@ jobs:
           x86_64-apple-darwin
           aarch64-apple-ios
           aarch64-apple-ios-sim
+          x86_64-apple-ios
 
       - name: Test the native package build contract
         run: scripts/tests/test-build-runtime-swift-xcframework.sh
