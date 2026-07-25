@@ -57,17 +57,11 @@ import Testing
     #expect(snapshot.activeAccount?.publicKeyHex == account.publicKeyHex)
 }
 
-@Test func accountSnapshotRejectsUnboundedOrInconsistentState() {
-    let tooMany = (0 ... WorkbenchAccountSnapshot.maximumAccountCount).map {
-        WorkbenchStoredAccount.fixture(handle: "account-\($0)")
-    }
-
-    #expect(
-        WorkbenchAccountSnapshot(
-            accounts: tooMany,
-            activeHandle: nil
-        ) == nil
-    )
+@Test func accountSnapshotRejectsInconsistentActiveHandle() {
+    // Count is deliberately unbounded here: Rust (nmp-adapter's
+    // MAX_PROFILE_ACCOUNTS) is the sole owner of that capacity limit and
+    // enforces it before any snapshot reaches Swift -- this type must not
+    // re-derive a competing ceiling. See issue #115.
     #expect(
         WorkbenchAccountSnapshot(
             accounts: [],

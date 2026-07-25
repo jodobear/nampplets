@@ -70,16 +70,28 @@ func accountManagerRendersRustsFullSnapshotAtCapacityWithoutDiscardingIt()
     defer { profile.close() }
     let manager = RuntimeWorkbenchAccountManager(profile: profile)
 
-    for secret in 1 ... WorkbenchAccountSnapshot.maximumAccountCount {
-        await manager.register(secret: String(format: "%064x", secret))
+    // Discover Rust's real capacity by registering until it refuses, rather
+    // than assuming any Swift-known number -- per issue #115, Swift must
+    // not re-derive or hardcode Rust's account-count ceiling (nmp-adapter's
+    // MAX_PROFILE_ACCOUNTS).
+    var registered = 0
+    while manager.snapshot().errorMessage == nil {
+        registered += 1
+        #expect(registered < 10_000, "Rust never refused registration")
+        if registered >= 10_000 { return }
+        await manager.register(secret: String(format: "%064x", registered))
     }
+    let acceptedCount = registered - 1
+    let limit = manager.snapshot().accounts.count
+    #expect(acceptedCount == limit)
 
     // Rust's own registry capacity is exhausted, but the accounts it already
     // accepted must still be rendered as-is: no Swift-side re-check should
     // override the snapshot with a fabricated "unavailable" state.
     #expect(
-        manager.snapshot().accounts.count ==
-            WorkbenchAccountSnapshot.maximumAccountCount
+        manager.snapshot().errorMessage?.contains(
+            "The account registry is full at \(limit) entries."
+        ) == true
     )
     guard case .available = manager.snapshot().availability else {
         Issue.record(
@@ -93,18 +105,15 @@ func accountManagerRendersRustsFullSnapshotAtCapacityWithoutDiscardingIt()
             "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5"
     )
 
-    // The capacity refusal is Rust's own typed failure, rendered verbatim;
-    // it must not be replaced by a Swift-fabricated message, and the
-    // already-registered accounts must remain intact.
+    // A second, different registration entry point at capacity must surface
+    // the same Rust-owned refusal verbatim, and must not erase the
+    // already-registered accounts.
     #expect(
         manager.snapshot().errorMessage?.contains(
-            "The account registry is full at \(WorkbenchAccountSnapshot.maximumAccountCount) entries."
+            "The account registry is full at \(limit) entries."
         ) == true
     )
-    #expect(
-        manager.snapshot().accounts.count ==
-            WorkbenchAccountSnapshot.maximumAccountCount
-    )
+    #expect(manager.snapshot().accounts.count == limit)
     guard case .available = manager.snapshot().availability else {
         Issue.record(
             "A capacity refusal on a subsequent mutation must not erase the existing accounts"
