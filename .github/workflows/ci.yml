@@ -242,8 +242,14 @@ jobs:
           test "$(xcodebuild -version | head -n 1)" = "Xcode $(cat .xcode-version)"
           swift --version | grep 'Apple Swift version 6.1'
 
-      - name: Install both macOS Rust standard libraries
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Install Apple Rust standard libraries
+        run: >-
+          rustup target add
+          aarch64-apple-darwin
+          x86_64-apple-darwin
+          aarch64-apple-ios
+          aarch64-apple-ios-sim
+          x86_64-apple-ios
 
       - name: Test the native package build contract
         run: scripts/tests/test-build-runtime-swift-xcframework.sh
@@ -259,6 +265,15 @@ jobs:
             echo "generated XCFramework must not be committed" >&2
             exit 1
           fi
+
+      - name: Build the iOS reference shell for a generic simulator
+        run: >-
+          xcodebuild build
+          -workspace apps/workbench-ios/RuntimeWorkbenchiOS.xcworkspace
+          -scheme RuntimeWorkbenchiOS
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/RuntimeWorkbenchiOSDerivedData"
+          CODE_SIGNING_ALLOWED=NO
 
       - name: Test the generated Swift binding package
         run: swift test --package-path Packages/NMPNativeRuntime --parallel

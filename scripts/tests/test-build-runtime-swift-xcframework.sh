@@ -96,7 +96,12 @@ if [[ "${1:-}" == -create ]]; then
 elif [[ "${1:-}" == -archs ]]; then
   if [[ -n "${MOCK_LIPO_ARCHS:-}" ]]; then
     printf '%s\n' "$MOCK_LIPO_ARCHS"
-  elif [[ "$2" == *aarch64-apple-darwin* ]]; then
+  elif [[ "$2" == *runtime-swift-package/ios-simulator* \
+    && -n "${MOCK_IOS_SIM_LIPO_ARCHS:-}" ]]; then
+    printf '%s\n' "$MOCK_IOS_SIM_LIPO_ARCHS"
+  elif [[ "$2" == *aarch64-apple-darwin* \
+    || "$2" == *aarch64-apple-ios/release* \
+    || "$2" == *aarch64-apple-ios-sim* ]]; then
     printf '%s\n' arm64
   else
     printf '%s\n' 'arm64 x86_64'
@@ -139,7 +144,16 @@ grep -Fq 'cargo build -p nmp-native-runtime-ffi --locked --release --target aarc
 grep -Fq 'cargo build -p nmp-native-runtime-ffi --locked --release --target x86_64-apple-darwin' "$tool_log"
 grep -Fq 'cargo build -p nmp-native-runtime-ffi --locked --release --target aarch64-apple-ios' "$tool_log"
 grep -Fq 'cargo build -p nmp-native-runtime-ffi --locked --release --target aarch64-apple-ios-sim' "$tool_log"
+grep -Fq 'cargo build -p nmp-native-runtime-ffi --locked --release --target x86_64-apple-ios' "$tool_log"
+grep -Fq 'lipo -create '"$fixture_target"'/aarch64-apple-ios-sim/release/libnmp_native_runtime_ffi.a '"$fixture_target"'/x86_64-apple-ios/release/libnmp_native_runtime_ffi.a -output '"$fixture_target"'/runtime-swift-package/ios-simulator/libnmp_native_runtime_ffi.a' "$tool_log"
 test -s "$fixture_repo/Packages/NMPNativeRuntime/NMPNativeRuntime.xcframework/Info.plist"
+
+if MOCK_IOS_SIM_LIPO_ARCHS=arm64 \
+  run_fixture --universal >"$error_file" 2>&1; then
+  echo "incomplete iOS Simulator architecture set was accepted" >&2
+  exit 1
+fi
+grep -Fq 'iOS Simulator library is missing architecture x86_64' "$error_file"
 
 printf '%s\n' '// stale binding' \
   > "$fixture_repo/Packages/NMPNativeRuntime/Sources/NMPNativeRuntime/NMPNativeRuntime.swift"
@@ -158,6 +172,14 @@ if grep -Fq 'x86_64-apple-darwin' "$tool_log"; then
   echo "arm64-only build unexpectedly requested x86_64" >&2
   exit 1
 fi
+if grep -Fq 'x86_64-apple-ios' "$tool_log"; then
+  echo "arm64-only build unexpectedly requested x86_64 iOS Simulator" >&2
+  exit 1
+fi
+if grep -Fq 'lipo -create ' "$tool_log"; then
+  echo "arm64-only build unexpectedly created a universal archive" >&2
+  exit 1
+fi
 grep -Fq '// generated binding' \
   "$fixture_repo/Packages/NMPNativeRuntime/Sources/NMPNativeRuntime/NMPNativeRuntime.swift"
 
@@ -165,11 +187,11 @@ if MOCK_LIPO_ARCHS='arm64 x86_64' run_fixture --arm64-only >"$error_file" 2>&1; 
   echo "unexpected architecture set was accepted" >&2
   exit 1
 fi
-grep -Fq 'packaged library has unexpected architectures' "$error_file"
+grep -Fq 'macOS library has unexpected architectures' "$error_file"
 
 : >"$tool_log"
 run_fixture --arm64-only --no-ios
-if grep -Fq 'aarch64-apple-ios' "$tool_log"; then
+if grep -Fq 'apple-ios' "$tool_log"; then
   echo "--no-ios unexpectedly requested an iOS build" >&2
   exit 1
 fi
