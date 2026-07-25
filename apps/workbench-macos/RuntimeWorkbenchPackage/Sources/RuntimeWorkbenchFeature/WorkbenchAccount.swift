@@ -76,7 +76,6 @@ public enum WorkbenchAccountAvailability: Equatable, Sendable {
 /// including the account-count ceiling (nmp-adapter's MAX_PROFILE_ACCOUNTS) --
 /// this type does not re-derive or enforce a count limit. See issue #115.
 public struct WorkbenchAccountSnapshot: Equatable, Sendable {
-
     public let availability: WorkbenchAccountAvailability
     public let accounts: [WorkbenchStoredAccount]
     public let activeHandle: WorkbenchAccountHandle?

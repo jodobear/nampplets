@@ -77,8 +77,10 @@ func accountManagerRendersRustsFullSnapshotAtCapacityWithoutDiscardingIt()
     var registered = 0
     while manager.snapshot().errorMessage == nil {
         registered += 1
-        #expect(registered < 10_000, "Rust never refused registration")
-        if registered >= 10_000 { return }
+        guard registered < 10_000 else {
+            Issue.record("Rust never refused registration")
+            return
+        }
         await manager.register(secret: String(format: "%064x", registered))
     }
     let acceptedCount = registered - 1
