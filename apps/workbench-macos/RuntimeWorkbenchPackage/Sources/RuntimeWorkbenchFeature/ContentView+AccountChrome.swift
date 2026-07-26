@@ -67,21 +67,13 @@ extension ContentView {
         }
     }
 
-    @ViewBuilder
     private var accountMenuLabel: some View {
-        if let activeAccount {
-            HStack(spacing: 6) {
-                Image(
-                    systemName: WorkbenchAccountPresentation.symbol(
-                        for: activeAccount
-                    )
-                )
-                Text(accountDisplayName(activeAccount))
-                    .lineLimit(1)
-            }
-        } else {
-            Image(systemName: "person.crop.circle")
-        }
+        Image(
+            systemName: activeAccount.map {
+                WorkbenchAccountPresentation.symbol(for: $0)
+            } ?? "person.crop.circle"
+        )
+        .imageScale(.large)
     }
 
     private var activeAccountLabel: String {

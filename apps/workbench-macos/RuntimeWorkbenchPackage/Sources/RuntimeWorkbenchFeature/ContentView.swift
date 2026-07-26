@@ -11,8 +11,8 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .overview: "Overview"
-        case .relays: "Relays"
+        case .overview: "Napplet"
+        case .relays: "Network"
         case .console: "Console"
         }
     }

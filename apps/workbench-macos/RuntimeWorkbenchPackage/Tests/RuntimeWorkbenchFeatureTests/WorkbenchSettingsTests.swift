@@ -51,14 +51,13 @@ func unavailableSettingsSnapshotRequiresBoundedDisplaySafeEvidence() {
 
 @MainActor
 @Test
-func settingsSheetBuildsWithEditableNativePreferences() {
+func settingsViewBuildsWithEditableNativePreferences() {
     let snapshot = WorkbenchSettingsSnapshot(
         preferences: samplePreferences,
         storage: sampleStorage
     )
-    _ = WorkbenchSettingsSheet(
+    _ = WorkbenchSettingsView(
         snapshot: snapshot,
-        openDestination: { _ in },
         performAction: { _ in }
     )
 }

@@ -4,7 +4,7 @@ extension ContentView {
     var nappletInspector: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Label("Details", systemImage: "info.circle")
+                Text("Inspector")
                     .font(.headline)
                 Spacer()
                 Button {
@@ -15,7 +15,8 @@ extension ContentView {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("Close napplet inspector")
+                .help("Close Inspector")
+                .accessibilityLabel("Close Inspector")
             }
 
             Picker("Inspector section", selection: $inspectorTab) {
@@ -25,6 +26,7 @@ extension ContentView {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .help("Choose what to inspect")
 
             Divider()
 
@@ -40,7 +42,7 @@ extension ContentView {
             Spacer()
         }
         .padding(16)
-        .frame(width: 290)
+        .frame(width: 320)
         .background(.bar)
     }
 
@@ -61,7 +63,6 @@ extension ContentView {
                     "Size",
                     value: "\(Int(window.frame.width)) × \(Int(window.frame.height))"
                 )
-
                 // A twelve-character prefix of a hash is the worst of both:
                 // meaningless to a person, and useless for the comparison a
                 // technical reader would want. The whole value lives here.
@@ -113,12 +114,35 @@ extension ContentView {
 
             Divider()
 
-            Button("Permissions", systemImage: "lock.shield") {
+            Button("Access", systemImage: "lock.shield") {
                 openPermissionReview()
             }
+            .help("Review this napplet’s access")
+            .accessibilityIdentifier("inspector-access")
+
             Button("Activity", systemImage: "waveform.path.ecg") {
                 openActivityDrawer()
             }
+            .help("View this napplet’s activity")
+            .accessibilityIdentifier("inspector-activity")
+
+            DisclosureGroup("Runtime details") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(activity)
+                    if let layoutNotice =
+                        layoutPersistenceError
+                        ?? layout.capacityWarningMessage
+                    {
+                        Text(layoutNotice)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .padding(.top, 4)
+            }
+            .font(.caption.weight(.medium))
+            .accessibilityIdentifier("inspector-runtime-details")
         } else {
             ContentUnavailableView(
                 "Nothing selected",
@@ -146,6 +170,7 @@ extension ContentView {
             RelayDiagnosticsInspectorView(
                 source: RuntimeWorkbenchRelayDiagnosticsSource(profile: profile)
             )
+            .accessibilityIdentifier("inspector-network")
         } else {
             let presentation = WorkbenchUnavailablePresentation.relays(
                 detail: bootstrapError ?? "No runtime profile was available."

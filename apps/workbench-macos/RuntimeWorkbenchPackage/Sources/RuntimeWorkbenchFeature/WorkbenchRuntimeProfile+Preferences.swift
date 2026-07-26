@@ -25,7 +25,7 @@ extension WorkbenchPermissionDefault {
 }
 
 extension WorkbenchRuntimeProfile {
-    func settingsSnapshot() -> WorkbenchSettingsSnapshot {
+    public func settingsSnapshot() -> WorkbenchSettingsSnapshot {
         let preferences = native.profilePreferences()
         let storage = native.storageSnapshot()
         return WorkbenchSettingsSnapshot(

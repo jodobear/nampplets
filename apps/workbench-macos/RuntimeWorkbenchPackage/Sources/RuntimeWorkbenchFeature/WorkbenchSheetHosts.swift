@@ -108,11 +108,17 @@ struct SettingsSheetHost: View {
 
     var body: some View {
         if let snapshot {
+            #if os(iOS)
             WorkbenchSettingsSheet(
                 snapshot: snapshot,
-                openDestination: openDestination,
                 performAction: performAction
             )
+            #else
+            WorkbenchSettingsView(
+                snapshot: snapshot,
+                performAction: performAction
+            )
+            #endif
         } else {
             NavigationStack {
                 ContentUnavailableView(
