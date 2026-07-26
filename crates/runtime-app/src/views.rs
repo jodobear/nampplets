@@ -183,9 +183,33 @@ pub enum PermissionReviewError {
     Store { detail: Arc<str> },
 }
 
+/// Monotonic per-section revisions for the producer snapshot.
+///
+/// An unchanged revision between two published snapshots proves that the
+/// section's content is unchanged. An advance means consumers must re-read the
+/// section; consumers must not require every advance to represent a difference.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SectionRevisions {
+    pub library: u64,
+    /// Sessions and their immutable launch-time domains form one section.
+    pub sessions: u64,
+    /// Live provider-push delivery state, intentionally separate from sessions.
+    pub provider_push_lanes: u64,
+    pub bindings: u64,
+    pub pending_writes: u64,
+    pub receipts: u64,
+    pub workspaces: u64,
+    pub resources: u64,
+    pub activity: u64,
+    pub errors: u64,
+    /// The platform event concern's revision is its existing replay cursor.
+    pub newest_event_sequence: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppSnapshot {
     pub revision: u64,
+    pub revisions: SectionRevisions,
     pub closed: bool,
     pub library: InstalledLibraryView,
     pub sessions: Vec<SessionSnapshot>,

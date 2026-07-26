@@ -7,26 +7,29 @@ use nmp_native_runtime_core::{Principal, SessionError, SessionId};
 use nmp_native_runtime_store::{ActivityRecord, StoreError};
 use nmp_native_surface::BindingError;
 
-use super::{AppState, RuntimeApp, install::installed_library_view};
+use super::{AppState, RuntimeApp, install::installed_library_view, revisions::advance_revisions};
 use crate::activity::{ActivityDetail, ActivityFact};
 use crate::{
     commands::{PlatformEvent, SequencedPlatformEvent},
     views::{
         AppErrorCode, AppErrorFact, AppSnapshot, BindingView, ProviderPushLaneView,
-        ProviderWriteProposalView, SessionDomainView, WorkspaceView,
+        ProviderWriteProposalView, SectionRevisions, SessionDomainView, WorkspaceView,
     },
 };
 
 impl RuntimeApp {
     pub(super) fn publish(&self, state: &mut AppState) {
         state.revision = state.revision.saturating_add(1);
-        let snapshot = Arc::new(self.build_snapshot(state));
-        self.snapshots.send_replace(snapshot);
+        let previous = Arc::clone(&self.snapshots.borrow());
+        let mut snapshot = self.build_snapshot(state);
+        snapshot.revisions = advance_revisions(&previous, &snapshot, state);
+        self.snapshots.send_replace(Arc::new(snapshot));
     }
 
     pub(super) fn build_snapshot(&self, state: &AppState) -> AppSnapshot {
         AppSnapshot {
             revision: state.revision,
+            revisions: SectionRevisions::default(),
             closed: state.closed,
             library: installed_library_view(
                 &state.installed,

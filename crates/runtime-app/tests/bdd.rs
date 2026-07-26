@@ -5,6 +5,8 @@
 //! (see `tests/support/mod.rs`), so a scenario and a `#[test]` exercise
 //! identical bootstrap and dispatch paths.
 
+#[path = "bdd/section_revision_steps.rs"]
+mod section_revision_steps;
 mod support;
 
 use std::collections::BTreeSet;
@@ -28,6 +30,8 @@ struct RuntimeWorld {
     sender: Option<ProviderPushSender>,
     review: Option<PermissionReviewView>,
     push_result: Option<Result<u64, ProviderPushError>>,
+    before_revisions: Option<nmp_native_runtime_app::SectionRevisions>,
+    after_revisions: Option<nmp_native_runtime_app::SectionRevisions>,
 }
 
 impl RuntimeWorld {

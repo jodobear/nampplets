@@ -29,5 +29,5 @@ pub use views::{
     InstalledBuildView, InstalledLibraryView, PermissionCapabilityView, PermissionDecision,
     PermissionDecisionOption, PermissionPlatformAvailability, PermissionReviewError,
     PermissionReviewView, ProviderPushLaneView, ProviderWriteProposalView, ReceiptDeliveryState,
-    ReceiptView, SessionDomainView, WorkspaceView,
+    ReceiptView, SectionRevisions, SessionDomainView, WorkspaceView,
 };

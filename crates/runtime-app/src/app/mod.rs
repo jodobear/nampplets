@@ -11,6 +11,7 @@ mod install;
 mod observe;
 mod permissions;
 mod push;
+mod revisions;
 mod session;
 mod workspace;
 
@@ -44,7 +45,7 @@ use crate::{
     commands::{EventBatch, PlatformCommand, ProviderOperationId, SequencedPlatformEvent},
     limits::{AppLimits, ExecutableArtifact, KernelClock, OpenError, RuntimeAppConfig},
     receipt::{AppReceipt, NoopBridgeActivity},
-    views::{AppErrorCode, AppErrorFact, AppSnapshot},
+    views::{AppErrorCode, AppErrorFact, AppSnapshot, SectionRevisions},
 };
 
 #[derive(Debug)]
@@ -212,6 +213,7 @@ impl RuntimeApp {
         }
         let initial = Arc::new(AppSnapshot {
             revision: 0,
+            revisions: SectionRevisions::default(),
             closed: false,
             library: installed_library_view(&installed, &BTreeMap::new(), &BTreeMap::new(), ""),
             sessions: Vec::new(),
