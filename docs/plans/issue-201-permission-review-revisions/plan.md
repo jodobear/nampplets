@@ -78,6 +78,6 @@ ready
 
 ## Hosted Artifacts
 
-- Plan page: Generated after publishing.
+- Plan page: https://pablof7z.github.io/nampplets/plans/issue-201-permission-review-revisions/
 
 - TTS audio: https://blossom.primal.net/8781662667890ef882cbe53e035f669d70057eb36637415789c3646c4a019922.mp3
