@@ -343,3 +343,54 @@ fn event_and_source_limits_refuse_without_work() {
         Err(ManifestError::NoApprovedBlobSource)
     ));
 }
+
+#[test]
+fn declared_requirements_survive_a_bundled_script_that_precedes_the_head_metas() {
+    // The shape published napplets actually ship: one large inline module,
+    // then the declarations. A meta spelled inside the script is a string
+    // literal, not an element, and must not be read as a declaration.
+    let document = concat!(
+        "<!doctype html>\n<html><head>\n",
+        "<script type=\"module\">var s = '<meta name=\"napplet-requires\" ",
+        "content=\"keys,upload\">';</script>\n",
+        "<style>.a{content:\"<meta>\"}</style>\n",
+        "<meta name=\"napplet-type\" content=\"nip29-groups\">\n",
+        "<meta name=\"napplet-requires\" content=\"config,intent,relay\">\n",
+        "</head><body></body></html>\n"
+    );
+    assert_eq!(
+        embedded_requirements(document.as_bytes()),
+        vec!["config", "intent", "relay"]
+    );
+}
+
+#[test]
+fn declared_requirements_keep_only_bounded_inventory_names() {
+    let document = concat!(
+        "<head><meta name='napplet-requires' content=' RELAY , relay,",
+        "not-a-domain,,intent '></head>"
+    );
+    assert_eq!(
+        embedded_requirements(document.as_bytes()),
+        vec!["relay", "intent"]
+    );
+}
+
+#[test]
+fn declarations_below_the_head_are_not_read() {
+    let document = "<head></head><body><meta name=\"napplet-requires\" content=\"relay\"></body>";
+    assert!(embedded_requirements(document.as_bytes()).is_empty());
+}
+
+#[test]
+fn commented_out_declarations_are_not_read() {
+    let document = "<head><!-- <meta name=\"napplet-requires\" content=\"relay\"> --></head>";
+    assert!(embedded_requirements(document.as_bytes()).is_empty());
+}
+
+#[test]
+fn documents_without_a_declaration_yield_no_requirements() {
+    assert!(embedded_requirements(PUBLISHED_INDEX).contains(&"identity"));
+    assert!(embedded_requirements(b"<html><head></head></html>").is_empty());
+    assert!(embedded_requirements(b"").is_empty());
+}
