@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:nampplets:performance:budget:v1",
+  "title": "Nampplets performance budget evidence envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "budget_id",
+    "status",
+    "benchmark_id",
+    "metric",
+    "threshold",
+    "baseline",
+    "rationale",
+    "owner",
+    "checksum_sha256"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "urn:nampplets:performance:budget:v1",
+      "type": "string",
+      "maxLength": 41
+    },
+    "budget_id": {
+      "$ref": "#/$defs/id"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "unratified",
+        "ratified",
+        "retired"
+      ],
+      "maxLength": 10
+    },
+    "benchmark_id": {
+      "$ref": "#/$defs/id"
+    },
+    "metric": {
+      "$ref": "#/$defs/metric"
+    },
+    "threshold": {
+      "$ref": "#/$defs/threshold"
+    },
+    "baseline": {
+      "$ref": "#/$defs/baseline"
+    },
+    "rationale": {
+      "$ref": "#/$defs/rationale"
+    },
+    "owner": {
+      "$ref": "#/$defs/id"
+    },
+    "ratification": {
+      "$ref": "#/$defs/ratification"
+    },
+    "checksum_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+    },
+    "bounded_string": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "sha256": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "unit"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "p50",
+            "p95",
+            "p99",
+            "max",
+            "population_variance",
+            "cpu_time",
+            "peak_rss",
+            "throughput",
+            "capacity"
+          ],
+          "maxLength": 19
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "ns",
+            "ns2",
+            "bytes",
+            "count",
+            "operations_per_second"
+          ],
+          "maxLength": 21
+        }
+      }
+    },
+    "threshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operator",
+        "value"
+      ],
+      "properties": {
+        "operator": {
+          "type": "string",
+          "enum": [
+            "less_than_or_equal",
+            "greater_than_or_equal"
+          ],
+          "maxLength": 21
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_locator",
+        "checksum_sha256"
+      ],
+      "properties": {
+        "artifact_locator": {
+          "$ref": "#/$defs/bounded_string"
+        },
+        "checksum_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "rationale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "detail",
+        "evidence_locator"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "product",
+            "security"
+          ],
+          "maxLength": 8
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "evidence_locator": {
+          "$ref": "#/$defs/bounded_string"
+        }
+      }
+    },
+    "ratification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_locator",
+        "approved_at",
+        "approvers"
+      ],
+      "properties": {
+        "decision_locator": {
+          "$ref": "#/$defs/bounded_string"
+        },
+        "approved_at": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 35,
+          "format": "date-time"
+        },
+        "approvers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:nampplets:performance:comparison:v1",
+  "title": "Nampplets performance comparison v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "comparison_id",
+    "baseline",
+    "candidate",
+    "producer_summary",
+    "confidence",
+    "checksum_sha256"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "urn:nampplets:performance:comparison:v1",
+      "type": "string",
+      "maxLength": 45
+    },
+    "comparison_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+    },
+    "baseline": {
+      "$ref": "#/$defs/result_reference"
+    },
+    "candidate": {
+      "$ref": "#/$defs/result_reference"
+    },
+    "producer_summary": {
+      "$ref": "#/$defs/comparison_summary"
+    },
+    "confidence": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/not_evaluated"
+        },
+        {
+          "$ref": "#/$defs/evaluated"
+        }
+      ]
+    },
+    "checksum_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "bounded_string": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "result_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_locator",
+        "source_revision",
+        "source_provenance",
+        "checksum_sha256",
+        "comparison_key",
+        "identity"
+      ],
+      "properties": {
+        "artifact_locator": {
+          "$ref": "#/$defs/bounded_string"
+        },
+        "source_revision": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+        },
+        "source_provenance": {
+          "$ref": "#/$defs/bounded_string"
+        },
+        "checksum_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "comparison_key": {
+          "$ref": "#/$defs/sha256"
+        },
+        "identity": {
+          "$ref": "result-v1.schema.json#/$defs/identity"
+        }
+      }
+    },
+    "comparison_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disposition",
+        "mismatch_codes"
+      ],
+      "properties": {
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "observed_only",
+            "method_evaluated",
+            "incomparable"
+          ],
+          "maxLength": 16
+        },
+        "mismatch_codes": {
+          "type": "array",
+          "maxItems": 13,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "benchmark_mismatch",
+              "state_mismatch",
+              "reset_scope_mismatch",
+              "fixture_mismatch",
+              "protocol_mismatch",
+              "build_mode_mismatch",
+              "toolchain_mismatch",
+              "environment_class_mismatch",
+              "os_mismatch",
+              "hardware_mismatch",
+              "power_state_mismatch",
+              "thermal_state_mismatch",
+              "measurement_availability_mismatch"
+            ],
+            "maxLength": 33
+          }
+        }
+      }
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "detail"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "no_ratified_method",
+            "method_not_requested",
+            "incomparable_inputs"
+          ],
+          "maxLength": 20
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "not_evaluated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disposition",
+        "reason"
+      ],
+      "properties": {
+        "disposition": {
+          "const": "not_evaluated",
+          "type": "string",
+          "maxLength": 13
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        }
+      }
+    },
+    "method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "revision",
+        "ratification_locator"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "ratification_locator": {
+          "$ref": "#/$defs/bounded_string"
+        }
+      }
+    },
+    "confidence_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "detail"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "regression_supported",
+            "no_regression_supported",
+            "inconclusive"
+          ],
+          "maxLength": 23
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "evaluated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disposition",
+        "method",
+        "result",
+        "evidence_locator"
+      ],
+      "properties": {
+        "disposition": {
+          "const": "evaluated",
+          "type": "string",
+          "maxLength": 9
+        },
+        "method": {
+          "$ref": "#/$defs/method"
+        },
+        "result": {
+          "$ref": "#/$defs/confidence_result"
+        },
+        "evidence_locator": {
+          "$ref": "#/$defs/bounded_string"
+        }
+      }
+    }
+  }
+}
