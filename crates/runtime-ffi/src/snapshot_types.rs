@@ -74,16 +74,32 @@ pub struct RuntimeBindingSnapshot {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum RuntimeReceiptStatus {
-    Pending,
+pub enum RuntimeReceiptOutcome {
+    InProgress,
     Delivered,
+    PartialDelivery,
+    Exhausted,
+    Ambiguous,
+    Refused,
+    Failed,
+    Cancelled,
+    Conflict,
+    Unavailable,
 }
 
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RuntimeReceiptObservationLifecycle {
+    Observing,
+    NotFound,
+    Closed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct RuntimeReceiptSnapshot {
     pub receipt_id: String,
-    pub status: RuntimeReceiptStatus,
-    pub delivery: String,
+    pub outcome: RuntimeReceiptOutcome,
+    pub observation_lifecycle: RuntimeReceiptObservationLifecycle,
+    pub outcome_detail: Option<String>,
     pub latest_state_json: Option<String>,
 }
 

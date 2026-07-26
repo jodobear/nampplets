@@ -1,0 +1,25 @@
+[package]
+name = "nmp-native-performance-harness"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+cucumber.workspace = true
+nmp-native-runtime-core = { path = "../runtime-core" }
+tempfile.workspace = true
+tokio.workspace = true
+
+[[test]]
+name = "bdd"
+harness = false
+
+[lints]
+workspace = true

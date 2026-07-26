@@ -15,6 +15,7 @@ mod native_capabilities;
 mod permission_types;
 mod profile_preferences;
 mod projection;
+mod receipt_projection;
 mod snapshot_integrity;
 mod snapshot_types;
 mod support;
@@ -62,14 +63,15 @@ pub use profile_preferences::{
     RuntimeProfilePreferences, RuntimeProfilePreferencesUpdate, RuntimeStorageResetResult,
     RuntimeStorageSnapshot,
 };
+pub use receipt_projection::project_receipt;
 pub use snapshot_types::{
     ObservationStart, RuntimeBindingSnapshot, RuntimeErrorSnapshot, RuntimeEvent,
     RuntimeExactBuildCoordinate, RuntimeInstalledBuildAvailability, RuntimeInstalledBuildSnapshot,
     RuntimeInstalledLibrarySnapshot, RuntimeObservation, RuntimeObservationFrame, RuntimeObserver,
-    RuntimePendingWriteSnapshot, RuntimeReceiptSnapshot, RuntimeReceiptStatus,
-    RuntimeSessionSnapshot, RuntimeSnapshot, RuntimeSnapshotProjection, RuntimeWorkspaceAxis,
-    RuntimeWorkspaceDefinition, RuntimeWorkspaceRenderer, RuntimeWorkspaceRestore,
-    RuntimeWorkspaceRole, RuntimeWorkspaceSlot, RuntimeWorkspaceUpdate,
+    RuntimePendingWriteSnapshot, RuntimeReceiptObservationLifecycle, RuntimeReceiptOutcome,
+    RuntimeReceiptSnapshot, RuntimeSessionSnapshot, RuntimeSnapshot, RuntimeSnapshotProjection,
+    RuntimeWorkspaceAxis, RuntimeWorkspaceDefinition, RuntimeWorkspaceRenderer,
+    RuntimeWorkspaceRestore, RuntimeWorkspaceRole, RuntimeWorkspaceSlot, RuntimeWorkspaceUpdate,
 };
 pub use types::{
     ArtifactCoordinate, ArtifactExecutionMode, ArtifactVerification, NativeConfigCommit,
