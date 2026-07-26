@@ -43,7 +43,7 @@ final class RuntimeNappletSessionArtifactTests: RuntimeNappletSessionTestCase {
 
         XCTAssertEqual(
             artifact.negotiatedDomains,
-            ["identity", "inc", "outbox", "shell", "storage"]
+            ["identity", "inc", "outbox", "shell", "storage", "theme"]
         )
         let sealed = try XCTUnwrap(
             try artifact.reader.readSealed(logicalPath: "/index.html")
@@ -77,7 +77,7 @@ final class RuntimeNappletSessionArtifactTests: RuntimeNappletSessionTestCase {
         )
         XCTAssertEqual(
             capabilities["domains"] as? [String],
-            ["identity", "inc", "outbox", "shell", "storage"]
+            ["identity", "inc", "outbox", "shell", "storage", "theme"]
         )
     }
 
@@ -139,14 +139,13 @@ final class RuntimeNappletSessionArtifactTests: RuntimeNappletSessionTestCase {
         let review = try XCTUnwrap(
             profile.permissionReview(for: reacquired.permissionCoordinate).review
         )
+        // The fixture's own `napplet-requires` meta, all required. No
+        // author/d-tag/aggregate match hands this build a profile.
         XCTAssertEqual(
             review.capabilities.map(\.domain),
-            ["identity", "inc", "outbox", "resource", "theme", "link"]
+            requiredGoodMorningDomains
         )
-        XCTAssertEqual(
-            review.capabilities.map(\.requirement),
-            [.required, .required, .required, .optional, .optional, .optional]
-        )
+        XCTAssertTrue(review.capabilities.allSatisfy { $0.requirement == .required })
 
         XCTAssertThrowsError(try profile.launchInstalled(reacquired)) { error in
             guard case RuntimeNappletOpenError.launchRefused = error else {
@@ -158,12 +157,14 @@ final class RuntimeNappletSessionArtifactTests: RuntimeNappletSessionTestCase {
         let update = profile.applyPermissionDecisions(
             NativeRuntimePermissionDecisionBatch(
                 coordinate: reacquired.permissionCoordinate,
+                // A domain with no registered provider can only be denied;
+                // `link` and `resource` have none on this runtime.
                 decisions: review.capabilities.map {
                     NativeRuntimePermissionDecisionSelection(
                         domain: $0.domain,
-                        decision: $0.requirement == .required
-                            ? .allowExactBuild
-                            : .denied
+                        decision: ["link", "resource"].contains($0.domain)
+                            ? .denied
+                            : .allowExactBuild
                     )
                 }
             )
@@ -179,7 +180,8 @@ final class RuntimeNappletSessionArtifactTests: RuntimeNappletSessionTestCase {
         let launched = try profile.launchInstalled(reacquired)
         XCTAssertEqual(
             launched.negotiatedDomains,
-            ["identity", "inc", "outbox", "shell"]
+            ["identity", "inc", "outbox", "shell", "theme"],
+            "the fixture declares theme, so granting it injects it"
         )
         launched.runtimeSession?.stop()
     }

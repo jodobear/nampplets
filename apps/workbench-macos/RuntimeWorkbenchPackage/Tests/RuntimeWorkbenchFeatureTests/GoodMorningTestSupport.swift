@@ -24,12 +24,21 @@ func installApproveAndLaunchGoodMorning(
     let update = profile.native.applyPermissionDecisions(
         NativeRuntimePermissionDecisionBatch(
             coordinate: installed.permissionCoordinate,
-            decisions: review.capabilities.map {
-                NativeRuntimePermissionDecisionSelection(
-                    domain: $0.domain,
-                    decision: $0.requirement == .required
-                        ? .allowExactBuild
-                        : .denied
+            // Decide on provider availability, not on requirement. The
+            // fixture declares every domain it wants as required, and a
+            // domain the runtime registers no provider for can only ever be
+            // denied -- `permission_decision_policy` invalidates every other
+            // option for it, and launch drops it rather than injecting it.
+            decisions: review.capabilities.map { capability in
+                let available: Bool
+                if case .available = capability.platformAvailability {
+                    available = true
+                } else {
+                    available = false
+                }
+                return NativeRuntimePermissionDecisionSelection(
+                    domain: capability.domain,
+                    decision: available ? .allowExactBuild : .denied
                 )
             }
         )
