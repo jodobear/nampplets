@@ -7,11 +7,14 @@
 
 mod binding;
 mod envelope;
+mod facts;
 mod install;
 mod observe;
 mod permissions;
 mod push;
+mod revisions;
 mod session;
+mod terminal;
 mod workspace;
 
 use std::{
@@ -44,7 +47,7 @@ use crate::{
     commands::{EventBatch, PlatformCommand, ProviderOperationId, SequencedPlatformEvent},
     limits::{AppLimits, ExecutableArtifact, KernelClock, OpenError, RuntimeAppConfig},
     receipt::{AppReceipt, NoopBridgeActivity},
-    views::{AppErrorCode, AppErrorFact, AppSnapshot},
+    views::{AppErrorCode, AppErrorFact, AppSnapshot, AppTerminalReason, SectionRevisions},
 };
 
 #[derive(Debug)]
@@ -95,6 +98,7 @@ pub(crate) struct AppState {
     next_event_sequence: u64,
     revision: u64,
     closed: bool,
+    terminal_reason: Option<AppTerminalReason>,
     library_query: Arc<str>,
     installed: BTreeMap<Principal, InstalledBuild>,
     artifacts: BTreeMap<Principal, Arc<dyn ExecutableArtifact>>,
@@ -212,7 +216,9 @@ impl RuntimeApp {
         }
         let initial = Arc::new(AppSnapshot {
             revision: 0,
+            revisions: SectionRevisions::default(),
             closed: false,
+            terminal_reason: None,
             library: installed_library_view(&installed, &BTreeMap::new(), &BTreeMap::new(), ""),
             sessions: Vec::new(),
             session_domains: Vec::new(),
@@ -247,6 +253,7 @@ impl RuntimeApp {
                 next_event_sequence: 0,
                 revision: 0,
                 closed: false,
+                terminal_reason: None,
                 library_query: Arc::from(""),
                 installed,
                 artifacts: BTreeMap::new(),
@@ -271,6 +278,12 @@ impl RuntimeApp {
         let now = self.clock.now_millis();
         let mut state = self.state.lock();
         let mut delivery_joins = Vec::new();
+        if state.terminal_reason.is_some() {
+            return;
+        }
+        if !self.preflight_revision_capacity(&mut state) {
+            return;
+        }
         if state.closed && !matches!(command, PlatformCommand::Close) {
             self.refuse(
                 &mut state,

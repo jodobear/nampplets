@@ -25,9 +25,10 @@ pub use commands::{
 pub use limits::{AppLimits, ExecutableArtifact, KernelClock, OpenError, RuntimeAppConfig};
 pub use receipt::{AppReceipt, ReceiptObserver};
 pub use views::{
-    AppErrorCode, AppErrorFact, AppSnapshot, BindingView, InstalledBuildAvailability,
-    InstalledBuildView, InstalledLibraryView, PermissionCapabilityView, PermissionDecision,
-    PermissionDecisionOption, PermissionPlatformAvailability, PermissionReviewError,
-    PermissionReviewView, ProviderPushLaneView, ProviderWriteProposalView, ReceiptDeliveryState,
-    ReceiptView, SessionDomainView, WorkspaceView,
+    AppErrorCode, AppErrorFact, AppSnapshot, AppTerminalReason, BindingView,
+    InstalledBuildAvailability, InstalledBuildView, InstalledLibraryView, PermissionCapabilityView,
+    PermissionDecision, PermissionDecisionOption, PermissionPlatformAvailability,
+    PermissionReviewError, PermissionReviewView, ProviderPushLaneView, ProviderWriteProposalView,
+    ReceiptDeliveryState, ReceiptView, SectionRevisions, SessionDomainView, SnapshotSection,
+    WorkspaceView,
 };

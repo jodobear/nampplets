@@ -49,13 +49,20 @@ impl<T> BoundedFacts<T> {
     }
 
     /// Appends `value`, evicting the oldest entry once `maximum` is reached.
-    /// The eviction is counted, never silent.
+    /// The eviction is counted, never silent. At counter exhaustion the value
+    /// is refused before the retained tail changes.
     pub fn push(&mut self, maximum: usize, value: T) {
+        let _ = self.try_push(maximum, value);
+    }
+
+    pub(crate) fn try_push(&mut self, maximum: usize, value: T) -> Result<(), ()> {
+        let next = self.appended.checked_add(1).ok_or(())?;
         if self.entries.len() == maximum {
             self.entries.pop_front();
         }
         self.entries.push_back(value);
-        self.appended = self.appended.saturating_add(1);
+        self.appended = next;
+        Ok(())
     }
 
     /// Oldest retained entry, if any.
@@ -90,6 +97,11 @@ impl<T> BoundedFacts<T> {
     /// How many facts the retained tail is short of the whole history.
     pub fn dropped(&self) -> u64 {
         self.appended.saturating_sub(self.entries.len() as u64)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_appended(&mut self, appended: u64) {
+        self.appended = appended;
     }
 }
 
@@ -147,5 +159,15 @@ mod tests {
         assert!(facts.is_empty());
         assert_eq!(facts.appended(), 0);
         assert_eq!(facts.dropped(), 0);
+    }
+
+    #[test]
+    fn exhausted_counter_refuses_before_mutating_the_tail() {
+        let mut facts = BoundedFacts::with_capacity(2);
+        facts.push(2, 1);
+        facts.seed_appended(u64::MAX);
+        assert_eq!(facts.try_push(2, 2), Err(()));
+        assert_eq!(facts.iter().copied().collect::<Vec<_>>(), vec![1]);
+        assert_eq!(facts.appended(), u64::MAX);
     }
 }
