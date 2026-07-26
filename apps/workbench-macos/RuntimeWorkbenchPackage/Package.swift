@@ -12,7 +12,15 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(path: "../../../platforms/apple")
+        .package(path: "../../../platforms/apple"),
+        .package(
+            url: "https://github.com/Quick/Quick.git",
+            from: "7.6.2"
+        ),
+        .package(
+            url: "https://github.com/Quick/Nimble.git",
+            from: "13.8.0"
+        ),
     ],
     targets: [
         .target(
@@ -27,7 +35,11 @@ let package = Package(
         ),
         .testTarget(
             name: "RuntimeWorkbenchFeatureTests",
-            dependencies: ["RuntimeWorkbenchFeature"]
+            dependencies: [
+                "RuntimeWorkbenchFeature",
+                .product(name: "Quick", package: "Quick"),
+                .product(name: "Nimble", package: "Nimble"),
+            ]
         )
     ]
 )

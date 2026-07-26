@@ -45,6 +45,7 @@ Bringing a new crate/package into scope means:
 | `crates/runtime-app` | Pilot | `cargo test -p nmp-native-runtime-app --test bdd` (also runs under `cargo test --workspace`) |
 | `crates/runtime-ffi` | Pilot | `cargo test -p nmp-native-runtime-ffi --test bdd` (also runs under `cargo test --workspace`) |
 | `crates/performance-harness` | Pilot | `cargo test -p nmp-native-performance-harness --test bdd` (also runs under `cargo test --workspace`) |
+| `apps/workbench-macos/RuntimeWorkbenchPackage` | Pilot | Quick/Nimble in `RuntimeWorkbenchFeatureTests` (runs under `swift test` and the shared `RuntimeWorkbench` scheme) |
 
 ## Rust: cucumber
 
@@ -75,9 +76,8 @@ Bringing a new crate/package into scope means:
 
 ## Swift: Quick/Nimble
 
-Not yet wired in — no Swift package in this repository has BDD coverage
-yet. When a Swift package (`platforms/apple`,
-`apps/workbench-macos/RuntimeWorkbenchPackage`) is brought into scope:
+`apps/workbench-macos/RuntimeWorkbenchPackage` owns the first Swift BDD
+pilot. When another Swift package is brought into scope:
 
 - Add `Quick` and `Nimble` as SPM dependencies scoped to the test target.
 - Use `describe`/`context`/`it` for scenario structure and Nimble matchers
