@@ -16,11 +16,11 @@ private let validTestNsec =
     let manager = RuntimeWorkbenchAccountManager(profile: profile)
     let model = WorkbenchAccountSheetModel(manager: manager)
 
-    model.secret = "\n  \(validTestNsec) \t"
-    let succeeded = await model.continueWithSecret()
+    model.identity = "\n  \(validTestNsec) \t"
+    let succeeded = await model.continueWithIdentity()
 
     #expect(succeeded)
-    #expect(model.secret.isEmpty)
+    #expect(model.identity.isEmpty)
     let registered = try #require(manager.snapshot().accounts.first)
     #expect(manager.snapshot().accounts.count == 1)
     #expect(manager.snapshot().activeHandle == registered.handle)

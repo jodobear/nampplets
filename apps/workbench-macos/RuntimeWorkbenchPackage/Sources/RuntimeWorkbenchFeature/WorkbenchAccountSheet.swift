@@ -1,8 +1,7 @@
 import SwiftUI
 
 enum WorkbenchAccountSheetRoute: String, Identifiable {
-    case secret
-    case readOnly
+    case add
     case manage
 
     var id: String { rawValue }
@@ -26,10 +25,8 @@ struct WorkbenchAccountSheet: View {
     var body: some View {
         Group {
             switch route {
-            case .secret:
-                WorkbenchAddAccountView(model: model, kind: .secret)
-            case .readOnly:
-                WorkbenchAddAccountView(model: model, kind: .readOnly)
+            case .add:
+                WorkbenchAddAccountView(model: model)
             case .manage:
                 WorkbenchAccountManagementSheet(model: model)
             }
@@ -43,46 +40,25 @@ struct WorkbenchAccountSheet: View {
     }
 }
 
-private enum WorkbenchAccountInputKind {
-    case secret
-    case readOnly
-
-    var title: String {
-        switch self {
-        case .secret:
-            "Add an account"
-        case .readOnly:
-            "Browse as a profile"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .secret:
-            "Use the secret account key you already have."
-        case .readOnly:
-            "See personalized public activity without signing."
-        }
-    }
-}
-
 private struct WorkbenchAddAccountView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var model: WorkbenchAccountSheetModel
-    let kind: WorkbenchAccountInputKind
     @FocusState private var inputFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(kind.title)
+                Text("Add an account")
                     .font(.title2.weight(.semibold))
-                Text(kind.detail)
+                Text(
+                    "Use an account key to sign in, or a public profile "
+                        + "to browse without signing."
+                )
                     .foregroundStyle(.secondary)
             }
 
             if case .available = model.snapshot.availability {
-                input
+                identityInput
                 if let errorMessage = model.errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.circle")
                         .font(.callout)
@@ -132,73 +108,56 @@ private struct WorkbenchAddAccountView: View {
         }
     }
 
+    private var identityInput: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Account")
+                .font(.callout.weight(.medium))
+            inputField
+
+            Text(
+                "Private keys stay protected on this Mac. Public profiles "
+                    + "open in read-only mode."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     @ViewBuilder
-    private var input: some View {
-        switch kind {
-        case .secret:
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Secret account key")
-                    .font(.callout.weight(.medium))
+    private var inputField: some View {
+        Group {
+            if model.identityLooksSecret {
                 SecureField(
-                    "Paste your secret account key",
-                    text: $model.secret
+                    "Account key or profile address",
+                    text: $model.identity
                 )
                 .textContentType(.password)
                 .privacySensitive()
-                .focused($inputFocused)
-                .onSubmit(continueFromInput)
-                .accessibilityIdentifier("account-secret-key")
-                .accessibilityLabel("Secret account key")
-                .accessibilityHint(
-                    "Paste the private key for the account you want to add."
-                )
-
-                Text(
-                    "Your key stays protected on this Mac and is never shared "
-                        + "with napplets."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-        case .readOnly:
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Profile address")
-                    .font(.callout.weight(.medium))
+            } else {
                 TextField(
-                    "Paste a profile address",
-                    text: $model.publicIdentity
+                    "Account key or profile address",
+                    text: $model.identity
                 )
                 .textContentType(.username)
-                .focused($inputFocused)
-                .onSubmit(continueFromInput)
-                .accessibilityIdentifier("account-profile-address")
-                .accessibilityLabel("Profile address")
-                .accessibilityHint(
-                    "Enter the public profile you want to browse as."
-                )
-
-                Text("You can browse, but you can’t post or approve actions.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
+        .focused($inputFocused)
+        .onSubmit(continueFromInput)
+        .accessibilityIdentifier("account-identity")
+        .accessibilityLabel("Account")
+        .accessibilityHint(
+            "Enter an account key to sign in or a public profile to browse."
+        )
     }
 
     private var canContinue: Bool {
         guard !model.isWorking else {
             return false
         }
-        switch kind {
-        case .secret:
-            return !model.secret.trimmingCharacters(
-                in: .whitespacesAndNewlines
-            ).isEmpty
-        case .readOnly:
-            return !model.publicIdentity.trimmingCharacters(
-                in: .whitespacesAndNewlines
-            ).isEmpty
-        }
+        return !model.identity.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ).isEmpty
     }
 
     private func continueFromInput() {
@@ -206,12 +165,7 @@ private struct WorkbenchAddAccountView: View {
             return
         }
         Task {
-            let succeeded = switch kind {
-            case .secret:
-                await model.continueWithSecret()
-            case .readOnly:
-                await model.continueReadOnly()
-            }
+            let succeeded = await model.continueWithIdentity()
             if succeeded {
                 dismiss()
             } else {

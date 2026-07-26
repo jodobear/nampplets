@@ -24,10 +24,10 @@ extension RuntimeWorkbenchUITests {
         )
         addSigner.click()
 
-        let secretField = app.secureTextFields["account-secret-key"]
-        XCTAssertTrue(secretField.waitForExistence(timeout: 10))
-        secretField.click()
-        secretField.typeText(Self.uiTestSigningSecret)
+        let identityField = app.textFields["account-identity"]
+        XCTAssertTrue(identityField.waitForExistence(timeout: 10))
+        identityField.click()
+        identityField.typeText(Self.uiTestSigningSecret)
 
         let continueButton = app.buttons["account-add-continue"]
         XCTAssertTrue(

@@ -21,10 +21,7 @@ extension ContentView {
 
             Section {
                 Button("Add Account…", systemImage: "key") {
-                    accountSheetRoute = .secret
-                }
-                Button("Browse Without Signing…", systemImage: "eye") {
-                    accountSheetRoute = .readOnly
+                    accountSheetRoute = .add
                 }
             }
 

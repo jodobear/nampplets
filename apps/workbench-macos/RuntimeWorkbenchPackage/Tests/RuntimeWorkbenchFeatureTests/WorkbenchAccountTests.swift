@@ -23,17 +23,17 @@ import Testing
 }
 
 @MainActor
-@Test func readOnlyContinueRegistersAndSelectsWithOneIntent()
+@Test func publicIdentityUsesReadOnlyRegistrationBehindTheSameIntent()
     async throws
 {
     let manager = RecordingAccountManager()
     let model = WorkbenchAccountSheetModel(manager: manager)
 
-    model.publicIdentity = "npub1test"
-    let succeeded = await model.continueReadOnly()
+    model.identity = "npub1test"
+    let succeeded = await model.continueWithIdentity()
 
     #expect(succeeded)
-    #expect(model.publicIdentity.isEmpty)
+    #expect(model.identity.isEmpty)
     #expect(model.snapshot.accounts.count == 1)
     #expect(model.snapshot.accounts.first?.connectionKind == .readOnly)
     let handle = try #require(model.snapshot.accounts.first?.handle)
@@ -67,15 +67,15 @@ import Testing
 }
 
 @MainActor
-@Test func secretContinueTrimsRegistersAndSelectsWithOneIntent() async throws {
+@Test func nsecUsesSigningRegistrationBehindTheSameIntent() async throws {
     let manager = RecordingAccountManager()
     let model = WorkbenchAccountSheetModel(manager: manager)
 
-    model.secret = " \n test-secret \t"
-    let succeeded = await model.continueWithSecret()
+    model.identity = " \n nsec1test \t"
+    let succeeded = await model.continueWithIdentity()
 
     #expect(succeeded)
-    #expect(model.secret.isEmpty)
+    #expect(model.identity.isEmpty)
     #expect(model.snapshot.accounts.count == 1)
     let handle = try #require(model.snapshot.accounts.first?.handle)
     #expect(model.snapshot.activeAccount?.handle == handle)
@@ -86,13 +86,13 @@ import Testing
 @Test func registrationErrorCannotEchoSubmittedSecret() async {
     let manager = EchoingFailureAccountManager()
     let model = WorkbenchAccountSheetModel(manager: manager)
-    let submittedSecret = "secret-that-must-not-render"
+    let submittedSecret = "nsec1secret-that-must-not-render"
 
-    model.secret = submittedSecret
-    let succeeded = await model.continueWithSecret()
+    model.identity = submittedSecret
+    let succeeded = await model.continueWithIdentity()
 
     #expect(!succeeded)
-    #expect(model.secret.isEmpty)
+    #expect(model.identity.isEmpty)
     #expect(model.errorMessage?.contains(submittedSecret) == false)
     #expect(model.errorMessage?.contains("wasn’t accepted") == true)
 }
@@ -128,7 +128,7 @@ private final class RecordingAccountManager: WorkbenchAccountManaging {
     }
 
     func register(secret: String) async {
-        guard secret == "test-secret" else { return }
+        guard secret == "nsec1test" else { return }
         let account = WorkbenchStoredAccount.fixture(handle: "registered")
         accounts.append(account)
         actions.append(.register)

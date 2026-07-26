@@ -9,8 +9,7 @@ final class WorkbenchAccountSheetModel {
     private(set) var snapshot: WorkbenchAccountSnapshot
     private(set) var errorMessage: String?
     private(set) var isWorking = false
-    var secret = ""
-    var publicIdentity = ""
+    var identity = ""
 
     init(manager: any WorkbenchAccountManaging) {
         self.manager = manager
@@ -22,45 +21,44 @@ final class WorkbenchAccountSheetModel {
         errorMessage = nil
     }
 
-    /// Maps one user intent onto the runtime's separate register and select
-    /// actions without letting secret-bearing input survive the first await.
-    func continueWithSecret() async -> Bool {
-        let submittedSecret = secret.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        )
-        secret.removeAll(keepingCapacity: false)
-        guard !submittedSecret.isEmpty else {
-            errorMessage = "Paste the complete secret account key."
-            return false
-        }
-
-        return await registerAndSelect(
-            registrationFailure:
-                "That account key wasn’t accepted. Check that you copied the complete key."
-        ) {
-            await manager.register(secret: submittedSecret)
-        }
+    var identityLooksSecret: Bool {
+        Self.identityKind(for: identity) == .signingKey
     }
 
-    func continueReadOnly() async -> Bool {
-        let submittedIdentity = publicIdentity.trimmingCharacters(
+    /// Maps one user intent onto the runtime's separate registration and
+    /// selection actions. Only an nsec-shaped value is treated as signing
+    /// material; every public identity shape takes the read-only path.
+    ///
+    /// The field is cleared before the first await so secret-bearing input
+    /// cannot remain in observable presentation state during registration.
+    func continueWithIdentity() async -> Bool {
+        let submittedIdentity = identity.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
+        identity.removeAll(keepingCapacity: false)
         guard !submittedIdentity.isEmpty else {
-            errorMessage = "Enter the profile you want to browse as."
+            errorMessage = "Enter your account key or public profile."
             return false
         }
 
-        let succeeded = await registerAndSelect(
-            registrationFailure:
-                "That profile couldn’t be added. Check the address and try again."
-        ) {
-            await manager.registerReadOnly(publicIdentity: submittedIdentity)
+        switch Self.identityKind(for: submittedIdentity) {
+        case .signingKey:
+            return await registerAndSelect(
+                registrationFailure:
+                    "That account key wasn’t accepted. Check that you copied the complete key."
+            ) {
+                await manager.register(secret: submittedIdentity)
+            }
+        case .publicIdentity:
+            return await registerAndSelect(
+                registrationFailure:
+                    "That profile couldn’t be added. Check the address and try again."
+            ) {
+                await manager.registerReadOnly(
+                    publicIdentity: submittedIdentity
+                )
+            }
         }
-        if succeeded {
-            publicIdentity.removeAll(keepingCapacity: false)
-        }
-        return succeeded
     }
 
     func activate(_ handle: WorkbenchAccountHandle) async {
@@ -93,9 +91,21 @@ final class WorkbenchAccountSheetModel {
     }
 
     func clearTransientState() {
-        secret.removeAll(keepingCapacity: false)
-        publicIdentity.removeAll(keepingCapacity: false)
+        identity.removeAll(keepingCapacity: false)
         errorMessage = nil
+    }
+
+    private enum IdentityKind {
+        case signingKey
+        case publicIdentity
+    }
+
+    private static func identityKind(for value: String) -> IdentityKind {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("nsec1")
+            ? .signingKey
+            : .publicIdentity
     }
 
     private func registerAndSelect(
