@@ -66,6 +66,14 @@ The registry currently distinguishes:
 The numbered message-protocol track was removed in July 2026. Older NIP-5D
 summaries can still mention it.
 
+At the observed revision, the registry table marks NAP-THEME `Active` while the
+NAP-THEME document itself is headed `draft`. Report both labels rather than
+silently choosing one. Its portable payload is intentionally narrow: required
+`background`, `text`, and `primary` colors; optional body/title fonts,
+background media, and title; read-only `get`; and automatic `theme.changed`
+pushes. It is a transport for the shell's theme, not a complete product design
+system. See `visual-identity-and-themes.md`.
+
 ## Implementations and tools
 
 ### @napplet packages and napplet.run
@@ -118,6 +126,12 @@ principal for their absent signed `dTag`. M0 advertises no providers; the
 imported Kehto corpus is `built-not-run`; and `resource` plus `link` remain
 unavailable until bounded native executors are production-wired. These are
 dated Nampplets implementation facts, not NIP-5D requirements.
+
+Nampplets now has a bounded NAP-THEME provider. Apple code reports raw
+light/dark, contrast, transparency, and accent facts; Rust maps them into the
+pinned three-color payload and pushes changes to declaring ready sessions. That
+proves the native projection and accessibility flow, not a branded
+cross-napplet visual system.
 
 ### stlstr composition case study
 

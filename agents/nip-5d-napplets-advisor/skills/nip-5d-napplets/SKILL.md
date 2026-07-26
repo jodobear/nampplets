@@ -51,6 +51,9 @@ upstream.
 - Read `references/cohesive-composition.md` for intent routing, product
   composition, developer-generated shells, user-selected replacements, and the
   dated stlstr implementation study.
+- Read `references/visual-identity-and-themes.md` for the current NAP-THEME
+  minimum, a composition-owned design system, native/web projection, branded
+  defaults, third-party replacements, and visual conformance.
 - Read `references/sandwich-interview.md` when discussing the system's product
   thesis, design history, native direction, or the intent behind the model.
 

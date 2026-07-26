@@ -42,7 +42,8 @@ probably rebuilding a monolith.
 2. Give each role an archetype plus supported actions and typed payload fields.
    Do not begin with routes, filenames, or implementation dTags.
 3. Define one composition manifest containing routes, presentation, defaults,
-   required capabilities, theme tokens, fallbacks, and migration policy.
+   required capabilities, a branded theme-profile reference, fallbacks, and
+   migration policy.
 4. Resolve every default or replacement to a verified exact build. Preflight
    domains and action compatibility before activation.
 5. Route napplet intent through the trusted runtime. Parse deep links into the
@@ -56,8 +57,10 @@ probably rebuilding a monolith.
 8. On replacement, show compatibility and permission consequences, bind new
    grants to the new exact build, preserve the prior selection for rollback,
    and define component-state migration explicitly.
-9. Test the curated product as one accessible interface and each replacement as
-   an isolated trust transition.
+9. Project one revisioned design system into native chrome and every napplet.
+   Test theme compliance independently from protocol compatibility.
+10. Test the curated product as one accessible interface and each replacement
+    as an isolated trust transition.
 
 Falsifiers: direct top-level navigation from a napplet, URL knowledge embedded
 in feature code, grants inherited by a replacement, archetype tags accepted

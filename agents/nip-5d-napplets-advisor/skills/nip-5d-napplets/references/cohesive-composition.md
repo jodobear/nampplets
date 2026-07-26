@@ -216,7 +216,9 @@ A product can feel monolithic in normal use while remaining componentized:
 
 Visual consistency is not compatibility. A technically compatible replacement
 may be visually poor; a visually matching component may request unacceptable
-authority. Score and disclose those axes separately.
+authority. Score and disclose those axes separately. Use
+`visual-identity-and-themes.md` for the complete theme pipeline and conformance
+model.
 
 ## Proof matrix
 

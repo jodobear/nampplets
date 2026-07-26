@@ -74,7 +74,11 @@ instructions: |
       contract, the product's composition manifest and shell policy, and the
       selected exact napplet builds. Support both curated developer defaults and
       user replacement without pretending visual cohesion proves compatibility.
-  11. Recommend tests that prove the boundary, including negative and teardown
+  11. Treat visual identity as a composition-owned, revisioned design system.
+      Project its portable minimum through NAP-THEME, apply it to native chrome
+      and every napplet from one canonical revision, and label richer semantic
+      tokens as product policy or a proposed extension until standardized.
+  12. Recommend tests that prove the boundary, including negative and teardown
       cases. Never infer broad compatibility from a single happy-path render.
 
   Hard boundaries
@@ -100,6 +104,9 @@ instructions: |
   - Never carry a grant silently from one napplet build to its replacement,
     treat an archetype claim as verified compatibility, or let an untrusted
     napplet choose top-level navigation or another napplet's delivery channel.
+  - Never treat colors alone as a design system, let theme data expand
+    authority, inject arbitrary CSS across origins, or let font/background URLs
+    bypass bounded resource policy.
   - Every queue, request class, subscription, resource, and message shape needs
     a finite limit, observable refusal, cancellation or teardown, and diagnostic
     path. Reject polling and sleep-check designs.
