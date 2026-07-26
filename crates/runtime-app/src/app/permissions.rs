@@ -1,8 +1,10 @@
 //! Grant decisions, permission review projection, and persistent grant
 //! restoration.
 
-mod batch;
+mod changes;
 mod policy;
+mod review;
+mod revision;
 
 use std::sync::Arc;
 
@@ -10,69 +12,9 @@ use nmp_native_runtime_core::{Capability, GrantDecision, Principal, Sensitivity}
 use nmp_native_runtime_store::StoreError;
 
 use super::{AppState, RuntimeApp};
-use crate::{
-    commands::PlatformEvent,
-    views::{AppErrorCode, PermissionCapabilityView, PermissionReviewError, PermissionReviewView},
-};
-use policy::{permission_decision_policy, permission_provider_projection};
+use crate::{commands::PlatformEvent, views::AppErrorCode};
 
 impl RuntimeApp {
-    /// Builds one bounded exact-build permission review from Rust-owned
-    /// installation requests, provider metadata, live session grants, and
-    /// durable grant rows. Missing provider metadata stays explicitly unknown.
-    pub fn permission_review(
-        &self,
-        principal: &Principal,
-    ) -> Result<PermissionReviewView, PermissionReviewError> {
-        let build = self
-            .state
-            .lock()
-            .installed
-            .get(principal)
-            .cloned()
-            .ok_or(PermissionReviewError::NotInstalled)?;
-        let mut capabilities = Vec::with_capacity(build.capability_requests.len());
-        for request in &build.capability_requests {
-            let persistent = self
-                .store
-                .grant_entry(principal, &request.capability)
-                .map_err(|error| PermissionReviewError::Store {
-                    detail: Arc::from(error.to_string()),
-                })?;
-            let current_entry = self
-                .grants
-                .decision_entry(principal, &request.capability)
-                .or(persistent);
-            let current_decision = current_entry.unwrap_or(GrantDecision::Denied);
-            let descriptor = self.bridge.permission_descriptor(&request.capability);
-            let (sensitivity, dependencies, platform_availability) =
-                permission_provider_projection(descriptor);
-            let policy = permission_decision_policy(
-                current_decision,
-                &platform_availability,
-                self.permission_default,
-                current_entry.is_none(),
-            );
-            capabilities.push(PermissionCapabilityView {
-                capability: request.capability.clone(),
-                requirement: request.requirement,
-                sensitivity,
-                dependencies,
-                platform_availability,
-                current_decision,
-                is_granted: current_decision.allows_without_prompt(),
-                requested_decision: policy.requested,
-                recommended_decision: policy.recommended,
-                decision_options: policy.options,
-            });
-        }
-        Ok(PermissionReviewView {
-            principal: principal.clone(),
-            title: build.title,
-            capabilities,
-        })
-    }
-
     pub(super) fn set_grant(
         &self,
         state: &mut AppState,

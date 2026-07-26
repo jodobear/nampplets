@@ -320,10 +320,9 @@ impl RuntimeApp {
                 decision,
                 now,
             ),
-            PlatformCommand::ApplyPermissionBatch {
-                principal,
-                decisions,
-            } => self.apply_permission_batch(&mut state, principal, decisions, now),
+            PlatformCommand::ApplyPermissionChanges(request) => {
+                let _ = self.apply_permission_changes_locked(&mut state, request, now);
+            }
             PlatformCommand::Revoke {
                 principal,
                 capability,

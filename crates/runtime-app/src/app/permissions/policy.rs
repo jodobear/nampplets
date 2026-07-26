@@ -4,7 +4,9 @@ use nmp_native_nap_bridge::{ProviderDescriptor, ProviderPlatformAvailability};
 use nmp_native_runtime_core::{Capability, GrantDecision, Sensitivity};
 use nmp_native_runtime_store::PermissionDefaultPreference;
 
-use crate::views::{PermissionDecisionOption, PermissionPlatformAvailability};
+use crate::views::{
+    PermissionDecisionController, PermissionDecisionOption, PermissionPlatformAvailability,
+};
 
 pub(super) fn permission_provider_projection(
     descriptor: Option<ProviderDescriptor>,
@@ -45,6 +47,7 @@ pub(super) fn permission_provider_projection(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PermissionDecisionPolicy {
+    pub controller: PermissionDecisionController,
     pub requested: Option<GrantDecision>,
     pub recommended: Option<GrantDecision>,
     pub options: Vec<PermissionDecisionOption>,
@@ -65,6 +68,9 @@ pub(super) fn permission_decision_policy(
     if current == GrantDecision::Managed {
         let reason: Arc<str> = Arc::from("this capability is managed by host policy");
         return PermissionDecisionPolicy {
+            controller: PermissionDecisionController::HostPolicy {
+                reason: Arc::clone(&reason),
+            },
             requested: None,
             recommended: None,
             options: user_decisions
@@ -107,6 +113,7 @@ pub(super) fn permission_decision_policy(
         })
         .collect::<Vec<_>>();
     PermissionDecisionPolicy {
+        controller: PermissionDecisionController::User,
         requested: Some(requested),
         recommended: Some(recommended_decision(&options)),
         options,

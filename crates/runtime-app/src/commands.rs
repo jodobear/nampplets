@@ -17,6 +17,13 @@ use crate::{
     views::{AppErrorFact, PermissionDecision},
 };
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PermissionChangeRequest {
+    pub principal: Principal,
+    pub review_revision: Arc<str>,
+    pub decisions: Vec<PermissionDecision>,
+}
+
 /// Commands are semantic platform inputs. No mapped-message command accepts a
 /// principal, profile, grant, or account chosen by untrusted content.
 #[derive(Debug)]
@@ -38,10 +45,7 @@ pub enum PlatformCommand {
         sensitivity: Sensitivity,
         decision: GrantDecision,
     },
-    ApplyPermissionBatch {
-        principal: Principal,
-        decisions: Vec<PermissionDecision>,
-    },
+    ApplyPermissionChanges(PermissionChangeRequest),
     Revoke {
         principal: Principal,
         capability: Capability,
@@ -119,7 +123,7 @@ pub enum PlatformEvent {
         capability: Capability,
         decision: GrantDecision,
     },
-    PermissionBatchApplied {
+    PermissionChangesApplied {
         principal: Principal,
         decisions: Vec<PermissionDecision>,
     },

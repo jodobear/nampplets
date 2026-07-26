@@ -134,12 +134,19 @@ pub enum PermissionPlatformAvailability {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PermissionDecisionController {
+    User,
+    HostPolicy { reason: Arc<str> },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PermissionCapabilityView {
     pub capability: Capability,
     pub requirement: CapabilityRequirement,
     pub sensitivity: Option<Sensitivity>,
     pub dependencies: Vec<Capability>,
     pub platform_availability: PermissionPlatformAvailability,
+    pub controller: PermissionDecisionController,
     pub current_decision: GrantDecision,
     /// True when the decision in force already allows this capability without
     /// prompting. This is the runtime's own classification of "granted"; it is
@@ -165,8 +172,10 @@ pub struct PermissionDecisionOption {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PermissionReviewView {
     pub principal: Principal,
+    pub revision: Arc<str>,
     pub title: Arc<str>,
     pub capabilities: Vec<PermissionCapabilityView>,
+    pub read_only: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -174,6 +183,37 @@ pub struct PermissionDecision {
     pub capability: Capability,
     pub decision: GrantDecision,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissionChangeRefusalCode {
+    Closed,
+    NotInstalled,
+    StaleReview,
+    EmptyChanges,
+    DuplicateCapability,
+    UnknownCapability,
+    ManagedCapability,
+    InvalidDecision,
+    DecisionUnavailable,
+    DependencyDenied,
+    Grant,
+    Store,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PermissionChangeRefusal {
+    pub code: PermissionChangeRefusalCode,
+    pub detail: Arc<str>,
+    pub current_review: Option<PermissionReviewView>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PermissionChangeSuccess {
+    pub changed: bool,
+    pub review: PermissionReviewView,
+}
+
+pub type PermissionChangeResult = Result<PermissionChangeSuccess, PermissionChangeRefusal>;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum PermissionReviewError {

@@ -1939,6 +1939,7 @@ name = "nmp-native-runtime-app"
 version = "0.1.0"
 dependencies = [
  "cucumber",
+ "hex",
  "nmp-native-artifact",
  "nmp-native-nap-bridge",
  "nmp-native-providers",
@@ -1948,6 +1949,7 @@ dependencies = [
  "nmp-native-test-harness",
  "parking_lot",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
