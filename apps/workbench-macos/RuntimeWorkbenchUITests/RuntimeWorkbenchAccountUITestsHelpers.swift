@@ -39,7 +39,9 @@ extension RuntimeWorkbenchUITests {
             "Bare hex must not choose a secret or public path by default"
         )
 
-        let signingUse = app.buttons["Sign and publish"]
+        let signingUse = app.descendants(matching: .any)[
+            "account-use-signing"
+        ]
         XCTAssertTrue(
             signingUse.waitForExistence(timeout: 10),
             "Bare hex must ask how the account will be used"

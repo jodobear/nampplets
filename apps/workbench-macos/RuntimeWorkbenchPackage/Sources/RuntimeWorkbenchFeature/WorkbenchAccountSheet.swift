@@ -145,8 +145,18 @@ private struct WorkbenchAddAccountView: View {
                 selection: $model.ambiguousIdentityUse
             ) {
                 Text("Sign and publish")
+                    .accessibilityLabel("Sign and publish")
+                    .accessibilityHint(
+                        "Uses this key to publish and sign on your behalf"
+                    )
+                    .accessibilityIdentifier("account-use-signing")
                     .tag(WorkbenchAccountIdentityUse?.some(.signing))
                 Text("Browse only")
+                    .accessibilityLabel("Browse only")
+                    .accessibilityHint(
+                        "Uses this identity without signing or publishing"
+                    )
+                    .accessibilityIdentifier("account-use-read-only")
                     .tag(WorkbenchAccountIdentityUse?.some(.readOnly))
             }
             .labelsHidden()
