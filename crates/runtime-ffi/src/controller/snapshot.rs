@@ -2,9 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use nmp_native_runtime_app::{
-    AppSnapshot, InstalledBuildAvailability, ReceiptDeliveryState, WorkspaceView,
-};
+use nmp_native_runtime_app::{AppSnapshot, InstalledBuildAvailability, WorkspaceView};
 use nmp_native_runtime_core::Principal;
 
 use super::RuntimeController;
@@ -13,7 +11,7 @@ use crate::{
     RuntimeBindingSnapshot, RuntimeErrorSnapshot, RuntimeExactBuildCoordinate,
     RuntimeInstalledBuildAvailability, RuntimeInstalledBuildSnapshot,
     RuntimeInstalledLibrarySnapshot, RuntimePendingWriteSnapshot, RuntimeReceiptSnapshot,
-    RuntimeReceiptStatus, RuntimeSessionSnapshot, RuntimeSnapshot, RuntimeSnapshotProjection,
+    RuntimeSessionSnapshot, RuntimeSnapshot, RuntimeSnapshotProjection, project_receipt,
     projection::project_profile, snapshot_integrity::check_snapshot_integrity,
     workspace::workspace_from_view,
 };
@@ -164,24 +162,7 @@ impl RuntimeController {
                     draft_json: pending.draft.as_str().to_owned(),
                 })
                 .collect(),
-            receipts: source
-                .receipts
-                .iter()
-                .map(|receipt| RuntimeReceiptSnapshot {
-                    receipt_id: receipt.receipt_id.0.to_string(),
-                    status: match receipt.delivery {
-                        ReceiptDeliveryState::Observing | ReceiptDeliveryState::NotFound => {
-                            RuntimeReceiptStatus::Pending
-                        }
-                        ReceiptDeliveryState::Closed => RuntimeReceiptStatus::Delivered,
-                    },
-                    delivery: format!("{:?}", receipt.delivery).to_ascii_lowercase(),
-                    latest_state_json: receipt
-                        .latest
-                        .as_ref()
-                        .map(|latest| latest.state.as_str().to_owned()),
-                })
-                .collect(),
+            receipts: source.receipts.iter().map(project_receipt).collect(),
             workspaces,
             recent_activity: source
                 .recent_activity

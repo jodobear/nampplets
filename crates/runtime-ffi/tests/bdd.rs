@@ -1,16 +1,22 @@
 //! Cucumber scenario runner for the public runtime-ffi facade.
 
+mod receipt_steps;
 mod support;
 
 use cucumber::{World, given, then, when};
-use nmp_native_runtime_ffi::{RuntimePermissionReviewSnapshot, RuntimeSnapshot};
-use support::PermissionReviewRig;
+use nmp_native_runtime_ffi::{
+    RuntimePermissionReviewSnapshot, RuntimeReceiptSnapshot, RuntimeSnapshot,
+};
+use support::{PermissionReviewRig, ReceiptProjectionRig};
 
 #[derive(Debug, Default, World)]
 struct RuntimeFfiWorld {
     rig: Option<PermissionReviewRig>,
     review: Option<RuntimePermissionReviewSnapshot>,
     snapshot: Option<RuntimeSnapshot>,
+    receipt_rig: Option<ReceiptProjectionRig>,
+    receipt: Option<RuntimeReceiptSnapshot>,
+    prior_receipt: Option<RuntimeReceiptSnapshot>,
 }
 
 impl RuntimeFfiWorld {
@@ -111,5 +117,5 @@ fn then_exact_build_receives_refusal(world: &mut RuntimeFfiWorld) {
 
 #[tokio::main]
 async fn main() {
-    RuntimeFfiWorld::run("tests/features/permission_review.feature").await;
+    RuntimeFfiWorld::run("tests/features").await;
 }

@@ -5,6 +5,8 @@
 //! calls, and the Rust-owned snapshot projection.
 #![allow(dead_code)]
 
+mod receipt;
+
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use nmp_native_artifact::{Sha256Digest, embedded_requirements};
@@ -15,6 +17,8 @@ use nmp_native_runtime_ffi::{
 };
 use nmp_native_test_harness::{FixtureLoader, FsFixtureLoader};
 use tempfile::TempDir;
+
+pub use receipt::ReceiptProjectionRig;
 
 const AUTHOR: &str = "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5";
 const D_TAG: &str = "good-morning";
