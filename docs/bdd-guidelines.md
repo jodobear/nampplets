@@ -43,6 +43,7 @@ Bringing a new crate/package into scope means:
 | Crate / package | Status | Runner |
 | --- | --- | --- |
 | `crates/runtime-app` | Pilot | `cargo test -p nmp-native-runtime-app --test bdd` (also runs under `cargo test --workspace`) |
+| `crates/runtime-ffi` | Pilot | `cargo test -p nmp-native-runtime-ffi --test bdd` (also runs under `cargo test --workspace`) |
 
 ## Rust: cucumber
 
