@@ -1,170 +1,201 @@
-# Sandwich interview synthesis
+# Sandwich interview: philosophy, vision, and tension
 
 Source: `30: Napplets w/ Sandwich`, published 2026-07-22:
 <https://sovereignengineering.io/podcast/30-napplets-w-sandwich>
 
-This is a timestamped synthesis of the diarized transcript. It captures author
-intent and experience, not normative protocol. The transcript contains speech
-recognition variants such as "naplet", "Noster", and "Keeto"; this reference
-normalizes obvious names without treating ambiguous words as facts.
+This is a critical synthesis of the complete diarized interview, not a
+transcript substitute. Timestamp ranges are an audit trail for themes that recur
+across the conversation. They preserve author intent and experience, not
+normative protocol or current implementation fact.
 
-## Product motivation
+## The essence
 
-- `01:04-02:17` — Standard clients were seen as inherently limited by one team
-  rebuilding keys, relays, caching, outbox, and every feature in a silo. The
-  proposed alternative is atomic functionality that can be switched and
-  composed across clients.
-- `03:28-05:59` — The visual idea drew from a composable desktop/window-manager
-  mindset. Early prototypes revealed main-thread pressure, repetition, and
-  security problems.
-- `25:12-25:38` — A napplet is described as a hosted application that does one
-  thing well. The single-file form was intended to reinforce focus and
-  portability.
+The central claim is that the ordinary client is the wrong unit of software
+sovereignty. A client bundles identity, relay behavior, storage, signing,
+rendering, and every product feature under one team's roadmap. Users can switch
+clients, but they cannot normally keep the whole environment and replace only
+the feed, editor, uploader, profile, or media experience that disappoints them.
 
-Advisor consequence: start product advice from focused jobs and host
-composition, not from protocol envelopes or Kehto packages.
+Napplets move the boundary inward. A feature becomes a small replaceable
+experience, while a trusted runtime supplies identity, policy, infrastructure,
+and composition. That changes competition from "which monolithic client wins?"
+to "which component best serves this role here?" The user can preserve the
+product they understand while replacing one decision at a time.
 
-## The boundary emerged through subtraction
+Evidence: `01:04-05:59`, `25:12-25:38`, `45:52-51:04`.
 
-- `05:59-07:40` — Early iframes still had the runtime's authority. Iteration
-  progressively removed features until the frame could essentially only talk
-  over `postMessage`.
-- `07:40-09:32` — Recreating all of Nostr inside the sub-protocol was the wrong
-  abstraction. The napplet needs high-level helpers plus lower-level escape
-  hatches: outbox-aware retrieval is a helper; explicit relay access is the
-  escape hatch.
-- `12:53-14:14` — An earlier design used a relay-like shell and assigned a key
-  pair to each napplet. It preserved attribution but added unnecessary
-  authentication and routing complexity because the runtime already controlled
-  the session.
-- `14:15-15:06` — Resource and media problems led to an operating-system analogy:
-  reuse mature capability patterns instead of inventing Nostr-specific answers
-  for every host service.
+## The philosophy
 
-Advisor consequence: protect the seam. Do not give the frame ambient authority
-or turn every host capability into raw Nostr messaging.
+### Sovereignty through replaceability
 
-## Runtime mediation
+Sovereignty is not merely holding a key or choosing a relay. It is having
+credible exit at the level where dissatisfaction occurs. Replaceability makes
+software choice granular; portability makes that choice durable across
+runtimes; host composition lets those freedoms add up to a usable product.
 
-- `15:16-17:59` — An upload napplet requests "upload"; the runtime chooses
-  configured backends, destinations, prompts, and later resolution. The author
-  names Blossom, HashTree, IPFS, and even Google Drive to show that the napplet's
-  intent can be independent of provider policy.
-- `18:59-21:04` — Signing, encryption, and decryption belong beyond the shell.
-  Napplet-to-runtime content is intended to remain inspectable cleartext; the
-  runtime cannot protect a user from behavior it cannot see.
-- `29:26-30:40` — Removing direct web APIs, using CSP/sandboxed iframes, keeping
-  the main thread for rendering/routing, and moving work to workers were
-  described as both security and performance controls. Without runtime pressure
-  control, one napplet could overwhelm relays or crash the parent.
+This philosophy rejects both the closed monolith and the fantasy that every
+small component should become its own infrastructure stack. The napplet is
+valuable because it owns less.
 
-Advisor consequence: capabilities need policy, consent, pressure limits,
-inspection, and provider abstraction. "It works" without those is incomplete.
+Evidence: `01:04-02:17`, `48:22-51:04`.
 
-## Tooling and implementation
+### Power is removed before it is reintroduced
 
-- `21:38-24:59` — Kehto was described as runtime packages; Paja as a workbench;
-  separate napplet tooling as SDK, shim, types, boilerplate, skills, and
-  conformance help. Minimal dependencies were an intentional security and
-  maintenance choice at interview time.
-- `10:21-11:22` and `49:42-50:33` — The workshop demonstrated very fast creation
-  and publication, including agent-assisted authoring. These are event
-  observations, not a guaranteed current onboarding time.
-- `37:03-37:22` — Integration drift was acknowledged: existing clients had not
-  all chased the moving spec.
+The design emerged by subtracting iframe authority until communication was
+essentially a typed `postMessage` seam. Capabilities are then reintroduced as
+inspectable, revocable runtime services. A napplet says what it wants; the
+runtime decides whether, how, and through which provider it happens.
 
-Advisor consequence: explain the whole ecosystem and version it. Never equate
-an impressive workshop or one successful runtime with general conformance.
+The upload example makes the philosophy concrete. The component asks to upload.
+The runtime may choose Blossom, HashTree, IPFS, Google Drive, a prompt, or a
+future provider without changing the napplet's product intent. Signing,
+encryption, relay selection, and resource access follow the same division.
 
-## Web, native, and permissionless resolution
+Evidence: `05:59-09:32`, `12:53-21:04`.
 
-- `31:30-33:34` — Browser delivery was chosen partly because a user can open a
-  link without installing anything. The runtime was described as resolving
-  manifests/blobs itself and validating hashes rather than relying on a gateway,
-  enabling permissionless and offline-capable behavior.
-- `33:53-36:13` — The browser was intentionally treated as one difficult edge.
-  A native app, browser/explorer, operating system, and RISC-V microkernel
-  experiment were used to test whether the capability contracts could survive
-  radically different environments.
+### The runtime is an operating system, not a permissive iframe host
 
-Advisor consequence: distinguish the web projection from the transport-neutral
-capability seam. A native runtime is not "Kehto rewritten"; it should preserve
-contracts while changing trusted execution and transport.
+The operating-system analogy is functional. The runtime mediates scarce
+resources, user authority, provider choice, pressure, lifecycle, and
+observation. Cleartext requests at the trusted boundary are intentional: a
+runtime cannot protect the user from behavior it is forbidden to inspect.
+Sandboxing and CSP are therefore paired with capability design, consent,
+limits, and diagnostics rather than treated as the complete security model.
 
-## Inter-napplet composition
+Evidence: `14:15-15:06`, `18:59-21:04`, `29:26-30:40`.
 
-- `09:34-10:21` — Cross-napplet communication was one of the hardest problems,
-  and showing the paradigm proved more effective than explaining it abstractly.
-- `39:35-43:27` — The working direction used an
-  `applet:<archetype>/<intent>`-style scheme analogous to mobile intents.
-  Payload semantics were deliberately exploratory and sometimes inferred from
-  context. The speakers valued agent legibility and real independent
-  interoperability over premature exhaustive standardization.
-- `43:57-45:48` — The seam is initially jarring to Nostr developers. A host
-  runtime can be a translation layer over existing business logic, while a
-  napplet author needs less Nostr infrastructure knowledge and leaves security
-  and optimization to runtime specialists.
+### High-level help with explicit escape hatches
 
-Later NAP work changed vocabulary and made conventions/archetypes more explicit.
-Use the current NAP registry, not the interview's exact URI spelling or
-underspecified payload rules.
+Recreating all of Nostr inside a sub-protocol would preserve the complexity the
+model is trying to remove. Most components should ask for a user-level outcome,
+such as outbox-aware retrieval, publishing, or upload. Lower-level relay access
+still matters for truly relay-local products, but it is an escape hatch rather
+than the default abstraction.
 
-## Many runtime shapes
+This is a philosophy of progressive disclosure: make the safe, optimized path
+easy without making unusual but legitimate software impossible.
 
-- `45:52-48:22` — Runtimes can be minimal, social, game/mod systems, global media
-  hosts, collaboration tools, editors, or plugin systems. Napplets need not all
-  be social, and a runtime may expose a very small capability set.
-- `48:22-51:04` — A kitchen-sink client can be decomposed into replaceable
-  surfaces. Clipboard and ordinary user workflows can remain useful composition
-  mechanisms. The same artifact behaving in another runtime was treated as a
-  key success signal.
+Evidence: `07:40-09:32`, `1:03:14-1:14:29`.
 
-Advisor consequence: evaluate a runtime by truthful policy and portability, not
-by how much desktop chrome or how many domains it has.
+## The grand vision
 
-## Relay and ecosystem context
+The long horizon is a user-owned software environment whose shape is not fixed
+by one vendor:
 
-- `59:12-1:03:14` — Work on nsites, NIP-46 tooling, gateways, Blossom, deployers,
-  and spec migrations provided practical background for artifact publication
-  and adoption. Shipping a complete reference stack was described as a way to
-  move an ecosystem toward a revised spec.
-- `1:03:14-1:09:27` — Hard-coded relays were criticized. Outbox solves much but
-  not all discovery. NIP-66 observations and subjective trust can help rank and
-  optimize relay choices.
-- `1:11:53-1:14:29` — Relay attributes were framed as an intentionally emergent
-  vocabulary that lets users and software discover specialized relays without
-  hard-coded lists.
+- a coherent social client can be assembled from independently replaceable
+  feeds, profiles, composers, media tools, and detail views;
+- the same component can run in a minimal browser host, a polished native app,
+  a desktop/window system, a game or mod environment, a collaboration tool, or
+  an experimental microkernel;
+- the runtime becomes a translation and optimization layer over mature Nostr
+  engines and platform services;
+- developers compete on focused experiences instead of repeatedly rebuilding
+  keys, caching, routing, permissions, and deployment;
+- agents can generate and combine smaller legible artifacts more reliably than
+  entire clients;
+- users can open a link immediately, later install or package a curated product,
+  and still retain the right to replace one role.
 
-Advisor consequence: higher-level runtime domains should own evolving relay
-discovery and routing policy. Napplet code should not freeze a global relay
-strategy unless its product is explicitly relay-local.
+The endpoint is not a desktop full of visibly unrelated mini-apps. It is
+software that feels intentionally designed while remaining internally
+substitutable. Composition is successful when ordinary users can ignore the
+seams and powerful users can exercise them.
 
-## Engineering method
+Evidence: `10:21-11:22`, `31:30-36:13`, `39:35-50:33`.
 
-- `1:19:32-1:20:31` — The author describes starting with a high-level spec,
-  expanding and compressing it, then breaking it into focused low-level design
-  documents suitable for delegated implementation.
-- `1:23:53-1:25:56` — Novel domains require reviewing generated research rather
-  than trusting model priors; a Socratic planning loop can surface missing
-  assumptions.
-- `1:27:23-1:32:30` — Strict repository/PR policy, issue refinement, independent
-  review, anti-slop checks, TDD/BDD, and model diversity were described as ways
-  to keep code from poisoning future context and tests from merely confirming
-  an implementation after the fact.
+## The load-bearing tensions
 
-Advisor consequence: recommendations should become executable contracts,
-negative tests, and independent review, especially in an alpha ecosystem.
+### Cohesion versus replaceability
 
-## What not to infer
+Curated components can share a design language and feel like one product.
+Arbitrary replacements may not. If the host standardizes too little, the result
+feels fragmented; if it standardizes layout and behavior too aggressively, it
+strangles the independent expression that makes replacement valuable.
 
-The interview does not prove:
+The resolution is layered: host-owned chrome, navigation, focus, accessibility,
+tokens, and presentation slots; component-owned feature experience; explicit
+compatibility and visual-quality signals rather than pretending they are the
+same.
 
-- the current NIP-5D or NAP wire format;
-- present package exports or domain status;
-- current interoperability of named clients;
-- a universal single-file rule outside a selected spec revision;
-- that Kehto is the canonical runtime;
-- that every implicit convention will interoperate;
-- that direct relay access, gateway behavior, or native projections are settled.
+### Portability versus optimization
 
-Use it to understand the "why," then verify the "what" live.
+A transport-neutral intent can survive web, native, and unusual runtimes.
+Platform-specific projections can be safer, faster, and more capable. The seam
+must remain stable while trusted execution changes beneath it. Otherwise "native
+Napplets" becomes either Kehto copied mechanically or a private plugin system
+that no independent napplet can enter.
+
+Evidence: `31:30-36:13`, `45:52-48:22`.
+
+### Legibility versus completeness
+
+Archetypes and intent vocabulary let independently built components understand
+one another. Exhaustively standardizing every payload too early would freeze
+weak ideas; leaving semantics implicit produces fragile interoperability.
+Sandwich favors learning from working examples and agent-legible conventions,
+then hardening what survives.
+
+The advisor should therefore separate experiment, product convention, active
+NAP, and proposed NIP—and demand executable interoperability before promotion.
+
+Evidence: `09:34-10:21`, `39:35-43:27`.
+
+### Convenience versus authority
+
+Fast generation, publication, and permissive helpers make the model exciting.
+The same convenience can hide signer access, direct networking, weak artifact
+identity, unbounded work, or stale grants. A polished demo is not security
+evidence. Every convenient abstraction needs an authority ledger and a
+falsifier.
+
+Evidence: `10:21-11:22`, `18:59-21:04`, `29:26-30:40`.
+
+### Permissionless discovery versus trustworthy execution
+
+Manifest and blob resolution can be open, gateway-independent, and offline
+capable. Execution still requires signatures, hashes, exact principals,
+capability preflight, and policy. Permissionless availability should eliminate
+gatekeepers, not verification.
+
+Evidence: `31:30-33:34`, `59:12-1:03:14`.
+
+### Ecosystem motion versus compatibility
+
+The interview celebrates rapid exploration while acknowledging that clients
+and integrations had not followed every moving revision. Reference stacks can
+create momentum, but one author's complete stack can also become an accidental
+monoculture. Independent implementations and unchanged legacy artifacts are the
+test of an ecosystem, not repository count.
+
+Evidence: `21:38-24:59`, `37:03-37:22`, `59:12-1:03:14`.
+
+## Engineering posture
+
+The interview's process mirrors its architecture: begin with a high-level
+model, repeatedly compress it, split it into small contracts, and subject each
+contract to independent review and negative tests. Novel areas require
+source-grounded research, not confident model priors. TDD/BDD, strict PR policy,
+anti-slop checks, and model diversity are proposed as defenses against code and
+tests that merely reinforce the first implementation.
+
+For this advisor, that means philosophy must end in proof: exact revisions,
+executable fixtures, two-sided interoperability, denial cases, pressure limits,
+teardown, and honest compatibility reports.
+
+Evidence: `1:19:32-1:32:30`.
+
+## Advisor stance
+
+Use the interview to recover the purpose behind the machinery:
+
+```text
+replaceable user experiences
+inside a coherent user-owned product
+over a trusted, inspectable, portable capability boundary
+```
+
+Then verify the machinery live. The interview does not determine current wire
+formats, package exports, NAP status, manifest kinds, exact intent spelling,
+interoperability, or the security of any named runtime. Kehto is evidence, not
+the definition. The vision is the compass; current specs, locks, source, and
+tests are the map.

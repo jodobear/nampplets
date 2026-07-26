@@ -163,6 +163,26 @@ Refresh the lock, provider matrix, compatibility report, and executable
 conformance evidence before making a current Nampplets claim. Keep these
 implementation gaps separate from the portable NIP/NAP model.
 
+## stlstr: a composed product case study
+
+At revision `69c220d27ae0f5d5a9a3a80928a4e284af338c4f`, stlstr presents a
+Thingiverse-like product through a small host and eleven built-in feature
+napplets. Its source is useful evidence that a product can own stable chrome,
+routes, history, overlays, identity, provider policy, and replacement controls
+while feature napplets call roles such as `printable-detail` instead of knowing
+which component or URL handles them.
+
+Its build packages all default napplet artifacts and a registry into one
+self-contained deployment. Its settings UI lets a user replace the napplet
+assigned to an archetype. Shared UI helpers and design-system use help the
+curated defaults read as one product.
+
+This does not prove visual interchangeability for arbitrary third-party
+napplets, protocol-level compatibility, or the stronger artifact/grant boundary
+required by a native NMP runtime. Keep its portable ideas, product choices, and
+security gaps distinct. The detailed review and native design translation live
+in `cohesive-composition.md`.
+
 ## Other approaches and prototypes
 
 The Sandwich interview mentions:

@@ -35,6 +35,35 @@ Falsifier: if the design needs tabs for unrelated application areas, its own
 signer, relay pool, database, notification center, and window manager, it is
 probably rebuilding a monolith.
 
+## Compose a cohesive application
+
+1. Describe the product in user language, then identify stable host chrome and
+   focused feature roles.
+2. Give each role an archetype plus supported actions and typed payload fields.
+   Do not begin with routes, filenames, or implementation dTags.
+3. Define one composition manifest containing routes, presentation, defaults,
+   required capabilities, theme tokens, fallbacks, and migration policy.
+4. Resolve every default or replacement to a verified exact build. Preflight
+   domains and action compatibility before activation.
+5. Route napplet intent through the trusted runtime. Parse deep links into the
+   same typed intent so refresh, history, and in-product navigation agree.
+6. Deliver destination payloads through a bounded, source-bound session channel
+   after the destination is ready. Treat the chosen channel as a projection or
+   product convention unless a current NAP standardizes it.
+7. Let developers generate a branded shell with sane defaults from the
+   composition manifest. Let users edit a separate overlay that replaces one
+   role without mutating the product's base definition.
+8. On replacement, show compatibility and permission consequences, bind new
+   grants to the new exact build, preserve the prior selection for rollback,
+   and define component-state migration explicitly.
+9. Test the curated product as one accessible interface and each replacement as
+   an isolated trust transition.
+
+Falsifiers: direct top-level navigation from a napplet, URL knowledge embedded
+in feature code, grants inherited by a replacement, archetype tags accepted
+without verified bytes, unbounded cross-frame broadcast, or a theme that can
+expand authority.
+
 ## Port an existing Nostr app
 
 Create an authority inventory:

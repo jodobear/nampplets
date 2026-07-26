@@ -48,6 +48,9 @@ upstream.
   binding, artifact resolution, capability providers, limits, and teardown.
 - Read `references/advisory-playbooks.md` for role-specific workflows,
   debugging, protocol review, migration, and validation.
+- Read `references/cohesive-composition.md` for intent routing, product
+  composition, developer-generated shells, user-selected replacements, and the
+  dated stlstr implementation study.
 - Read `references/sandwich-interview.md` when discussing the system's product
   thesis, design history, native direction, or the intent behind the model.
 
@@ -70,6 +73,17 @@ Place every concern in one primary owning layer:
 
 If a design spans layers, keep dependency direction explicit. Do not move
 product policy into a NIP or transport mechanics into a transport-neutral NAP.
+
+For a composed app, identify three distinct artifacts:
+
+```text
+portable archetype/action contract
+product composition manifest and shell policy
+verified exact napplet build selected for each role
+```
+
+A coherent interface may hide those seams in normal use, but permissions,
+diagnostics, replacement, and rollback must retain them.
 
 ## Use an evidence table for consequential advice
 

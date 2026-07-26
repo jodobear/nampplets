@@ -119,6 +119,29 @@ imported Kehto corpus is `built-not-run`; and `resource` plus `link` remain
 unavailable until bounded native executors are production-wired. These are
 dated Nampplets implementation facts, not NIP-5D requirements.
 
+### stlstr composition case study
+
+- Repository: <https://github.com/hzrd149/stlstr>
+- Deployed product: <https://stlstr.xyz>
+- Revision observed:
+  `69c220d27ae0f5d5a9a3a80928a4e284af338c4f`
+- Scope: small persistent host, bundled default napplets, archetype/action
+  routing, deep links, targeted destination delivery, overlay presentation,
+  napplet catalog, and per-archetype user overrides
+
+Source and committed tests were inspected on 2026-07-26. Dependency install,
+static source-policy tests, napplet type-check/build verification, and the full
+production host build all passed locally. The deployed site returned HTTP 200,
+but no compatible local browser was available for visual inspection and its
+browser suite was not run because its Chromium and local-relay prerequisites
+were absent.
+
+Use stlstr as implementation evidence for cohesive composition, never as NIP or
+NAP authority. In particular, its picker compatibility indicators are described
+as advisory, and its artifact fetch path is not evidence for Nampplets'
+signature, per-path hash, aggregate hash, exact-principal, or grant requirements.
+See `cohesive-composition.md`.
+
 ## Oral history and design intent
 
 - Episode: <https://sovereignengineering.io/podcast/30-napplets-w-sandwich>
@@ -139,8 +162,9 @@ For current advice:
 3. Check NIP-5A if manifest/hash semantics matter.
 4. Check the relevant NAP file or PR and its status.
 5. Inspect exact package versions and exports.
-6. Inspect the target runtime's lock, source, fixtures, and report.
-7. State the observation date and identify unresolved drift.
+6. Inspect any cited product case study at an exact revision.
+7. Inspect the target runtime's lock, source, fixtures, and report.
+8. State the observation date and identify unresolved drift.
 
 For pinned advice, do steps 4-6 against the pinned revisions first. Never
 silently update a compatibility contract while answering a design question.
