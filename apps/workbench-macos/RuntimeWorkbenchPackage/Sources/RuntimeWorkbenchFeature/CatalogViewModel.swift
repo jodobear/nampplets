@@ -11,7 +11,15 @@ public final class CatalogViewModel {
     public private(set) var evidence: CatalogBrowseEvidence?
     public private(set) var review: CatalogInstallReview?
     public private(set) var installedBuild: CatalogInstalledBuild?
-    public private(set) var issue: CatalogIssue?
+    private(set) var browseIssue: CatalogIssueNotice.Presentation?
+    private(set) var operationIssue: CatalogIssueNotice.Presentation?
+    var presentedIssue: CatalogIssueNotice.Presentation? {
+        operationIssue ?? browseIssue
+    }
+    var installIssuePresentation: CatalogIssueNotice.Presentation? {
+        operationIssue?.intent == .installBlocked ? operationIssue : nil
+    }
+    public var issue: CatalogIssue? { presentedIssue?.issue }
     public private(set) var isResolvingReview = false
     public private(set) var isInstalling = false
 
@@ -98,9 +106,14 @@ public final class CatalogViewModel {
 
     private func refreshFeed() async {
         guard let request = CatalogSearchRequest(query: query) else {
-            issue = CatalogIssue(
-                title: "Search is too long",
-                message: "Use at most \(CatalogLimits.maximumQueryUTF8Bytes) UTF-8 bytes."
+            // These two are the shell's own words, not a projected refusal,
+            // so they say what to do rather than quoting a byte ceiling.
+            browseIssue = CatalogIssueNotice.Presentation(
+                issue: CatalogIssue(
+                    title: "Search is too long",
+                    message: "Try a shorter search."
+                ),
+                intent: entries.isEmpty ? .browseBlocked : .browsePartial
             )
             return
         }
@@ -117,14 +130,15 @@ public final class CatalogViewModel {
             entries = page.entries
             hasMore = page.hasMore
             evidence = page.evidence
-            if review == nil {
-                issue = nil
-            }
+            browseIssue = nil
         case let .unavailable(problem):
             entries = []
             hasMore = false
             evidence = nil
-            issue = problem
+            browseIssue = CatalogIssueNotice.Presentation(
+                issue: problem,
+                intent: .browseBlocked
+            )
         }
     }
 
@@ -137,10 +151,12 @@ public final class CatalogViewModel {
         guard let request = CatalogManualCoordinateRequest(
             coordinate: manualCoordinate
         ) else {
-            issue = CatalogIssue(
-                title: "Coordinate is invalid",
-                message: "Enter a non-empty coordinate no larger than "
-                    + "\(CatalogLimits.maximumCoordinateUTF8Bytes) UTF-8 bytes."
+            operationIssue = CatalogIssueNotice.Presentation(
+                issue: CatalogIssue(
+                    title: "That address doesn't look right",
+                    message: "Check you copied the whole thing."
+                ),
+                intent: .resolveBlocked
             )
             return
         }
@@ -153,7 +169,7 @@ public final class CatalogViewModel {
     public func cancelReview() {
         cancelTransientWork()
         review = nil
-        issue = nil
+        operationIssue = nil
     }
 
     @discardableResult
@@ -164,7 +180,7 @@ public final class CatalogViewModel {
 
         let generation = operationGeneration
         isInstalling = true
-        issue = nil
+        operationIssue = nil
         let response = await client.confirmExactVerifiedInstall(
             CatalogInstallConfirmation(review: review)
         )
@@ -180,7 +196,10 @@ public final class CatalogViewModel {
             onInstalled(build)
             return build
         case let .refused(problem):
-            issue = problem
+            operationIssue = CatalogIssueNotice.Presentation(
+                issue: problem,
+                intent: .installBlocked
+            )
             return nil
         }
     }
@@ -194,7 +213,7 @@ public final class CatalogViewModel {
         }
         let generation = operationGeneration
         isResolvingReview = true
-        issue = nil
+        operationIssue = nil
         let response = await client.resolveReview(target)
         guard generation == operationGeneration else {
             return
@@ -206,7 +225,10 @@ public final class CatalogViewModel {
             self.review = review
         case let .unavailable(problem):
             review = nil
-            issue = problem
+            operationIssue = CatalogIssueNotice.Presentation(
+                issue: problem,
+                intent: .resolveBlocked
+            )
         }
     }
 

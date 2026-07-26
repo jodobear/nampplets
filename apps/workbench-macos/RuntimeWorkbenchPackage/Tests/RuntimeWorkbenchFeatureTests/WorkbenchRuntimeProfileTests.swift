@@ -107,3 +107,33 @@ func catalogInstallWarningsStaySilentWhenRustPermitsTheInstall() {
 
     #expect(WorkbenchCatalogInstallEligibility.warnings(for: permitted).isEmpty)
 }
+
+@MainActor
+@Test
+func verifiedInstallEligibilityDoesNotInventPlatformCompatibility() throws {
+    let author = String(repeating: "a", count: 64)
+    let review = NativeRuntimeCatalogReview(
+        token: "review-1",
+        eventId: String(repeating: "c", count: 64),
+        coordinate: "35129:\(author):good-morning",
+        manifestAuthor: author,
+        dTag: "good-morning",
+        title: "Good Morning",
+        description: nil,
+        aggregateHash: String(repeating: "b", count: 64),
+        capabilities: [],
+        blobSources: ["https://example.com/\(String(repeating: "b", count: 64))"],
+        provenance: [],
+        installEligibility: NativeRuntimeCatalogInstallEligibility(
+            canInstall: true,
+            blocker: nil
+        )
+    )
+
+    let projected = try #require(
+        WorkbenchRuntimeProfile.projectCatalogReview(review)
+    )
+
+    #expect(projected.canInstall)
+    #expect(projected.platformCompatibility.isEmpty)
+}

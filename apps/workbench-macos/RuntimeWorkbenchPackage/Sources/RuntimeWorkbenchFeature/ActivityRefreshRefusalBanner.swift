@@ -4,21 +4,41 @@ struct ActivityRefreshRefusalBanner: View {
     let refusal: RuntimeWorkbenchActivitySourceRefusal
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Activity couldn’t refresh")
-                .font(.headline)
-            Text("Showing the last accepted activity; it may be out of date.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            DisclosureGroup("Technical details") {
-                Text(refusal.localizedDescription)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+        HStack(alignment: .top, spacing: NappletMetrics.snug) {
+            Image(systemName: "clock.arrow.trianglehead.2.counterclockwise.rotate.90")
+                .foregroundStyle(NappletInk.caution)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: NappletMetrics.hairline) {
+                Text("Activity couldn’t refresh")
+                    .font(NappletType.heading)
+                Text("Showing the last accepted activity; it may be out of date.")
+                    .font(NappletType.caption)
+                    .foregroundStyle(NappletInk.inkSecondary)
+                NappletEvidence(label: "Technical details") {
+                    NappletFieldGrid(fields: evidenceFields)
+                }
+                .font(NappletType.caption)
             }
-            .font(.caption)
         }
-        .padding()
+        .padding(NappletMetrics.comfortable)
+        .background(NappletInk.ground(for: .caution("")))
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    var evidenceFields: [NappletField] {
+        switch refusal {
+        case let .snapshotRefused(code, detail):
+            [
+                NappletField("Code", code),
+                NappletField("Detail", detail),
+            ]
+        case let .subscriberCapacity(maximum):
+            [
+                NappletField("Refusal", refusal.localizedDescription),
+                NappletField("Subscriber limit", "\(maximum)"),
+            ]
+        case .scopeMismatch:
+            [NappletField("Refusal", refusal.localizedDescription)]
+        }
     }
 }

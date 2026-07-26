@@ -1,13 +1,19 @@
 import SwiftUI
 
+/// What a napplet has actually been doing.
+///
+/// Runtime refusals remain visible without replacing the last accepted
+/// snapshot. Build identity stays one deliberate move away as evidence.
 public struct ActivityDrawer: View {
     @State private var model: ActivityViewModel
     @Environment(\.dismiss) private var dismiss
+    private let nappletTitle: String?
 
     @MainActor
     public init(
         source: any ActivitySource,
         scope: ActivityExactBuildScope,
+        nappletTitle: String? = nil,
         developerModeAvailable: Bool = false
     ) {
         _model = State(
@@ -17,12 +23,13 @@ public struct ActivityDrawer: View {
                 developerModeAvailable: developerModeAvailable
             )
         )
+        self.nappletTitle = nappletTitle
     }
 
     public var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                exactBuildHeader
+                header
                 Divider()
                 inventory
                 Divider()
@@ -39,10 +46,12 @@ public struct ActivityDrawer: View {
 
                 facts
             }
-            .navigationTitle("Recent Activity")
+            // Deliberately no container identifier. SwiftUI propagates one
+            // through the subtree and can mask the evidence disclosure.
+            .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
+                    Button("Done") {
                         dismiss()
                     }
                     .keyboardShortcut(.cancelAction)
@@ -54,9 +63,7 @@ public struct ActivityDrawer: View {
                     Button("Refresh", systemImage: "arrow.clockwise") {
                         model.refresh()
                     }
-                    .accessibilityHint(
-                        "Requests one fresh activity snapshot for this exact build"
-                    )
+                    .accessibilityHint("Checks for the latest activity")
 
                     if model.developerModeAvailable {
                         Toggle(
@@ -70,15 +77,13 @@ public struct ActivityDrawer: View {
                             )
                         )
                         .toggleStyle(.button)
-                        .accessibilityHint(
-                            "Shows bounded redacted detail fields"
-                        )
+                        .accessibilityHint("Shows extra fields on each entry")
                     }
                 }
             }
         }
         #if os(macOS)
-        .frame(minWidth: 700, idealWidth: 820, minHeight: 500, idealHeight: 680)
+        .frame(minWidth: 640, idealWidth: 760, minHeight: 480, idealHeight: 640)
         #endif
         .onAppear {
             model.start()
@@ -86,136 +91,118 @@ public struct ActivityDrawer: View {
         .onDisappear {
             model.stop()
         }
-        .accessibilityIdentifier("runtime-activity-drawer")
     }
 
-    private var exactBuildHeader: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Label("Exact verified build", systemImage: "checkmark.seal")
-                .font(.headline)
-            LabeledContent("Publisher", value: model.scope.manifestAuthor)
-            LabeledContent("d-tag", value: model.scope.dTag)
-            LabeledContent("Aggregate hash", value: model.scope.aggregateHash)
+    private var title: String {
+        nappletTitle.map { "\($0) Activity" } ?? "Recent Activity"
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: NappletMetrics.tight) {
+            Text(ActivityPlainPresentation.header)
+            .font(NappletType.secondary)
+            .foregroundStyle(NappletInk.inkSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            NappletEvidence(label: "Which build this is") {
+                NappletFieldGrid(fields: [
+                    NappletField("Publisher key", model.scope.manifestAuthor),
+                    NappletField("dTag", model.scope.dTag),
+                    NappletField("Aggregate hash", model.scope.aggregateHash),
+                ])
+            }
+            .font(NappletType.caption)
         }
-        .font(.caption)
-        .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "Activity for exact build \(model.scope.dTag), "
-                + "aggregate hash \(model.scope.aggregateHash)"
-        )
+        .padding(NappletMetrics.comfortable)
     }
 
     @ViewBuilder
     private var inventory: some View {
         let inventory = model.snapshot?.inventory ?? .empty
-        HStack(spacing: 12) {
-            inventoryCell(
-                title: "Sessions",
-                value: inventory.activeSessions,
-                symbol: "rectangle.connected.to.line.below"
+        let presentation = ActivityInventoryPresentation(inventory: inventory)
+        HStack(spacing: NappletMetrics.snug) {
+            ActivityInventoryCell(
+                title: "Open now",
+                value: presentation.openNow,
+                symbol: "play.rectangle"
             )
-            inventoryCell(
-                title: "Bindings",
-                value: inventory.activeBindings,
-                symbol: "link"
-            )
-            inventoryCell(
-                title: "Resources",
-                value: inventory.activeResources,
-                symbol: "shippingbox"
-            )
-            inventoryCell(
-                title: "Pending receipts",
-                value: inventory.pendingReceipts,
-                symbol: "clock.badge.exclamationmark"
-            )
+            Text(presentation.unavailableCountsMessage)
+                .font(NappletType.caption)
+                .foregroundStyle(NappletInk.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding()
+        .padding(NappletMetrics.comfortable)
         .accessibilityElement(children: .contain)
     }
 
-    private func inventoryCell(
-        title: String,
-        value: Int,
-        symbol: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(title, systemImage: symbol)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value, format: .number)
-                .font(.title2.monospacedDigit().weight(.semibold))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title): \(value)")
-    }
-
     private func updateGapBanner(_ gap: ActivityUpdateGap) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: NappletMetrics.snug) {
             Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
-                .foregroundStyle(.orange)
+                .foregroundStyle(NappletInk.caution)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Activity may be incomplete")
+            VStack(alignment: .leading, spacing: NappletMetrics.hairline) {
+                Text("Some entries may be missing")
                     .font(.headline)
-                Text(
-                    "Expected update after revision "
-                        + "\(gap.expectedPredecessorRevision), received "
-                        + "\(gap.receivedPredecessorRevision). Refresh to "
-                        + "replace it with an authoritative snapshot."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("runtime-activity-update-gap")
+                Text(ActivityPlainPresentation.updateGap)
+                    .font(NappletType.caption)
+                    .foregroundStyle(NappletInk.inkSecondary)
+                NappletEvidence(label: "Why") {
+                    NappletFieldGrid(fields: [
+                        NappletField(
+                            "Expected predecessor revision",
+                            "\(gap.expectedPredecessorRevision)"
+                        ),
+                        NappletField(
+                            "Received predecessor revision",
+                            "\(gap.receivedPredecessorRevision)"
+                        ),
+                        NappletField(
+                            "Received revision",
+                            "\(gap.receivedRevision)"
+                        ),
+                    ])
+                }
+                .font(NappletType.caption)
             }
             Spacer()
             Button("Refresh") {
                 model.refresh()
             }
         }
-        .padding()
-        .background(.orange.opacity(0.08))
-        .accessibilityElement(children: .combine)
+        .padding(NappletMetrics.comfortable)
+        .background(NappletInk.ground(for: .caution("")))
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            "Activity may be incomplete. Expected predecessor revision "
-                + "\(gap.expectedPredecessorRevision), received "
-                + "\(gap.receivedPredecessorRevision)."
+            "Some entries may be missing. \(ActivityPlainPresentation.updateGap)"
         )
-        .accessibilityHint("Activate Refresh to request a complete snapshot")
-        .accessibilityIdentifier("runtime-activity-update-gap")
     }
 
     @ViewBuilder
     private var facts: some View {
         if model.snapshot == nil {
-            ProgressView("Waiting for runtime activity…")
+            ProgressView("Loading…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityLabel("Waiting for the first activity snapshot")
+                .accessibilityLabel("Loading activity")
         } else if
             model.visibleFacts.isEmpty,
             let omitted = model.snapshot?.omittedFactCount,
             omitted > 0
         {
             ContentUnavailableView(
-                "Activity detail unavailable",
+                "Nothing to show here",
                 systemImage: "ellipsis.rectangle",
                 description: Text(
-                    "\(omitted) scoped runtime facts are not present in this "
-                        + "typed native projection yet."
+                    "\(omitted) entries exist but this version of the app "
+                        + "can't display them yet."
                 )
             )
         } else if model.visibleFacts.isEmpty {
             ContentUnavailableView(
-                "No matching activity",
+                "Nothing matches",
                 systemImage: "line.3.horizontal.decrease.circle",
-                description: Text(
-                    "Change the severity or category filters to show more facts."
-                )
+                description: Text("Change the filters to see more.")
             )
         } else {
             List(model.visibleFacts) { fact in
@@ -224,17 +211,19 @@ public struct ActivityDrawer: View {
                     detailFields: model.detailFields(for: fact)
                 )
             }
-            .overlay(alignment: .bottomTrailing) {
+            .listStyle(.inset)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 if let omitted = model.snapshot?.omittedFactCount, omitted > 0 {
-                    Text("\(omitted) facts omitted by the runtime projection")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(8)
-                        .background(.bar, in: Capsule())
-                        .padding()
-                        .accessibilityLabel(
-                            "\(omitted) activity facts omitted by the runtime projection"
-                        )
+                    VStack(spacing: 0) {
+                        Divider()
+                        Text("\(omitted) more entries can't be shown yet")
+                            .font(NappletType.caption)
+                            .foregroundStyle(NappletInk.inkSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, NappletMetrics.comfortable)
+                            .padding(.vertical, NappletMetrics.tight)
+                    }
+                    .background(.bar)
                 }
             }
         }
@@ -242,7 +231,7 @@ public struct ActivityDrawer: View {
 
     private var filters: some View {
         Menu {
-            Section("Severity") {
+            Section("Importance") {
                 ForEach(ActivitySeverity.allCases, id: \.self) { severity in
                     Toggle(
                         severity.title,
@@ -258,7 +247,7 @@ public struct ActivityDrawer: View {
                 }
             }
 
-            Section("Category") {
+            Section("Kind") {
                 ForEach(ActivityCategory.allCases, id: \.self) { category in
                     Toggle(
                         category.title,
@@ -276,6 +265,6 @@ public struct ActivityDrawer: View {
         } label: {
             Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
         }
-        .accessibilityHint("Filters activity by severity and category")
+        .accessibilityHint("Filters what's listed below")
     }
 }

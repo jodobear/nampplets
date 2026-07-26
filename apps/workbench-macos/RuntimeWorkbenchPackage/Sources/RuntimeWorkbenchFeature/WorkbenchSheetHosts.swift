@@ -4,7 +4,8 @@ struct ActivitySheetPresentation: Identifiable {
     enum Content {
         case admitted(
             source: RuntimeWorkbenchActivitySource,
-            scope: ActivityExactBuildScope
+            scope: ActivityExactBuildScope,
+            title: String?
         )
         case unavailable(reason: String)
     }
@@ -14,9 +15,10 @@ struct ActivitySheetPresentation: Identifiable {
 
     static func admitted(
         source: RuntimeWorkbenchActivitySource,
-        scope: ActivityExactBuildScope
+        scope: ActivityExactBuildScope,
+        title: String? = nil
     ) -> Self {
-        Self(content: .admitted(source: source, scope: scope))
+        Self(content: .admitted(source: source, scope: scope, title: title))
     }
 
     static func unavailable(reason: String) -> Self {
@@ -32,18 +34,28 @@ struct ActivitySheetHost: View {
     @ViewBuilder
     var body: some View {
         switch presentation.content {
-        case let .admitted(source, scope):
+        case let .admitted(source, scope, title):
             ActivityDrawer(
                 source: source,
-                scope: scope
+                scope: scope,
+                nappletTitle: title
             )
         case let .unavailable(reason):
+            let presentation = WorkbenchUnavailablePresentation.activity(
+                detail: reason
+            )
             NavigationStack {
-                ContentUnavailableView(
-                    "Activity unavailable",
-                    systemImage: "waveform.path.ecg.rectangle",
-                    description: Text(reason)
-                )
+                VStack(spacing: NappletMetrics.comfortable) {
+                    ContentUnavailableView(
+                        presentation.title,
+                        systemImage: presentation.symbol,
+                        description: Text(presentation.message)
+                    )
+                    NappletEvidence {
+                        NappletFieldGrid(fields: presentation.evidenceFields)
+                    }
+                    .frame(maxWidth: NappletMetrics.measure)
+                }
                 .navigationTitle("Recent Activity")
                 #if os(macOS)
                 .frame(minWidth: 620, minHeight: 420)
@@ -63,15 +75,21 @@ struct PermissionSheetHost: View {
         if let manager {
             PermissionReviewSheet(manager: manager)
         } else {
+            let presentation = WorkbenchUnavailablePresentation.permission(
+                detail: error ?? "No permission manager was admitted."
+            )
             NavigationStack {
-                ContentUnavailableView(
-                    "Permission review unavailable",
-                    systemImage: "lock.slash",
-                    description: Text(
-                        error
-                            ?? "The exact-build permission review was not admitted."
+                VStack(spacing: NappletMetrics.comfortable) {
+                    ContentUnavailableView(
+                        presentation.title,
+                        systemImage: presentation.symbol,
+                        description: Text(presentation.message)
                     )
-                )
+                    NappletEvidence {
+                        NappletFieldGrid(fields: presentation.evidenceFields)
+                    }
+                    .frame(maxWidth: NappletMetrics.measure)
+                }
                 .navigationTitle("Review Permissions")
                 #if os(macOS)
                 .frame(minWidth: 620, minHeight: 420)

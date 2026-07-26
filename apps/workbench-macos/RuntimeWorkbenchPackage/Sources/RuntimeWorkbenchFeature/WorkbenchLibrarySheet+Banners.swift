@@ -3,57 +3,76 @@ import SwiftUI
 extension WorkbenchLibrarySheet {
     func unavailableBanner(_ reason: String) -> some View {
         LibraryStatusBanner(
-            title: "Installed library unavailable",
-            message: reason,
+            title: "Can't reach your napplets right now",
+            message: WorkbenchLibraryPlainPresentation.unavailableMessage,
             symbol: "externaldrive.badge.xmark",
-            color: .orange,
-            accessibilityIdentifier: "workbench-library-unavailable"
+            color: NappletInk.caution,
+            accessibilityIdentifier: "workbench-library-unavailable",
+            evidenceFields: [NappletField("Reason", reason)]
         )
     }
 
+    /// The refusal code is the runtime's own identifier and means nothing to
+    /// the person reading it. The message is the part written for them, so it
+    /// is the part shown; the code stays available in activity.
     func refusalBanner(_ refusal: WorkbenchLibraryRefusal) -> some View {
         LibraryStatusBanner(
-            title: "Runtime refused an action",
-            message: "\(refusal.code): \(refusal.message)",
+            title: "That didn't work",
+            message: WorkbenchLibraryPlainPresentation.refusalMessage,
             symbol: "hand.raised",
-            color: .red,
-            accessibilityIdentifier: "workbench-library-refusal"
+            color: NappletInk.refusal,
+            accessibilityIdentifier: "workbench-library-refusal",
+            evidenceFields: [
+                NappletField("Code", refusal.code),
+                NappletField("Detail", refusal.message),
+                NappletField("Occurred at milliseconds", "\(refusal.occurredAtMillis)"),
+            ]
         )
     }
 
     func updateGapBanner(
         _ gap: WorkbenchLibraryUpdateGap
     ) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: NappletMetrics.snug) {
             Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
-                .foregroundStyle(.orange)
+                .foregroundStyle(NappletInk.inkSecondary)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Library update may be incomplete")
+            VStack(alignment: .leading, spacing: NappletMetrics.hairline) {
+                Text("This list might be out of date")
                     .font(.headline)
-                Text(
-                    "Expected revision \(gap.expectedPredecessorRevision), "
-                        + "received \(gap.receivedPredecessorRevision)."
-                )
+                    .accessibilityIdentifier("workbench-library-update-gap")
+                Text("Refresh to get the latest available list.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                NappletEvidence(label: "Why") {
+                    NappletFieldGrid(fields: [
+                        NappletField(
+                            "Expected predecessor revision",
+                            "\(gap.expectedPredecessorRevision)"
+                        ),
+                        NappletField(
+                            "Received predecessor revision",
+                            "\(gap.receivedPredecessorRevision)"
+                        ),
+                        NappletField(
+                            "Received revision",
+                            "\(gap.receivedRevision)"
+                        ),
+                    ])
+                }
                 .font(.caption)
-                .foregroundStyle(.secondary)
             }
             Spacer()
             Button("Refresh") {
                 model.refresh()
             }
         }
-        .padding()
-        .background(.orange.opacity(0.08))
-        .accessibilityElement(children: .combine)
+        .padding(NappletMetrics.comfortable)
+        .background(NappletInk.fillQuiet)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            "Library update may be incomplete. Expected predecessor revision "
-                + "\(gap.expectedPredecessorRevision), received "
-                + "\(gap.receivedPredecessorRevision)."
+            "This list might be out of date. Refresh to get the latest "
+                + "available list."
         )
-        .accessibilityHint(
-            "Activate Refresh to request an authoritative snapshot"
-        )
-        .accessibilityIdentifier("workbench-library-update-gap")
     }
 }

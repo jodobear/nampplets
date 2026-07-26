@@ -145,74 +145,6 @@ extension RuntimeWorkbenchUITests {
         ) == .completed
     }
 
-    /// Reveals the `permission-decision-<domain>` control in the native
-    /// permission review sheet and returns it.
-    ///
-    /// The permission list is rendered inside a `ScrollView` whose sheet
-    /// window is only given an `idealHeight`, not a fixed one — CI's
-    /// virtual display can size it down toward its `minHeight` and reveal
-    /// far less of the list than a local run does. Two earlier attempts at
-    /// simulating swipe gestures from this side of the fence
-    /// (`scrollToHittable` below) proved unable to keep up with that: a
-    /// single-direction swipe loop can overshoot a target that sits near
-    /// the end of the list right off the top of the scroll view's visible
-    /// bounds, with no safe way to correct without reintroducing a flicker
-    /// bug a prior fix hit when it tried swiping both directions.
-    ///
-    /// `PermissionReviewSheet` now exposes a deterministic, UI-test-only
-    /// hook instead: a `permission-scroll-to-<domain>` button that lives
-    /// outside the `ScrollView` (so it is always hittable, regardless of
-    /// scroll position) and calls `ScrollViewProxy.scrollTo` directly,
-    /// which is exact and cannot overshoot. Prefer that hook when it
-    /// exists; fall back to the swipe-based heuristic only for launches
-    /// that do not set `NMP_WORKBENCH_UI_TEST_SCENARIO` (and therefore
-    /// never render the hook), such as the opt-in live catalog journey.
-    @MainActor
-    func scrollPermissionDecisionIntoView(
-        domain: String,
-        in app: XCUIApplication,
-        message: String? = nil
-    ) -> XCUIElement {
-        let decision = app.descendants(matching: .any)[
-            "permission-decision-\(domain)"
-        ]
-        XCTAssertTrue(
-            decision.waitForExistence(timeout: 10),
-            message ?? "The \(domain) decision must exist in the native review"
-        )
-
-        let anchor = app.buttons["permission-scroll-to-\(domain)"]
-        if anchor.waitForExistence(timeout: 2) {
-            let frameBeforeClick = decision.frame
-            anchor.click()
-            let settled = waitForStableFrame(decision, timeout: 5)
-            if !settled {
-                NSLog(
-                    "scrollPermissionDecisionIntoView: \(domain) did not "
-                        + "settle after clicking the deterministic-scroll "
-                        + "anchor. anchorExists=\(anchor.exists) "
-                        + "anchorHittable=\(anchor.isHittable) "
-                        + "decisionExists=\(decision.exists) "
-                        + "decisionHittable=\(decision.isHittable) "
-                        + "frameBeforeClick=\(frameBeforeClick) "
-                        + "frameAfterClick=\(decision.frame)"
-                )
-            }
-            XCTAssertTrue(
-                settled,
-                message
-                    ?? "The \(domain) decision must settle into view after "
-                    + "the deterministic scroll"
-            )
-        } else {
-            XCTAssertTrue(
-                scrollToHittable(decision, in: app),
-                message ?? "The \(domain) decision must be reachable in the native review"
-            )
-        }
-        return decision
-    }
-
     @MainActor
     func scrollToHittable(
         _ element: XCUIElement,
@@ -340,58 +272,6 @@ extension RuntimeWorkbenchUITests {
         let margin: CGFloat = 2
         let visibleBounds = scrollView.frame.insetBy(dx: 0, dy: margin)
         return visibleBounds.contains(element.frame)
-    }
-
-    /// Clicks `decision` to open its native popup menu and waits for `allow`
-    /// to appear inside it, retrying the click a bounded number of times.
-    ///
-    /// A click delivered immediately after `scrollToHittable` scrolls a row
-    /// into view can land on a control whose popup-menu tracking session
-    /// never stabilizes in the accessibility tree — the row was hittable,
-    /// but only just, right at the edge of the scroll view's clip bounds.
-    /// The first click is silently swallowed rather than opening a menu.
-    /// Retrying the click (instead of only waiting longer for a menu that
-    /// was never opened) recovers deterministically without weakening what
-    /// this is actually asserting: that the runtime offers this decision.
-    ///
-    /// The retry alone only covers the swallowed-click mode. A menu that
-    /// merely opened *slowly* — under a machine sharing its single desktop
-    /// session with concurrent builds, an NSMenu tracking session can take
-    /// longer than the old 2s budget to publish its items into the
-    /// accessibility tree — is still an **open** menu, and a second click on
-    /// the same popup control toggles it shut. That turned one slow menu
-    /// into three failed attempts, which is a decision-menu failure of
-    /// exactly the shape issue #137 reports.
-    ///
-    /// Both halves of the fix are here because neither is sufficient alone:
-    ///
-    /// * The re-click is now guarded on no menu being open. That is the
-    ///   direct fix, but it can only see a half-open menu that has already
-    ///   reached the accessibility tree as a `menus` element.
-    /// * The final attempt therefore also waits the suite's standard 10s, so
-    ///   a menu still entirely invisible to that guard gets a budget long
-    ///   enough to finish opening, with no further click behind it to close
-    ///   it again.
-    ///
-    /// The first attempt keeps the short 2s budget: a swallowed click must
-    /// still be retried promptly, and that is the common case.
-    @MainActor
-    func openDecisionMenu(
-        _ decision: XCUIElement,
-        revealing allow: XCUIElement,
-        in app: XCUIApplication
-    ) -> Bool {
-        let attempts = 3
-        for attempt in 0 ..< attempts {
-            if attempt == 0 || !app.menus.firstMatch.exists {
-                decision.click()
-            }
-            let isFinalAttempt = attempt == attempts - 1
-            if allow.waitForExistence(timeout: isFinalAttempt ? 10 : 2) {
-                return true
-            }
-        }
-        return false
     }
 
     /// `swipeUp()` requests a fast (flinged) scroll, which hands off to
