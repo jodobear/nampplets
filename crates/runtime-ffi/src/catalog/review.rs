@@ -54,14 +54,13 @@ impl RuntimeCatalogService {
         let operation_id =
             self.register_operation(ActiveCancellation::Resolve(cancellation.clone()))?;
         let worker_cancellation = cancellation.clone();
+        let worker_coordinate = coordinate.clone();
         let (sender, receiver) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("runtime-catalog-review".to_owned())
             .spawn(move || {
                 let _permit = permit;
-                let result = resolver
-                    .begin_review(&coordinate, &worker_cancellation)
-                    .map(Arc::new);
+                let result = resolver.resolve(&worker_coordinate, &worker_cancellation);
                 let _ = sender.send(result);
             })
             .map_err(|error| {
@@ -85,11 +84,12 @@ impl RuntimeCatalogService {
             }
         };
         self.remove_operation(operation_id);
-        let _ = worker.join();
+        if !matches!(&result, Err(RuntimeCatalogError::Deadline { .. })) {
+            let _ = worker.join();
+        }
         let review = result?;
         let mut state = self.reviews.lock();
         if state.reviews.len() >= MAXIMUM_PENDING_REVIEWS {
-            let _ = review.cancel();
             return Err(RuntimeCatalogError::ReviewCapacity {
                 maximum: MAXIMUM_PENDING_REVIEWS as u64,
             });
@@ -102,11 +102,12 @@ impl RuntimeCatalogService {
                     reason: "catalog review token space is exhausted".to_owned(),
                 })?;
         let token = format!("catalog-review-{}", state.next_token);
-        let projection = project_review(&token, review.as_ref());
+        let projection =
+            project_review(&token, &coordinate, review.handle(), review.lookup_facts())?;
         state.reviews.insert(
             token,
             StoredReview {
-                review,
+                handle: review.handle().clone(),
                 projection: projection.clone(),
             },
         );
@@ -114,73 +115,24 @@ impl RuntimeCatalogService {
     }
 
     pub fn cancel_review(&self, token: &str) -> Result<(), RuntimeCatalogError> {
-        let stored = self
-            .reviews
+        self.reviews
             .lock()
             .reviews
             .remove(token)
             .ok_or(RuntimeCatalogError::StaleReview)?;
-        stored
-            .review
-            .cancel()
-            .map_err(|_| RuntimeCatalogError::StaleReview)
+        Ok(())
     }
 
     pub fn confirm_review(
         &self,
         token: &str,
     ) -> Result<RuntimeCatalogConfirmedArtifact, RuntimeCatalogError> {
-        let permit = self.admission.reserve()?;
         let stored = self
             .reviews
             .lock()
             .reviews
             .remove(token)
             .ok_or(RuntimeCatalogError::StaleReview)?;
-        let resolver = Arc::clone(&self.resolver);
-        let review = Arc::clone(&stored.review);
-        let cancellation = CancellationToken::default();
-        let operation_id =
-            self.register_operation(ActiveCancellation::Resolve(cancellation.clone()))?;
-        let worker_cancellation = cancellation.clone();
-        let (sender, receiver) = mpsc::sync_channel(1);
-        let worker = thread::Builder::new()
-            .name("runtime-catalog-confirm".to_owned())
-            .spawn(move || {
-                let _permit = permit;
-                let result = resolver.confirm_review(&review, &worker_cancellation);
-                let _ = sender.send(result);
-            })
-            .map_err(|error| {
-                self.remove_operation(operation_id);
-                RuntimeCatalogError::WorkerUnavailable {
-                    reason: error.to_string(),
-                }
-            })?;
-        let result = match receiver.recv_timeout(self.deadline) {
-            Ok(result) => result.map_err(map_resolve_error),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                cancellation.cancel();
-                let _ = receiver.recv();
-                Err(RuntimeCatalogError::Deadline {
-                    milliseconds: duration_millis(self.deadline),
-                })
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                Err(RuntimeCatalogError::WorkerUnavailable {
-                    reason: "catalog confirmation worker ended without a result".to_owned(),
-                })
-            }
-        };
-        self.remove_operation(operation_id);
-        // A timed-out resolver is cancelled cooperatively, but the public
-        // operation must remain bounded even if a transport does not wake
-        // immediately. Dropping the handle detaches that already-cancelled
-        // worker; successful and terminal workers are joined normally.
-        if !matches!(&result, Err(RuntimeCatalogError::Deadline { .. })) {
-            let _ = worker.join();
-        }
-        let resolved = result?;
         Ok(RuntimeCatalogConfirmedArtifact {
             confirmation: RuntimeCatalogConfirmation {
                 event_id: stored.projection.event_id,
@@ -192,7 +144,7 @@ impl RuntimeCatalogService {
                 capabilities: stored.projection.capabilities,
                 provenance: stored.projection.provenance,
             },
-            handle: resolved.handle().clone(),
+            handle: stored.handle,
         })
     }
 }

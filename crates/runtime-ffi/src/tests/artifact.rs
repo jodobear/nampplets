@@ -14,6 +14,13 @@ fn signed_artifact_crosses_only_as_sealed_handle_and_exact_reads() {
     let artifact = verified.artifact.expect("published fixture verifies");
     assert!(verified.refusal.is_none());
     assert!(artifact.requires().is_empty());
+    assert_eq!(
+        artifact
+            .handle
+            .authenticated_requirements()
+            .expect("verified entry requirements"),
+        ["identity", "inc", "outbox", "resource", "theme", "link"]
+    );
     controller.install(Arc::clone(&artifact));
     controller.set_grant(
         Arc::clone(&artifact),
