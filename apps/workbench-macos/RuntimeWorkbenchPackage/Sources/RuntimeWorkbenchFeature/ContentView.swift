@@ -64,7 +64,13 @@ public struct ContentView: View {
     @State var accountSnapshot: WorkbenchAccountSnapshot
     @State var isInspectorPresented = false
     @State var inspectorTab: InspectorTab = .overview
-    @State var isAccountSheetPresented = false
+    @State var accountSheetRoute: WorkbenchAccountSheetRoute?
+    var isAccountSheetPresented: Bool {
+        get { accountSheetRoute != nil }
+        nonmutating set {
+            accountSheetRoute = newValue ? .manage : nil
+        }
+    }
     @State var isCatalogSheetPresented = false
     @State var isLibrarySheetPresented = false
     @State var isPermissionSheetPresented = false
@@ -150,8 +156,11 @@ public struct ContentView: View {
 
     public var body: some View {
         platformBody
-            .sheet(isPresented: $isAccountSheetPresented) {
-            WorkbenchAccountSheet(manager: accountManager)
+            .sheet(item: $accountSheetRoute) { route in
+            WorkbenchAccountSheet(
+                manager: accountManager,
+                route: route
+            )
         }
         .sheet(isPresented: $isCatalogSheetPresented) {
             CatalogSheet(
@@ -191,8 +200,8 @@ public struct ContentView: View {
         .task(id: profile.map(ObjectIdentifier.init)) {
             await bootstrapProfile()
         }
-        .onChange(of: isAccountSheetPresented) { _, isPresented in
-            if !isPresented {
+        .onChange(of: accountSheetRoute) { _, route in
+            if route == nil {
                 accountSnapshot = accountManager.snapshot()
             }
         }

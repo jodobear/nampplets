@@ -23,24 +23,20 @@ import Testing
 }
 
 @MainActor
-@Test func readOnlyRegistrationAndActivationRemainSeparateActions()
+@Test func publicIdentityUsesReadOnlyRegistrationBehindTheSameIntent()
     async throws
 {
     let manager = RecordingAccountManager()
     let model = WorkbenchAccountSheetModel(manager: manager)
 
-    model.publicIdentity = "npub1test"
-    await model.registerReadOnly()
+    model.identity = "npub1test"
+    let succeeded = await model.continueWithIdentity()
 
-    #expect(model.publicIdentity.isEmpty)
+    #expect(succeeded)
+    #expect(model.identity.isEmpty)
     #expect(model.snapshot.accounts.count == 1)
     #expect(model.snapshot.accounts.first?.connectionKind == .readOnly)
-    #expect(model.snapshot.activeAccount == nil)
-    #expect(manager.actions == [.registerReadOnly])
-
     let handle = try #require(model.snapshot.accounts.first?.handle)
-    await model.activate(handle)
-
     #expect(model.snapshot.activeAccount?.handle == handle)
     #expect(manager.actions == [.registerReadOnly, .activate(handle)])
 }
@@ -71,37 +67,81 @@ import Testing
 }
 
 @MainActor
-@Test func registrationAndActivationRemainExplicitSeparateActions() async throws {
+@Test func nsecUsesSigningRegistrationBehindTheSameIntent() async throws {
     let manager = RecordingAccountManager()
     let model = WorkbenchAccountSheetModel(manager: manager)
 
-    model.secret = "test-secret"
-    await model.register()
+    model.identity = " \n nsec1test \t"
+    let succeeded = await model.continueWithIdentity()
 
-    #expect(model.secret.isEmpty)
+    #expect(succeeded)
+    #expect(model.identity.isEmpty)
     #expect(model.snapshot.accounts.count == 1)
-    #expect(model.snapshot.activeAccount == nil)
-    #expect(manager.actions == [.register])
-
     let handle = try #require(model.snapshot.accounts.first?.handle)
-    await model.activate(handle)
-
     #expect(model.snapshot.activeAccount?.handle == handle)
     #expect(manager.actions == [.register, .activate(handle)])
+}
+
+@MainActor
+@Test func bareHexRequiresAnExplicitUseBeforeRegistration() async {
+    let manager = RecordingAccountManager()
+    let model = WorkbenchAccountSheetModel(manager: manager)
+    let ambiguousKey = String(repeating: "a", count: 64)
+
+    model.identity = ambiguousKey
+
+    #expect(model.requiresIdentityUseChoice)
+    #expect(model.ambiguousIdentityUse == nil)
+    let succeeded = await model.continueWithIdentity()
+    #expect(!succeeded)
+    #expect(model.identity == ambiguousKey)
+    #expect(manager.actions.isEmpty)
+}
+
+@MainActor
+@Test func bareHexCanBeUsedForSigningAfterExplicitChoice() async throws {
+    let manager = RecordingAccountManager()
+    let model = WorkbenchAccountSheetModel(manager: manager)
+
+    model.identity = String(repeating: "a", count: 64)
+    model.ambiguousIdentityUse = .signing
+    let succeeded = await model.continueWithIdentity()
+
+    #expect(succeeded)
+    #expect(model.identity.isEmpty)
+    let handle = try #require(model.snapshot.activeAccount?.handle)
+    #expect(manager.actions == [.register, .activate(handle)])
+}
+
+@MainActor
+@Test func bareHexCanBeReadOnlyAfterExplicitChoice() async throws {
+    let manager = RecordingAccountManager()
+    let model = WorkbenchAccountSheetModel(manager: manager)
+
+    model.identity = String(repeating: "a", count: 64)
+    model.ambiguousIdentityUse = .readOnly
+    let succeeded = await model.continueWithIdentity()
+
+    #expect(succeeded)
+    #expect(model.identity.isEmpty)
+    #expect(model.snapshot.activeAccount?.connectionKind == .readOnly)
+    let handle = try #require(model.snapshot.activeAccount?.handle)
+    #expect(manager.actions == [.registerReadOnly, .activate(handle)])
 }
 
 @MainActor
 @Test func registrationErrorCannotEchoSubmittedSecret() async {
     let manager = EchoingFailureAccountManager()
     let model = WorkbenchAccountSheetModel(manager: manager)
-    let submittedSecret = "secret-that-must-not-render"
+    let submittedSecret = "nsec1secret-that-must-not-render"
 
-    model.secret = submittedSecret
-    await model.register()
+    model.identity = submittedSecret
+    let succeeded = await model.continueWithIdentity()
 
-    #expect(model.secret.isEmpty)
+    #expect(!succeeded)
+    #expect(model.identity.isEmpty)
     #expect(model.errorMessage?.contains(submittedSecret) == false)
-    #expect(model.errorMessage?.contains("••••") == true)
+    #expect(model.errorMessage?.contains("wasn’t accepted") == true)
 }
 
 private extension WorkbenchStoredAccount {
@@ -135,14 +175,18 @@ private final class RecordingAccountManager: WorkbenchAccountManaging {
     }
 
     func register(secret: String) async {
-        guard secret == "test-secret" else { return }
+        guard secret == "nsec1test"
+            || secret == String(repeating: "a", count: 64)
+        else { return }
         let account = WorkbenchStoredAccount.fixture(handle: "registered")
         accounts.append(account)
         actions.append(.register)
     }
 
     func registerReadOnly(publicIdentity: String) async {
-        guard publicIdentity == "npub1test" else { return }
+        guard publicIdentity == "npub1test"
+            || publicIdentity == String(repeating: "a", count: 64)
+        else { return }
         let account = WorkbenchStoredAccount(
             handle: WorkbenchAccountHandle(
                 opaqueValue: "registered-read-only"
