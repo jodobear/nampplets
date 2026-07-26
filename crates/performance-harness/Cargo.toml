@@ -15,6 +15,7 @@ thiserror.workspace = true
 cucumber.workspace = true
 nmp-native-runtime-core = { path = "../runtime-core" }
 tempfile.workspace = true
+tokio.workspace = true
 
 [[test]]
 name = "bdd"

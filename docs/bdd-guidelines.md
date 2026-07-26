@@ -44,6 +44,7 @@ Bringing a new crate/package into scope means:
 | --- | --- | --- |
 | `crates/runtime-app` | Pilot | `cargo test -p nmp-native-runtime-app --test bdd` (also runs under `cargo test --workspace`) |
 | `crates/runtime-ffi` | Pilot | `cargo test -p nmp-native-runtime-ffi --test bdd` (also runs under `cargo test --workspace`) |
+| `crates/performance-harness` | Pilot | `cargo test -p nmp-native-performance-harness --test bdd` (also runs under `cargo test --workspace`) |
 
 ## Rust: cucumber
 
@@ -57,7 +58,10 @@ Bringing a new crate/package into scope means:
   path. In `crates/runtime-app`, both `tests/kernel_*.rs` (`#[test]`) and
   `tests/bdd.rs` (cucumber) share the exact same `Rig` harness from
   `tests/support/mod.rs`, so a scenario and a unit test exercise identical
-  setup and dispatch code.
+  setup and dispatch code. The performance harness follows the same rule:
+  its Cucumber scenarios and ordinary `ResourceTracker` exemplar share
+  `tests/support/mod.rs`, including the authoritative Python v1 validator
+  invocation.
 - A scenario is a *port* of already-verified behavior until the pilot
   proves the tooling; do not let scenario coverage get ahead of what is
   independently known to be correct. Expand past that once the approach
