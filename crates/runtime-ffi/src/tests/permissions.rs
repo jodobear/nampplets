@@ -1,60 +1,6 @@
 use super::*;
 
 #[test]
-fn pinned_good_morning_installs_rust_owned_permission_profile() {
-    let temp = TempDir::new().unwrap();
-    let controller = controller(&temp);
-    let artifact = controller
-        .verify_artifact(
-            EVENT.to_vec(),
-            ArtifactCoordinate::Named {
-                author: AUTHOR.to_owned(),
-                d_tag: GOOD_MORNING_D_TAG.to_owned(),
-            },
-        )
-        .artifact
-        .expect("published fixture verifies");
-    assert!(
-        artifact.requires().is_empty(),
-        "the immutable manifest remains unchanged"
-    );
-
-    controller.install(Arc::clone(&artifact));
-    let review = controller
-        .permission_review(exact_coordinate(&artifact))
-        .review
-        .expect("the installed exact build has a permission review");
-    assert_eq!(
-        review
-            .capabilities
-            .iter()
-            .map(|capability| { (capability.domain.as_str(), capability.requirement) })
-            .collect::<Vec<_>>(),
-        vec![
-            ("identity", RuntimePermissionRequirement::Required),
-            ("inc", RuntimePermissionRequirement::Required),
-            ("outbox", RuntimePermissionRequirement::Required),
-            ("resource", RuntimePermissionRequirement::Optional),
-            ("theme", RuntimePermissionRequirement::Optional),
-            ("link", RuntimePermissionRequirement::Optional),
-        ]
-    );
-    assert!(!review.launch_permitted);
-    let outbox = review
-        .capabilities
-        .iter()
-        .find(|capability| capability.domain == "outbox")
-        .expect("outbox permission");
-    assert_eq!(outbox.sensitivity, RuntimePermissionSensitivity::Sensitive);
-
-    controller.launch(artifact, RuntimeExecutionProfile::Legacy);
-    assert!(
-        controller.snapshot_value().sessions.is_empty(),
-        "required compatibility capabilities are enforced before execution"
-    );
-}
-
-#[test]
 fn permission_review_and_atomic_batch_are_exact_typed_and_restart_safe() {
     let temp = TempDir::new().unwrap();
     let runtime = controller(&temp);

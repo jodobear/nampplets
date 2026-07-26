@@ -1969,6 +1969,7 @@ name = "nmp-native-runtime-ffi"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "cucumber",
  "nmp",
  "nmp-native-artifact",
  "nmp-native-catalog-resolver",
@@ -1982,6 +1983,7 @@ dependencies = [
  "nmp-native-runtime-core",
  "nmp-native-runtime-store",
  "nmp-native-surface",
+ "nmp-native-test-harness",
  "nostr",
  "parking_lot",
  "serde",

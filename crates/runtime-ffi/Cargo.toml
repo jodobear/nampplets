@@ -40,8 +40,14 @@ tokio.workspace = true
 uniffi.workspace = true
 
 [dev-dependencies]
+cucumber.workspace = true
+nmp-native-test-harness = { path = "../test-harness" }
 nostr = "0.44.4"
 tempfile.workspace = true
+
+[[test]]
+name = "bdd"
+harness = false
 
 [lints]
 workspace = true
