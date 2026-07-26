@@ -6,6 +6,7 @@ mod library;
 mod observation;
 mod open;
 mod permissions;
+mod preferences;
 mod providers;
 mod session;
 pub(crate) mod support;
@@ -14,6 +15,7 @@ mod workspace;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -34,9 +36,9 @@ use parking_lot::Mutex;
 use tokio::sync::watch;
 
 use crate::{
-    RuntimeRefusal, catalog::RuntimeCatalogService, diagnostics::RuntimeDiagnosticsService,
-    native_capabilities::CallbackArtifactSource, native_capabilities::RuntimeThemeSource,
-    support::now_millis,
+    RuntimeProfilePreferences, RuntimeRefusal, catalog::RuntimeCatalogService,
+    diagnostics::RuntimeDiagnosticsService, native_capabilities::CallbackArtifactSource,
+    native_capabilities::RuntimeThemeSource, support::now_millis,
 };
 
 #[derive(uniffi::Object)]
@@ -65,6 +67,9 @@ pub struct RuntimeController {
     signal: watch::Sender<u64>,
     observers: Arc<AtomicUsize>,
     maximum_observers: usize,
+    profile_preferences: Mutex<RuntimeProfilePreferences>,
+    nmp_store_path: Option<PathBuf>,
+    artifact_cache_path: PathBuf,
     closed: AtomicBool,
 }
 

@@ -13,6 +13,7 @@ mod diagnostics;
 mod intent_dispatch;
 mod native_capabilities;
 mod permission_types;
+mod profile_preferences;
 mod projection;
 mod snapshot_types;
 mod support;
@@ -31,7 +32,7 @@ pub use catalog::{
     RuntimeCatalogReviewResult, RuntimeCatalogShortfall, RuntimeCatalogSource,
     RuntimeCatalogSourceAccess, RuntimeCatalogSourceState, RuntimeCatalogWindowState,
 };
-pub use config::{RuntimeConfig, RuntimeOpenError};
+pub use config::{RuntimeConfig, RuntimeOpenError, RuntimePermissionDefault};
 pub use controller::RuntimeController;
 pub use diagnostics::{
     RuntimeRelayAccess, RuntimeRelayCoverage, RuntimeRelayDiagnostics,
@@ -53,6 +54,10 @@ pub use permission_types::{
     RuntimePermissionExistingDecision, RuntimePermissionPlatformAvailability,
     RuntimePermissionRequirement, RuntimePermissionReviewResult, RuntimePermissionReviewSnapshot,
     RuntimePermissionSensitivity, RuntimeSensitivity,
+};
+pub use profile_preferences::{
+    RuntimeProfilePreferences, RuntimeProfilePreferencesUpdate, RuntimeStorageResetResult,
+    RuntimeStorageSnapshot,
 };
 pub use snapshot_types::{
     ObservationStart, RuntimeBindingSnapshot, RuntimeErrorSnapshot, RuntimeEvent,

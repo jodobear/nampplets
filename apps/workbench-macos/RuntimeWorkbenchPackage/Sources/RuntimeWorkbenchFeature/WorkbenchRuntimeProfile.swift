@@ -16,9 +16,18 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
         let appRelays: [String]
     }
 
+    struct OpeningConfiguration: Sendable {
+        let storageRoot: URL
+        let indexerRelays: [String]
+        let appRelays: [String]
+        let accountPersistence: NativeRuntimeAccountPersistence
+        let permissionDefault: NativeRuntimePermissionDefault
+    }
+
     private static let maximumOperatorRelaysPerLane = 4
 
     let native: NativeRuntimeProfile
+    let openingConfiguration: OpeningConfiguration
     let catalogStateLock = NSLock()
     let persistedArtifactResolver: PersistedArtifactResolver
     private var catalogReviews: [String: NativeRuntimeCatalogReview] = [:]
@@ -105,6 +114,7 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
         indexerRelays: [String] = [],
         appRelays: [String] = [],
         accountPersistence: NativeRuntimeAccountPersistence = .transient,
+        permissionDefault: NativeRuntimePermissionDefault = .askEveryTime,
         persistedArtifactResolver: PersistedArtifactResolver? = nil
     ) throws -> WorkbenchRuntimeProfile {
         let native = try NativeRuntimeProfile.open(
@@ -112,11 +122,19 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
                 storageRoot: storageRoot,
                 indexerRelays: indexerRelays,
                 appRelays: appRelays,
-                accountPersistence: accountPersistence
+                accountPersistence: accountPersistence,
+                permissionDefault: permissionDefault
             )
         )
         return WorkbenchRuntimeProfile(
             native: native,
+            openingConfiguration: OpeningConfiguration(
+                storageRoot: storageRoot,
+                indexerRelays: indexerRelays,
+                appRelays: appRelays,
+                accountPersistence: accountPersistence,
+                permissionDefault: permissionDefault
+            ),
             persistedArtifactResolver: persistedArtifactResolver
         )
     }
@@ -129,15 +147,28 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
 
     init(
         native: NativeRuntimeProfile,
+        openingConfiguration: OpeningConfiguration,
         persistedArtifactResolver: PersistedArtifactResolver? = nil
     ) {
         self.native = native
+        self.openingConfiguration = openingConfiguration
         self.persistedArtifactResolver =
             persistedArtifactResolver ?? Self.resolvePersistedArtifact
     }
 
     public func close() {
         native.close()
+    }
+
+    public func reopened() throws -> WorkbenchRuntimeProfile {
+        try Self.open(
+            storageRoot: openingConfiguration.storageRoot,
+            indexerRelays: openingConfiguration.indexerRelays,
+            appRelays: openingConfiguration.appRelays,
+            accountPersistence: openingConfiguration.accountPersistence,
+            permissionDefault: openingConfiguration.permissionDefault,
+            persistedArtifactResolver: persistedArtifactResolver
+        )
     }
 
     func storeCatalogReview(_ review: NativeRuntimeCatalogReview) {

@@ -1,5 +1,6 @@
 //! Controller construction: every native capability wiring lives here.
 
+use std::path::PathBuf;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicUsize},
@@ -33,6 +34,7 @@ use super::{RuntimeController, RuntimeShellEnvironment, SystemClock};
 use crate::{
     ArtifactSource, NativeAppearanceSource, NativeIncActionExecutor,
     NativeIntentActivationExecutor, NativeSettingsExecutor, RuntimeConfig, RuntimeOpenError,
+    RuntimeProfilePreferences,
     catalog::RuntimeCatalogService,
     diagnostics::RuntimeDiagnosticsService,
     intent_dispatch::{
@@ -43,6 +45,7 @@ use crate::{
         CallbackArtifactSource, CallbackIncNativeActions, CallbackSettingsExecutor,
         RuntimeThemeSource,
     },
+    profile_preferences::{project_profile_preferences, validate_configured_profile_preferences},
     projection::theme_from_appearance,
 };
 
@@ -159,6 +162,22 @@ pub(super) fn open_runtime_controller(
             },
         )?,
     );
+    let configured_preferences =
+        validate_configured_profile_preferences(RuntimeProfilePreferences {
+            indexer_relays: config.indexer_relays.clone(),
+            app_relays: config.app_relays.clone(),
+            permission_default: config.permission_default,
+        })
+        .map_err(|detail| RuntimeOpenError::InvalidConfig { detail })?;
+    let profile_preferences = runtime_store
+        .profile_preferences()
+        .map_err(|error| RuntimeOpenError::RuntimeStore {
+            detail: error.to_string(),
+        })?
+        .unwrap_or(configured_preferences);
+    let projected_profile_preferences = project_profile_preferences(&profile_preferences);
+    let nmp_store_path = config.nmp_store_path.as_ref().map(PathBuf::from);
+    let artifact_cache_path = PathBuf::from(&config.artifact_cache_path);
     let artifact_cache = Arc::new(
         FileArtifactCache::open(&config.artifact_cache_path).map_err(|error| {
             RuntimeOpenError::ArtifactCache {
@@ -170,8 +189,8 @@ pub(super) fn open_runtime_controller(
         NmpDataPlane::open(
             EngineConfig {
                 store_path: config.nmp_store_path,
-                indexer_relays: config.indexer_relays,
-                app_relays: config.app_relays,
+                indexer_relays: profile_preferences.indexer_relays.clone(),
+                app_relays: profile_preferences.app_relays.clone(),
                 fallback_relays: config.fallback_relays,
                 allowed_local_relay_hosts: config.allowed_local_relay_hosts,
                 max_relays: config.maximum_nmp_relays,
@@ -333,6 +352,7 @@ pub(super) fn open_runtime_controller(
         store: runtime_store.clone(),
         data_plane: data_plane.clone(),
         clock: Arc::new(SystemClock),
+        permission_default: profile_preferences.permission_default,
         shell_provider,
         providers,
     })
@@ -368,6 +388,9 @@ pub(super) fn open_runtime_controller(
         signal,
         observers: Arc::new(AtomicUsize::new(0)),
         maximum_observers: config.maximum_observers,
+        profile_preferences: Mutex::new(projected_profile_preferences),
+        nmp_store_path,
+        artifact_cache_path,
         closed: AtomicBool::new(false),
     });
     Ok(controller)

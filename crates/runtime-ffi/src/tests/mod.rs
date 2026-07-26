@@ -8,6 +8,7 @@ mod intent;
 mod library;
 mod native_capabilities;
 mod permissions;
+mod profile_preferences;
 mod workspace;
 
 use std::{
