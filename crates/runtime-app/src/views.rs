@@ -206,11 +206,34 @@ pub struct SectionRevisions {
     pub newest_event_sequence: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotSection {
+    FusedSnapshot,
+    Library,
+    Sessions,
+    ProviderPushLanes,
+    Bindings,
+    PendingWrites,
+    Receipts,
+    Workspaces,
+    Resources,
+    Activity,
+    Errors,
+    NewestEventSequence,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AppTerminalReason {
+    SectionRevisionExhausted { section: SnapshotSection },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppSnapshot {
     pub revision: u64,
     pub revisions: SectionRevisions,
     pub closed: bool,
+    /// Rust-owned lifecycle evidence, always read outside section gating.
+    pub terminal_reason: Option<AppTerminalReason>,
     pub library: InstalledLibraryView,
     pub sessions: Vec<SessionSnapshot>,
     pub session_domains: Vec<SessionDomainView>,

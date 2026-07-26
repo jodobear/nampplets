@@ -73,6 +73,12 @@ impl RuntimeApp {
     ) -> bool {
         let now = self.clock.now_millis();
         let mut state = self.state.lock();
+        if state.terminal_reason.is_some() {
+            return false;
+        }
+        if !self.preflight_revision_capacity(&mut state) {
+            return false;
+        }
         let Some(entry) = state.sessions.get_mut(&session_id) else {
             return false;
         };
@@ -197,6 +203,12 @@ impl RuntimeApp {
     ) {
         let now = self.clock.now_millis();
         let mut state = self.state.lock();
+        if state.terminal_reason.is_some() {
+            return;
+        }
+        if !self.preflight_revision_capacity(&mut state) {
+            return;
+        }
         let Some(entry) = state.sessions.get(&session_id) else {
             return;
         };
