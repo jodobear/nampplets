@@ -438,6 +438,22 @@ fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
@@ -652,7 +668,7 @@ public protocol RuntimeControllerProtocol: AnyObject, Sendable {
     func permissionReview(coordinate: RuntimeExactBuildCoordinate)  -> RuntimePermissionReviewResult
 
     /**
-     * Reopens one installed exact build.
+     * Reopens one installed exact build from its retained verifier handle.
      *
      * Native supplies only the exact library coordinate. Rust checks the
      * unfiltered persistent installation and returns a handle only when its
@@ -820,15 +836,14 @@ public static func `open`(config: RuntimeConfig, artifactSource: ArtifactSource)
 })
 }
 
-public static func openWithAllNativeCapabilities(config: RuntimeConfig, artifactSource: ArtifactSource, appearanceSource: NativeAppearanceSource, settingsExecutor: NativeSettingsExecutor, incActionExecutor: NativeIncActionExecutor, intentActivationExecutor: NativeIntentActivationExecutor)throws  -> RuntimeController  {
+public static func openWithAllNativeCapabilities(config: RuntimeConfig, artifactSource: ArtifactSource, appearanceSource: NativeAppearanceSource, settingsExecutor: NativeSettingsExecutor, incActionExecutor: NativeIncActionExecutor)throws  -> RuntimeController  {
     return try  FfiConverterTypeRuntimeController_lift(try rustCallWithError(FfiConverterTypeRuntimeOpenError_lift) {
     uniffi_nmp_native_runtime_ffi_fn_constructor_runtimecontroller_open_with_all_native_capabilities(
         FfiConverterTypeRuntimeConfig_lower(config),
         FfiConverterCallbackInterfaceArtifactSource_lower(artifactSource),
         FfiConverterCallbackInterfaceNativeAppearanceSource_lower(appearanceSource),
         FfiConverterCallbackInterfaceNativeSettingsExecutor_lower(settingsExecutor),
-        FfiConverterCallbackInterfaceNativeIncActionExecutor_lower(incActionExecutor),
-        FfiConverterCallbackInterfaceNativeIntentActivationExecutor_lower(intentActivationExecutor),$0
+        FfiConverterCallbackInterfaceNativeIncActionExecutor_lower(incActionExecutor),$0
     )
 })
 }
@@ -839,6 +854,19 @@ public static func openWithAppearance(config: RuntimeConfig, artifactSource: Art
         FfiConverterTypeRuntimeConfig_lower(config),
         FfiConverterCallbackInterfaceArtifactSource_lower(artifactSource),
         FfiConverterCallbackInterfaceNativeAppearanceSource_lower(appearanceSource),$0
+    )
+})
+}
+
+public static func openWithIntentActivation(config: RuntimeConfig, artifactSource: ArtifactSource, appearanceSource: NativeAppearanceSource, settingsExecutor: NativeSettingsExecutor, incActionExecutor: NativeIncActionExecutor, intentActivationExecutor: NativeIntentActivationExecutor)throws  -> RuntimeController  {
+    return try  FfiConverterTypeRuntimeController_lift(try rustCallWithError(FfiConverterTypeRuntimeOpenError_lift) {
+    uniffi_nmp_native_runtime_ffi_fn_constructor_runtimecontroller_open_with_intent_activation(
+        FfiConverterTypeRuntimeConfig_lower(config),
+        FfiConverterCallbackInterfaceArtifactSource_lower(artifactSource),
+        FfiConverterCallbackInterfaceNativeAppearanceSource_lower(appearanceSource),
+        FfiConverterCallbackInterfaceNativeSettingsExecutor_lower(settingsExecutor),
+        FfiConverterCallbackInterfaceNativeIncActionExecutor_lower(incActionExecutor),
+        FfiConverterCallbackInterfaceNativeIntentActivationExecutor_lower(intentActivationExecutor),$0
     )
 })
 }
@@ -1113,7 +1141,7 @@ open func permissionReview(coordinate: RuntimeExactBuildCoordinate) -> RuntimePe
 }
 
     /**
-     * Reopens one installed exact build.
+     * Reopens one installed exact build from its retained verifier handle.
      *
      * Native supplies only the exact library coordinate. Rust checks the
      * unfiltered persistent installation and returns a handle only when its
@@ -2862,6 +2890,82 @@ public func FfiConverterTypeRuntimeAccountUpdate_lower(_ value: RuntimeAccountUp
 }
 
 
+/**
+ * One classified key/value pair belonging to an activity fact.
+ */
+public struct RuntimeActivityDetail {
+    public var key: String
+    public var value: RuntimeActivityDetailValue
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(key: String, value: RuntimeActivityDetailValue) {
+        self.key = key
+        self.value = value
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeActivityDetail: Sendable {}
+#endif
+
+
+extension RuntimeActivityDetail: Equatable, Hashable {
+    public static func ==(lhs: RuntimeActivityDetail, rhs: RuntimeActivityDetail) -> Bool {
+        if lhs.key != rhs.key {
+            return false
+        }
+        if lhs.value != rhs.value {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(key)
+        hasher.combine(value)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeActivityDetail: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeActivityDetail {
+        return
+            try RuntimeActivityDetail(
+                key: FfiConverterString.read(from: &buf),
+                value: FfiConverterTypeRuntimeActivityDetailValue.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeActivityDetail, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.key, into: &buf)
+        FfiConverterTypeRuntimeActivityDetailValue.write(value.value, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeActivityDetail_lift(_ buf: RustBuffer) throws -> RuntimeActivityDetail {
+    return try FfiConverterTypeRuntimeActivityDetail.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeActivityDetail_lower(_ value: RuntimeActivityDetail) -> RustBuffer {
+    return FfiConverterTypeRuntimeActivityDetail.lower(value)
+}
+
+
+/**
+ * One bounded activity fact attributed to an exact build.
+ */
 public struct RuntimeActivitySnapshot {
     public var author: String
     public var dTag: String
@@ -2870,10 +2974,24 @@ public struct RuntimeActivitySnapshot {
     public var operation: String
     public var outcome: String
     public var occurredAtMillis: UInt64
+    /**
+     * Details the runtime produced, each already classified.
+     */
+    public var details: [RuntimeActivityDetail]
+    /**
+     * Details the runtime dropped to stay within its per-fact bound.
+     */
+    public var droppedDetailCount: UInt32
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(author: String, dTag: String, aggregateHash: String, category: String, operation: String, outcome: String, occurredAtMillis: UInt64) {
+    public init(author: String, dTag: String, aggregateHash: String, category: String, operation: String, outcome: String, occurredAtMillis: UInt64,
+        /**
+         * Details the runtime produced, each already classified.
+         */details: [RuntimeActivityDetail],
+        /**
+         * Details the runtime dropped to stay within its per-fact bound.
+         */droppedDetailCount: UInt32) {
         self.author = author
         self.dTag = dTag
         self.aggregateHash = aggregateHash
@@ -2881,6 +2999,8 @@ public struct RuntimeActivitySnapshot {
         self.operation = operation
         self.outcome = outcome
         self.occurredAtMillis = occurredAtMillis
+        self.details = details
+        self.droppedDetailCount = droppedDetailCount
     }
 }
 
@@ -2912,6 +3032,12 @@ extension RuntimeActivitySnapshot: Equatable, Hashable {
         if lhs.occurredAtMillis != rhs.occurredAtMillis {
             return false
         }
+        if lhs.details != rhs.details {
+            return false
+        }
+        if lhs.droppedDetailCount != rhs.droppedDetailCount {
+            return false
+        }
         return true
     }
 
@@ -2923,6 +3049,8 @@ extension RuntimeActivitySnapshot: Equatable, Hashable {
         hasher.combine(operation)
         hasher.combine(outcome)
         hasher.combine(occurredAtMillis)
+        hasher.combine(details)
+        hasher.combine(droppedDetailCount)
     }
 }
 
@@ -2941,7 +3069,9 @@ public struct FfiConverterTypeRuntimeActivitySnapshot: FfiConverterRustBuffer {
                 category: FfiConverterString.read(from: &buf),
                 operation: FfiConverterString.read(from: &buf),
                 outcome: FfiConverterString.read(from: &buf),
-                occurredAtMillis: FfiConverterUInt64.read(from: &buf)
+                occurredAtMillis: FfiConverterUInt64.read(from: &buf),
+                details: FfiConverterSequenceTypeRuntimeActivityDetail.read(from: &buf),
+                droppedDetailCount: FfiConverterUInt32.read(from: &buf)
         )
     }
 
@@ -2953,6 +3083,8 @@ public struct FfiConverterTypeRuntimeActivitySnapshot: FfiConverterRustBuffer {
         FfiConverterString.write(value.operation, into: &buf)
         FfiConverterString.write(value.outcome, into: &buf)
         FfiConverterUInt64.write(value.occurredAtMillis, into: &buf)
+        FfiConverterSequenceTypeRuntimeActivityDetail.write(value.details, into: &buf)
+        FfiConverterUInt32.write(value.droppedDetailCount, into: &buf)
     }
 }
 
@@ -3678,6 +3810,84 @@ public func FfiConverterTypeRuntimeCatalogFeedSnapshot_lower(_ value: RuntimeCat
 
 
 /**
+ * Rust's exact-install decision for one frozen review.
+ *
+ * `can_install` is the decision itself. `blocker` is present exactly when the
+ * decision is negative and states, in Rust's own words, why the runtime would
+ * refuse to mint an exact-build principal for this manifest. Its `provenance`
+ * stays empty: the review's own provenance already covers the lookup.
+ */
+public struct RuntimeCatalogInstallEligibility {
+    public var canInstall: Bool
+    public var blocker: RuntimeCatalogFailure?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(canInstall: Bool, blocker: RuntimeCatalogFailure?) {
+        self.canInstall = canInstall
+        self.blocker = blocker
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeCatalogInstallEligibility: Sendable {}
+#endif
+
+
+extension RuntimeCatalogInstallEligibility: Equatable, Hashable {
+    public static func ==(lhs: RuntimeCatalogInstallEligibility, rhs: RuntimeCatalogInstallEligibility) -> Bool {
+        if lhs.canInstall != rhs.canInstall {
+            return false
+        }
+        if lhs.blocker != rhs.blocker {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(canInstall)
+        hasher.combine(blocker)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeCatalogInstallEligibility: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeCatalogInstallEligibility {
+        return
+            try RuntimeCatalogInstallEligibility(
+                canInstall: FfiConverterBool.read(from: &buf),
+                blocker: FfiConverterOptionTypeRuntimeCatalogFailure.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeCatalogInstallEligibility, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.canInstall, into: &buf)
+        FfiConverterOptionTypeRuntimeCatalogFailure.write(value.blocker, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogInstallEligibility_lift(_ buf: RustBuffer) throws -> RuntimeCatalogInstallEligibility {
+    return try FfiConverterTypeRuntimeCatalogInstallEligibility.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeCatalogInstallEligibility_lower(_ value: RuntimeCatalogInstallEligibility) -> RustBuffer {
+    return FfiConverterTypeRuntimeCatalogInstallEligibility.lower(value)
+}
+
+
+/**
  * A finite page for one screen.
  *
  * `has_more` means matching rows were omitted by the 100-row screen
@@ -3965,10 +4175,19 @@ public struct RuntimeCatalogReview {
     public var capabilities: [RuntimeCatalogCapability]
     public var blobSources: [String]
     public var provenance: [RuntimeCatalogProvenance]
+    /**
+     * Rust's exact-install decision. Native renders it; it never re-derives
+     * eligibility from `d_tag` or any other raw field above.
+     */
+    public var installEligibility: RuntimeCatalogInstallEligibility
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(token: String, eventId: String, coordinate: String, manifestAuthor: String, dTag: String?, title: String?, description: String?, aggregateHash: String, capabilities: [RuntimeCatalogCapability], blobSources: [String], provenance: [RuntimeCatalogProvenance]) {
+    public init(token: String, eventId: String, coordinate: String, manifestAuthor: String, dTag: String?, title: String?, description: String?, aggregateHash: String, capabilities: [RuntimeCatalogCapability], blobSources: [String], provenance: [RuntimeCatalogProvenance],
+        /**
+         * Rust's exact-install decision. Native renders it; it never re-derives
+         * eligibility from `d_tag` or any other raw field above.
+         */installEligibility: RuntimeCatalogInstallEligibility) {
         self.token = token
         self.eventId = eventId
         self.coordinate = coordinate
@@ -3980,6 +4199,7 @@ public struct RuntimeCatalogReview {
         self.capabilities = capabilities
         self.blobSources = blobSources
         self.provenance = provenance
+        self.installEligibility = installEligibility
     }
 }
 
@@ -4023,6 +4243,9 @@ extension RuntimeCatalogReview: Equatable, Hashable {
         if lhs.provenance != rhs.provenance {
             return false
         }
+        if lhs.installEligibility != rhs.installEligibility {
+            return false
+        }
         return true
     }
 
@@ -4038,6 +4261,7 @@ extension RuntimeCatalogReview: Equatable, Hashable {
         hasher.combine(capabilities)
         hasher.combine(blobSources)
         hasher.combine(provenance)
+        hasher.combine(installEligibility)
     }
 }
 
@@ -4060,7 +4284,8 @@ public struct FfiConverterTypeRuntimeCatalogReview: FfiConverterRustBuffer {
                 aggregateHash: FfiConverterString.read(from: &buf),
                 capabilities: FfiConverterSequenceTypeRuntimeCatalogCapability.read(from: &buf),
                 blobSources: FfiConverterSequenceString.read(from: &buf),
-                provenance: FfiConverterSequenceTypeRuntimeCatalogProvenance.read(from: &buf)
+                provenance: FfiConverterSequenceTypeRuntimeCatalogProvenance.read(from: &buf),
+                installEligibility: FfiConverterTypeRuntimeCatalogInstallEligibility.read(from: &buf)
         )
     }
 
@@ -4076,6 +4301,7 @@ public struct FfiConverterTypeRuntimeCatalogReview: FfiConverterRustBuffer {
         FfiConverterSequenceTypeRuntimeCatalogCapability.write(value.capabilities, into: &buf)
         FfiConverterSequenceString.write(value.blobSources, into: &buf)
         FfiConverterSequenceTypeRuntimeCatalogProvenance.write(value.provenance, into: &buf)
+        FfiConverterTypeRuntimeCatalogInstallEligibility.write(value.installEligibility, into: &buf)
     }
 }
 
@@ -4939,16 +5165,18 @@ public struct RuntimeObservationFrame {
     public var oldestAvailableEvent: UInt64
     public var newestAvailableEvent: UInt64
     public var eventCursorWasStale: Bool
+    public var lostBeforeBatch: UInt64
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(snapshot: RuntimeSnapshot, catalog: RuntimeCatalogFeedSnapshot, events: [RuntimeEvent], oldestAvailableEvent: UInt64, newestAvailableEvent: UInt64, eventCursorWasStale: Bool) {
+    public init(snapshot: RuntimeSnapshot, catalog: RuntimeCatalogFeedSnapshot, events: [RuntimeEvent], oldestAvailableEvent: UInt64, newestAvailableEvent: UInt64, eventCursorWasStale: Bool, lostBeforeBatch: UInt64) {
         self.snapshot = snapshot
         self.catalog = catalog
         self.events = events
         self.oldestAvailableEvent = oldestAvailableEvent
         self.newestAvailableEvent = newestAvailableEvent
         self.eventCursorWasStale = eventCursorWasStale
+        self.lostBeforeBatch = lostBeforeBatch
     }
 }
 
@@ -4977,6 +5205,9 @@ extension RuntimeObservationFrame: Equatable, Hashable {
         if lhs.eventCursorWasStale != rhs.eventCursorWasStale {
             return false
         }
+        if lhs.lostBeforeBatch != rhs.lostBeforeBatch {
+            return false
+        }
         return true
     }
 
@@ -4987,6 +5218,7 @@ extension RuntimeObservationFrame: Equatable, Hashable {
         hasher.combine(oldestAvailableEvent)
         hasher.combine(newestAvailableEvent)
         hasher.combine(eventCursorWasStale)
+        hasher.combine(lostBeforeBatch)
     }
 }
 
@@ -5004,7 +5236,8 @@ public struct FfiConverterTypeRuntimeObservationFrame: FfiConverterRustBuffer {
                 events: FfiConverterSequenceTypeRuntimeEvent.read(from: &buf),
                 oldestAvailableEvent: FfiConverterUInt64.read(from: &buf),
                 newestAvailableEvent: FfiConverterUInt64.read(from: &buf),
-                eventCursorWasStale: FfiConverterBool.read(from: &buf)
+                eventCursorWasStale: FfiConverterBool.read(from: &buf),
+                lostBeforeBatch: FfiConverterUInt64.read(from: &buf)
         )
     }
 
@@ -5015,6 +5248,7 @@ public struct FfiConverterTypeRuntimeObservationFrame: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.oldestAvailableEvent, into: &buf)
         FfiConverterUInt64.write(value.newestAvailableEvent, into: &buf)
         FfiConverterBool.write(value.eventCursorWasStale, into: &buf)
+        FfiConverterUInt64.write(value.lostBeforeBatch, into: &buf)
     }
 }
 
@@ -5237,19 +5471,43 @@ public struct RuntimePermissionCapabilitySnapshot {
     public var dependencies: [String]
     public var platformAvailability: RuntimePermissionPlatformAvailability
     public var existingDecision: RuntimePermissionExistingDecision
+    /**
+     * Rust's own answer to "is this capability granted?". Callers render it;
+     * they never rebuild it by matching decision names.
+     */
+    public var isGranted: Bool
     public var requestedDecision: RuntimeGrantDecision?
+    /**
+     * The decision Rust recommends when the user accepts this capability
+     * without picking a scope: the broadest currently valid affirmative
+     * decision, `Denied` when nothing affirmative is valid here, and absent
+     * when host policy manages the capability and offers no user decision.
+     */
+    public var recommendedDecision: RuntimeGrantDecision?
     public var decisionOptions: [RuntimePermissionDecisionOption]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(domain: String, requirement: RuntimePermissionRequirement, sensitivity: RuntimePermissionSensitivity, dependencies: [String], platformAvailability: RuntimePermissionPlatformAvailability, existingDecision: RuntimePermissionExistingDecision, requestedDecision: RuntimeGrantDecision?, decisionOptions: [RuntimePermissionDecisionOption]) {
+    public init(domain: String, requirement: RuntimePermissionRequirement, sensitivity: RuntimePermissionSensitivity, dependencies: [String], platformAvailability: RuntimePermissionPlatformAvailability, existingDecision: RuntimePermissionExistingDecision,
+        /**
+         * Rust's own answer to "is this capability granted?". Callers render it;
+         * they never rebuild it by matching decision names.
+         */isGranted: Bool, requestedDecision: RuntimeGrantDecision?,
+        /**
+         * The decision Rust recommends when the user accepts this capability
+         * without picking a scope: the broadest currently valid affirmative
+         * decision, `Denied` when nothing affirmative is valid here, and absent
+         * when host policy manages the capability and offers no user decision.
+         */recommendedDecision: RuntimeGrantDecision?, decisionOptions: [RuntimePermissionDecisionOption]) {
         self.domain = domain
         self.requirement = requirement
         self.sensitivity = sensitivity
         self.dependencies = dependencies
         self.platformAvailability = platformAvailability
         self.existingDecision = existingDecision
+        self.isGranted = isGranted
         self.requestedDecision = requestedDecision
+        self.recommendedDecision = recommendedDecision
         self.decisionOptions = decisionOptions
     }
 }
@@ -5279,7 +5537,13 @@ extension RuntimePermissionCapabilitySnapshot: Equatable, Hashable {
         if lhs.existingDecision != rhs.existingDecision {
             return false
         }
+        if lhs.isGranted != rhs.isGranted {
+            return false
+        }
         if lhs.requestedDecision != rhs.requestedDecision {
+            return false
+        }
+        if lhs.recommendedDecision != rhs.recommendedDecision {
             return false
         }
         if lhs.decisionOptions != rhs.decisionOptions {
@@ -5295,7 +5559,9 @@ extension RuntimePermissionCapabilitySnapshot: Equatable, Hashable {
         hasher.combine(dependencies)
         hasher.combine(platformAvailability)
         hasher.combine(existingDecision)
+        hasher.combine(isGranted)
         hasher.combine(requestedDecision)
+        hasher.combine(recommendedDecision)
         hasher.combine(decisionOptions)
     }
 }
@@ -5315,7 +5581,9 @@ public struct FfiConverterTypeRuntimePermissionCapabilitySnapshot: FfiConverterR
                 dependencies: FfiConverterSequenceString.read(from: &buf),
                 platformAvailability: FfiConverterTypeRuntimePermissionPlatformAvailability.read(from: &buf),
                 existingDecision: FfiConverterTypeRuntimePermissionExistingDecision.read(from: &buf),
+                isGranted: FfiConverterBool.read(from: &buf),
                 requestedDecision: FfiConverterOptionTypeRuntimeGrantDecision.read(from: &buf),
+                recommendedDecision: FfiConverterOptionTypeRuntimeGrantDecision.read(from: &buf),
                 decisionOptions: FfiConverterSequenceTypeRuntimePermissionDecisionOption.read(from: &buf)
         )
     }
@@ -5327,7 +5595,9 @@ public struct FfiConverterTypeRuntimePermissionCapabilitySnapshot: FfiConverterR
         FfiConverterSequenceString.write(value.dependencies, into: &buf)
         FfiConverterTypeRuntimePermissionPlatformAvailability.write(value.platformAvailability, into: &buf)
         FfiConverterTypeRuntimePermissionExistingDecision.write(value.existingDecision, into: &buf)
+        FfiConverterBool.write(value.isGranted, into: &buf)
         FfiConverterOptionTypeRuntimeGrantDecision.write(value.requestedDecision, into: &buf)
+        FfiConverterOptionTypeRuntimeGrantDecision.write(value.recommendedDecision, into: &buf)
         FfiConverterSequenceTypeRuntimePermissionDecisionOption.write(value.decisionOptions, into: &buf)
     }
 }
@@ -6803,15 +7073,18 @@ public struct RuntimeSnapshot {
     public var receipts: [RuntimeReceiptSnapshot]
     public var workspaces: [RuntimeWorkspaceDefinition]
     public var recentActivity: [RuntimeActivitySnapshot]
+    public var droppedActivity: UInt64
     public var recentErrors: [RuntimeErrorSnapshot]
+    public var droppedErrors: UInt64
     public var boundaryRefusals: [RuntimeRefusal]
+    public var droppedBoundaryRefusals: UInt64
     public var activeResources: UInt64
     public var resourceHighWatermark: UInt64
     public var resourceRefusalCount: UInt64
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(revision: UInt64, closed: Bool, installedLibrary: RuntimeInstalledLibrarySnapshot, sessions: [RuntimeSessionSnapshot], bindings: [RuntimeBindingSnapshot], pendingWrites: [RuntimePendingWriteSnapshot], receipts: [RuntimeReceiptSnapshot], workspaces: [RuntimeWorkspaceDefinition], recentActivity: [RuntimeActivitySnapshot], recentErrors: [RuntimeErrorSnapshot], boundaryRefusals: [RuntimeRefusal], activeResources: UInt64, resourceHighWatermark: UInt64, resourceRefusalCount: UInt64) {
+    public init(revision: UInt64, closed: Bool, installedLibrary: RuntimeInstalledLibrarySnapshot, sessions: [RuntimeSessionSnapshot], bindings: [RuntimeBindingSnapshot], pendingWrites: [RuntimePendingWriteSnapshot], receipts: [RuntimeReceiptSnapshot], workspaces: [RuntimeWorkspaceDefinition], recentActivity: [RuntimeActivitySnapshot], droppedActivity: UInt64, recentErrors: [RuntimeErrorSnapshot], droppedErrors: UInt64, boundaryRefusals: [RuntimeRefusal], droppedBoundaryRefusals: UInt64, activeResources: UInt64, resourceHighWatermark: UInt64, resourceRefusalCount: UInt64) {
         self.revision = revision
         self.closed = closed
         self.installedLibrary = installedLibrary
@@ -6821,8 +7094,11 @@ public struct RuntimeSnapshot {
         self.receipts = receipts
         self.workspaces = workspaces
         self.recentActivity = recentActivity
+        self.droppedActivity = droppedActivity
         self.recentErrors = recentErrors
+        self.droppedErrors = droppedErrors
         self.boundaryRefusals = boundaryRefusals
+        self.droppedBoundaryRefusals = droppedBoundaryRefusals
         self.activeResources = activeResources
         self.resourceHighWatermark = resourceHighWatermark
         self.resourceRefusalCount = resourceRefusalCount
@@ -6863,10 +7139,19 @@ extension RuntimeSnapshot: Equatable, Hashable {
         if lhs.recentActivity != rhs.recentActivity {
             return false
         }
+        if lhs.droppedActivity != rhs.droppedActivity {
+            return false
+        }
         if lhs.recentErrors != rhs.recentErrors {
             return false
         }
+        if lhs.droppedErrors != rhs.droppedErrors {
+            return false
+        }
         if lhs.boundaryRefusals != rhs.boundaryRefusals {
+            return false
+        }
+        if lhs.droppedBoundaryRefusals != rhs.droppedBoundaryRefusals {
             return false
         }
         if lhs.activeResources != rhs.activeResources {
@@ -6891,8 +7176,11 @@ extension RuntimeSnapshot: Equatable, Hashable {
         hasher.combine(receipts)
         hasher.combine(workspaces)
         hasher.combine(recentActivity)
+        hasher.combine(droppedActivity)
         hasher.combine(recentErrors)
+        hasher.combine(droppedErrors)
         hasher.combine(boundaryRefusals)
+        hasher.combine(droppedBoundaryRefusals)
         hasher.combine(activeResources)
         hasher.combine(resourceHighWatermark)
         hasher.combine(resourceRefusalCount)
@@ -6917,8 +7205,11 @@ public struct FfiConverterTypeRuntimeSnapshot: FfiConverterRustBuffer {
                 receipts: FfiConverterSequenceTypeRuntimeReceiptSnapshot.read(from: &buf),
                 workspaces: FfiConverterSequenceTypeRuntimeWorkspaceDefinition.read(from: &buf),
                 recentActivity: FfiConverterSequenceTypeRuntimeActivitySnapshot.read(from: &buf),
+                droppedActivity: FfiConverterUInt64.read(from: &buf),
                 recentErrors: FfiConverterSequenceTypeRuntimeErrorSnapshot.read(from: &buf),
+                droppedErrors: FfiConverterUInt64.read(from: &buf),
                 boundaryRefusals: FfiConverterSequenceTypeRuntimeRefusal.read(from: &buf),
+                droppedBoundaryRefusals: FfiConverterUInt64.read(from: &buf),
                 activeResources: FfiConverterUInt64.read(from: &buf),
                 resourceHighWatermark: FfiConverterUInt64.read(from: &buf),
                 resourceRefusalCount: FfiConverterUInt64.read(from: &buf)
@@ -6935,8 +7226,11 @@ public struct FfiConverterTypeRuntimeSnapshot: FfiConverterRustBuffer {
         FfiConverterSequenceTypeRuntimeReceiptSnapshot.write(value.receipts, into: &buf)
         FfiConverterSequenceTypeRuntimeWorkspaceDefinition.write(value.workspaces, into: &buf)
         FfiConverterSequenceTypeRuntimeActivitySnapshot.write(value.recentActivity, into: &buf)
+        FfiConverterUInt64.write(value.droppedActivity, into: &buf)
         FfiConverterSequenceTypeRuntimeErrorSnapshot.write(value.recentErrors, into: &buf)
+        FfiConverterUInt64.write(value.droppedErrors, into: &buf)
         FfiConverterSequenceTypeRuntimeRefusal.write(value.boundaryRefusals, into: &buf)
+        FfiConverterUInt64.write(value.droppedBoundaryRefusals, into: &buf)
         FfiConverterUInt64.write(value.activeResources, into: &buf)
         FfiConverterUInt64.write(value.resourceHighWatermark, into: &buf)
         FfiConverterUInt64.write(value.resourceRefusalCount, into: &buf)
@@ -7995,6 +8289,88 @@ public func FfiConverterTypeRuntimeAccountKind_lower(_ value: RuntimeAccountKind
 
 
 extension RuntimeAccountKind: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * One activity detail value whose visibility the runtime already decided.
+ */
+
+public enum RuntimeActivityDetailValue {
+
+    /**
+     * The runtime classified this value as safe to display verbatim.
+     */
+    case visible(text: String
+    )
+    /**
+     * The runtime classified this value as secret; no bytes are carried.
+     */
+    case redacted
+}
+
+
+#if compiler(>=6)
+extension RuntimeActivityDetailValue: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeActivityDetailValue: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeActivityDetailValue
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeActivityDetailValue {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .visible(text: try FfiConverterString.read(from: &buf)
+        )
+
+        case 2: return .redacted
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeActivityDetailValue, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case let .visible(text):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(text, into: &buf)
+
+
+        case .redacted:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeActivityDetailValue_lift(_ buf: RustBuffer) throws -> RuntimeActivityDetailValue {
+    return try FfiConverterTypeRuntimeActivityDetailValue.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeActivityDetailValue_lower(_ value: RuntimeActivityDetailValue) -> RustBuffer {
+    return FfiConverterTypeRuntimeActivityDetailValue.lower(value)
+}
+
+
+extension RuntimeActivityDetailValue: Equatable, Hashable {}
 
 
 
@@ -11192,6 +11568,31 @@ fileprivate struct FfiConverterSequenceTypeRuntimeAccountHandle: FfiConverterRus
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeRuntimeActivityDetail: FfiConverterRustBuffer {
+    typealias SwiftType = [RuntimeActivityDetail]
+
+    public static func write(_ value: [RuntimeActivityDetail], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRuntimeActivityDetail.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeActivityDetail] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RuntimeActivityDetail]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRuntimeActivityDetail.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeRuntimeActivitySnapshot: FfiConverterRustBuffer {
     typealias SwiftType = [RuntimeActivitySnapshot]
 
@@ -11848,7 +12249,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_permission_review() != 34440) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_reacquire_installed_artifact() != 38634) {
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_reacquire_installed_artifact() != 16446) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_read_verified() != 14937) {
@@ -11932,10 +12333,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open() != 25423) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_all_native_capabilities() != 3282) {
+    if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_all_native_capabilities() != 22922) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_appearance() != 25867) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_intent_activation() != 10985) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_native_capabilities() != 18420) {

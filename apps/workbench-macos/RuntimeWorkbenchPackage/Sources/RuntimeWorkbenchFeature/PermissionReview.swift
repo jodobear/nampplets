@@ -60,20 +60,6 @@ final class PermissionReviewSheetModel {
             && invalidSelections.isEmpty
     }
 
-    var diffs: [PermissionDecisionDiff] {
-        review.capabilities.compactMap { capability in
-            guard let selection = selections[capability.domain] else {
-                return nil
-            }
-            let diff = PermissionDecisionDiff(
-                domain: capability.domain,
-                existingDecision: capability.existingDecision,
-                requestedDecision: selection
-            )
-            return diff.isChange ? diff : nil
-        }
-    }
-
     func selection(
         for capability: PermissionCapabilityReview
     ) -> PermissionRequestedDecision? {
@@ -103,11 +89,10 @@ final class PermissionReviewSheetModel {
         transientIssue = nil
     }
 
-    /// Grants the broadest decision Rust has already validated as available
-    /// (never a decision this model invents), or denies if nothing
-    /// affirmative is valid. This is the only decision a normal user makes
-    /// per capability -- session-vs-exact-build and "ask every time" are
-    /// implementation nuance, not something to expose as a choice.
+    /// Applies the decision Rust itself recommends for this capability, or
+    /// denies. This layer never ranks `decisionOptions` on its own:
+    /// session-vs-exact-build scope is a runtime policy question, and
+    /// `recommendedDecision` is Rust's answer to it.
     func setGranted(_ granted: Bool, for capability: PermissionCapabilityReview) {
         guard granted else {
             if capability.option(for: .deny)?.isValid == true {
@@ -115,26 +100,45 @@ final class PermissionReviewSheetModel {
             }
             return
         }
-        let broadest = [PermissionRequestedDecision.allowExactBuild, .allowSession]
-            .first { decision in capability.option(for: decision)?.isValid == true }
-        if let broadest {
-            select(broadest, for: capability)
+        guard let recommended = grantingRecommendation(for: capability) else {
+            return
         }
+        select(recommended, for: capability)
     }
 
+    /// Whether this capability currently reads as granted. Before the user
+    /// edits anything that is Rust's own `isGranted` classification of the
+    /// decision in force; afterwards it is whether the pending selection is
+    /// the runtime's recommended grant.
     func isGranted(_ capability: PermissionCapabilityReview) -> Bool {
-        switch selection(for: capability) {
-        case .allowExactBuild, .allowSession:
-            true
-        case .deny, .askEveryTime, nil:
-            false
+        guard let selected = selection(for: capability) else {
+            return capability.isGranted
         }
+        guard selected != capability.requestedDecision else {
+            return capability.isGranted
+        }
+        return selected == grantingRecommendation(for: capability)
     }
 
     func hasAffirmativeOption(_ capability: PermissionCapabilityReview) -> Bool {
-        [PermissionRequestedDecision.allowExactBuild, .allowSession].contains { decision in
-            capability.option(for: decision)?.isValid == true
+        grantingRecommendation(for: capability) != nil
+    }
+
+    /// Rust's recommended decision, but only when that recommendation is an
+    /// actual grant. A capability the runtime recommends denying offers the
+    /// user nothing to switch on.
+    private func grantingRecommendation(
+        for capability: PermissionCapabilityReview
+    ) -> PermissionRequestedDecision? {
+        guard
+            let recommended = capability.recommendedDecision,
+            recommended != .deny,
+            recommended != .askEveryTime,
+            capability.option(for: recommended)?.isValid == true
+        else {
+            return nil
         }
+        return recommended
     }
 
     /// Discards only transient native form state. It never calls the manager.
@@ -151,28 +155,24 @@ final class PermissionReviewSheetModel {
     }
 
     /// Selects, for every capability the runtime lets the user decide, the
-    /// broadest decision Rust has already validated as available -- never a
-    /// decision this model invents. Managed capabilities (no
-    /// `requestedDecision`) are untouched; they carry no user-selectable
-    /// option at all. This is the one-tap "just let me try it" path: the
-    /// Rust-requested default is `askEveryTime`, which can never satisfy
-    /// launch, so confirming un-edited defaults previously looked like it
-    /// worked and then silently failed to launch.
+    /// decision Rust itself recommends -- never one this model invents by
+    /// ranking `decisionOptions`. Managed capabilities (no
+    /// `requestedDecision`, and therefore no `recommendedDecision`) are
+    /// untouched; they carry no user-selectable option at all. This is the
+    /// one-tap "just let me try it" path: the Rust-requested default is
+    /// `askEveryTime`, which can never satisfy launch, so confirming
+    /// un-edited defaults previously looked like it worked and then
+    /// silently failed to launch.
     func selectAllRecommended() {
         for capability in review.capabilities {
-            guard capability.requestedDecision != nil else {
+            guard
+                capability.requestedDecision != nil,
+                let recommended = capability.recommendedDecision,
+                capability.option(for: recommended)?.isValid == true
+            else {
                 continue
             }
-            let broadest = [.allowExactBuild, .allowSession, .deny]
-                .compactMap { decision in
-                    capability.decisionOptions.first {
-                        $0.decision == decision && $0.isValid
-                    }
-                }
-                .first
-            if let broadest {
-                selections[capability.domain] = broadest.decision
-            }
+            selections[capability.domain] = recommended
         }
         transientIssue = nil
     }
@@ -261,7 +261,7 @@ final class PermissionReviewSheetModel {
 /// build hash -- is one disclosure tap away, never the default view.
 public struct PermissionReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var model: PermissionReviewSheetModel
+    @State var model: PermissionReviewSheetModel
     @State private var showsTechnicalDetails = false
 
     @MainActor
@@ -273,15 +273,22 @@ public struct PermissionReviewSheet: View {
 
     public var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    header
-                    capabilityList
-                    if let issue = model.issue {
-                        issueView(issue)
+            ScrollViewReader { proxy in
+                VStack(spacing: 0) {
+                    if isUITestScrollHookEnabled {
+                        scrollAnchorRow(proxy: proxy)
+                    }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 22) {
+                            header
+                            capabilityList
+                            if let issue = model.issue {
+                                issueView(issue)
+                            }
+                        }
+                        .padding(20)
                     }
                 }
-                .padding(20)
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -389,6 +396,7 @@ public struct PermissionReviewSheet: View {
             } else {
                 ForEach(model.review.capabilities) { capability in
                     capabilityRow(capability)
+                        .id(capability.domain)
                 }
             }
         }

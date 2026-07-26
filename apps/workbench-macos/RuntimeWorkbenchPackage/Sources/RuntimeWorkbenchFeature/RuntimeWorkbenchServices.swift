@@ -58,15 +58,11 @@ public final class RuntimeWorkbenchAccountManager:
             setError(message(for: update.failure))
             return
         }
-        guard snapshot.localAccounts.count <=
-            WorkbenchAccountSnapshot.maximumAccountCount
-        else {
-            current = .unavailable(
-                reason: "The runtime returned more accounts than the Workbench can display."
-            )
-            nativeHandles.removeAll(keepingCapacity: false)
-            return
-        }
+        // Rust enforces the account registry capacity (MAX_PROFILE_ACCOUNTS)
+        // on every registration path before a snapshot is ever produced, so
+        // an accepted snapshot can never exceed that bound here. Render what
+        // Rust returned rather than re-deriving and enforcing a second,
+        // independently hardcoded copy of that boundary in Swift.
 
         var handles: [
             WorkbenchAccountHandle: NativeRuntimeAccountHandle

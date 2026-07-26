@@ -38,6 +38,12 @@ These rules apply to the whole repository.
 - A file already past 600 lines is not license to keep piling onto it: put
   new code in a new module/file, and any nontrivial change touching such a
   file should shrink it (extract, split) rather than add net lines.
+- This is enforced as a one-way ratchet, not just a guideline: a file at or
+  over 600 lines must not grow versus its prior committed size (it may shrink
+  freely, even while staying over the ceiling), and a file under 600 lines
+  must not cross it. `scripts/ci/check_file_growth.py` implements the check;
+  it runs in CI (`file-growth` job) and locally via the pre-commit hook
+  installed by `scripts/setup-git-hooks.sh`.
 
 ## Workstream boundaries
 
@@ -70,6 +76,12 @@ schema, or lifecycle state machine. Coordinate changes at the owning boundary.
 - Grants bind to `(manifest author, dTag, aggregateHash)`.
 - Legacy compatibility becomes green before the private surface extension may
   be described as supported.
+- Hash-gated artifact acquisition (see "Redirected artifact acquisition" in
+  `docs/compatibility.md`) follows redirects intentionally. The manifest's
+  signature over the SHA-256 path/aggregate hashes *is* the provenance; once
+  bytes hash-match, which host they came from is not a security property to
+  re-litigate. Read that section before flagging redirect-following as a
+  provenance regression.
 
 ## Behavior scenarios
 
@@ -108,5 +120,4 @@ cargo test --workspace
 
 For Apple changes, build and test the shared `RuntimeWorkbench` scheme in the
 macOS destination, and build the `RuntimeWorkbenchiOS` scheme in an iOS
-Simulator destination. For NMP-sensitive application work, run the
-architecture scanner and document which D0-D10 rules the design discharges.
+Simulator destination.

@@ -75,13 +75,22 @@ EXCLUDED_FILES = frozenset(
 # active, and any shell change must deliberately update this fingerprint.
 TRUSTED_SHELL_FILES = frozenset(
     {
+        "platforms/apple/Sources/NMPNativeRuntimeApple/Resources/TrustedShell/trusted-shell-prelude-domains.js",
         "platforms/apple/Sources/NMPNativeRuntimeApple/Resources/TrustedShell/trusted-shell.js",
+        "web/trusted-shell/trusted-shell-prelude-domains.js",
         "web/trusted-shell/trusted-shell.js",
     }
 )
-TRUSTED_SHELL_SHA256 = (
-    "ad306946e7a0eb4437ccb5f6c8251ec0e35dbaeb718fe323aef1e5d8c7e0d59e"
-)
+# The Apple package ships a byte-identical copy of each canonical source,
+# so one reviewed digest per file name covers both tracked paths.
+TRUSTED_SHELL_SHA256 = {
+    "trusted-shell-prelude-domains.js": (
+        "d4c930f66df0ae1767147598d2a05b9940a06ba8f6681a1093af36e6e35251c5"
+    ),
+    "trusted-shell.js": (
+        "391db63b35e7ce8e8c4ad3e8e2a400be339cd44963f4ac7a159bffd9524e57f1"
+    ),
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -144,11 +153,12 @@ def trusted_shell_sources(repository: Path, sources: list[str]) -> list[str]:
         )
 
     for path in selected:
+        expected = TRUSTED_SHELL_SHA256[Path(path).name]
         actual = hashlib.sha256((repository / path).read_bytes()).hexdigest()
-        if actual != TRUSTED_SHELL_SHA256:
+        if actual != expected:
             raise RuntimeError(
                 f"trusted-shell source fingerprint changed: {path}: "
-                f"expected {TRUSTED_SHELL_SHA256}, got {actual}"
+                f"expected {expected}, got {actual}"
             )
     return selected
 

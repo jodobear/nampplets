@@ -128,7 +128,9 @@ class AntiSlopRunnerTests(unittest.TestCase):
             sources = RUNNER.tracked_sources(repository)
 
             with mock.patch.object(
-                RUNNER, "TRUSTED_SHELL_SHA256", fingerprint
+                RUNNER,
+                "TRUSTED_SHELL_SHA256",
+                {Path(relative).name: fingerprint for relative in shell_paths},
             ):
                 self.assertEqual(
                     RUNNER.trusted_shell_sources(repository, sources),

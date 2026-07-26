@@ -1736,38 +1736,3 @@ test("prelude bounds correlations and returns subscriptions on teardown", async 
     /session is closed/
   );
 });
-
-test("the Apple package snapshot exactly matches canonical trusted-shell bytes", () => {
-  const canonicalRoot = path.join(__dirname, "..");
-  const packagedRoot = path.join(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "platforms",
-    "apple",
-    "Sources",
-    "NMPNativeRuntimeApple",
-    "Resources",
-    "TrustedShell"
-  );
-  const relativeFiles = [
-    "trusted-shell.html",
-    "trusted-shell.css",
-    "trusted-shell-policy.js",
-    "trusted-shell.js",
-    path.join("fixtures", "minimal-conformant-napplet.html"),
-    path.join("fixtures", "external-assets", "index.html"),
-    path.join("fixtures", "external-assets", "styles", "site.css"),
-    path.join("fixtures", "external-assets", "scripts", "boot.js"),
-    path.join("fixtures", "external-assets", "images", "verified.svg")
-  ];
-
-  for (const relativeFile of relativeFiles) {
-    assert.equal(
-      fs.readFileSync(path.join(packagedRoot, relativeFile), "utf8"),
-      fs.readFileSync(path.join(canonicalRoot, relativeFile), "utf8"),
-      `${relativeFile} must be refreshed with platforms/apple/scripts/sync-trusted-shell`
-    );
-  }
-});

@@ -1,4 +1,5 @@
 import Foundation
+import NMPNativeRuntimeApple
 @testable import RuntimeWorkbenchFeature
 import Testing
 
@@ -58,6 +59,72 @@ import Testing
 }
 
 @MainActor
+@Test
+func accountManagerRendersRustsFullSnapshotAtCapacityWithoutDiscardingIt()
+    async throws
+{
+    let root = temporaryRuntimeRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let profile = try WorkbenchRuntimeProfile.open(storageRoot: root)
+    defer { profile.close() }
+    let manager = RuntimeWorkbenchAccountManager(profile: profile)
+
+    // Discover Rust's real capacity by registering until it refuses, rather
+    // than assuming any Swift-known number -- per issue #115, Swift must
+    // not re-derive or hardcode Rust's account-count ceiling (nmp-adapter's
+    // MAX_PROFILE_ACCOUNTS).
+    var registered = 0
+    while manager.snapshot().errorMessage == nil {
+        registered += 1
+        guard registered < 10_000 else {
+            Issue.record("Rust never refused registration")
+            return
+        }
+        await manager.register(secret: String(format: "%064x", registered))
+    }
+    let acceptedCount = registered - 1
+    let limit = manager.snapshot().accounts.count
+    #expect(acceptedCount == limit)
+
+    // Rust's own registry capacity is exhausted, but the accounts it already
+    // accepted must still be rendered as-is: no Swift-side re-check should
+    // override the snapshot with a fabricated "unavailable" state.
+    #expect(
+        manager.snapshot().errorMessage?.contains(
+            "The account registry is full at \(limit) entries."
+        ) == true
+    )
+    guard case .available = manager.snapshot().availability else {
+        Issue.record(
+            "A full but valid Rust snapshot must remain available, not be overridden"
+        )
+        return
+    }
+
+    await manager.registerReadOnly(
+        publicIdentity:
+            "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5"
+    )
+
+    // A second, different registration entry point at capacity must surface
+    // the same Rust-owned refusal verbatim, and must not erase the
+    // already-registered accounts.
+    #expect(
+        manager.snapshot().errorMessage?.contains(
+            "The account registry is full at \(limit) entries."
+        ) == true
+    )
+    #expect(manager.snapshot().accounts.count == limit)
+    guard case .available = manager.snapshot().availability else {
+        Issue.record(
+            "A capacity refusal on a subsequent mutation must not erase the existing accounts"
+        )
+        return
+    }
+}
+
+@MainActor
 @Test func nativeLayoutAdapterRestoresWorkspaceAcrossProfileRestart() throws {
     let root = temporaryRuntimeRoot()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -87,6 +154,110 @@ import Testing
         let loaded = try store.loadLayout(workspaceID: workspaceID)
         let restored = try #require(loaded)
         #expect(restored == expected)
+    }
+}
+
+@MainActor
+@Test
+func persistedInstalledCanvasBuildIsPlannedReacquiredAndLaunched() throws {
+    let root = temporaryRuntimeRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fixture = try GoodMorningFixture.load()
+    let identity = WorkbenchExactBuildIdentity(
+        manifestAuthor: GoodMorningFixture.author,
+        dTag: GoodMorningFixture.dTag,
+        aggregateHash: GoodMorningFixture.aggregateHash
+    )
+    let expected = WorkbenchLayoutSnapshot(
+        mode: .freeform,
+        windows: [.goodMorning],
+        selectedWindowID: WorkbenchCanvasWindow.goodMorning.id
+    )
+
+    do {
+        let profile = try WorkbenchRuntimeProfile.open(storageRoot: root)
+        _ = try installApproveAndLaunchGoodMorning(
+            fixture: fixture,
+            profile: profile
+        )
+        let store = RuntimeWorkbenchLayoutStore(profile: profile)
+        try store.saveLayout(expected, workspaceID: "default")
+        profile.close()
+    }
+
+    do {
+        let profile = try WorkbenchRuntimeProfile.open(
+            storageRoot: root,
+            persistedArtifactResolver: { native, _ in
+                do {
+                    let installed = try native.installSignedNamed(
+                        title: "Good Morning Protocol",
+                        eventJSON: fixture.eventJSON,
+                        author: GoodMorningFixture.author,
+                        dTag: GoodMorningFixture.dTag,
+                        blobsBySHA256: [
+                            GoodMorningFixture.indexDigest:
+                                fixture.indexHTML,
+                        ]
+                    )
+                    return native.reacquireInstalledArtifact(
+                        installed.permissionCoordinate
+                    )
+                } catch {
+                    return .refused(
+                        NativeRuntimeCatalogFailure(
+                            code: "test-source-refused",
+                            detail: error.localizedDescription,
+                            provenance: []
+                        )
+                    )
+                }
+            }
+        )
+        defer { profile.close() }
+        let store = RuntimeWorkbenchLayoutStore(profile: profile)
+        let restored = try #require(
+            try store.loadLayout(workspaceID: "default")
+        )
+        let plan = WorkbenchRestoredCanvasLaunchPlan(
+            layout: WorkbenchLayoutModel(snapshot: restored)
+        )
+        #expect(plan.identities == [identity])
+
+        // A restarted profile no longer needs a network-backed resolver to
+        // reopen an installed exact build: Rust re-verifies the signed
+        // manifest event it retained at install time against the sealed
+        // artifact cache, entirely offline.
+        guard case let .installed(directly) =
+            profile.reacquireInstalledArtifact(for: identity)
+        else {
+            Issue.record(
+                "A restarted profile must reopen the sealed exact build offline"
+            )
+            return
+        }
+        #expect(
+            directly.installedArtifact.permissionCoordinate.aggregateHash
+                == GoodMorningFixture.aggregateHash
+        )
+
+        let installation = try #require(
+            reacquiredInstallation(
+                profile.reacquirePersistedCanvasArtifact(
+                    for: plan.identities[0]
+                )
+            )
+        )
+        let review = profile.native.permissionReview(
+            for: installation.installedArtifact.permissionCoordinate
+        )
+        #expect(review.refusal == nil)
+        #expect(review.review?.launchPermitted == true)
+
+        let launched = try profile.native.launchInstalled(
+            installation.installedArtifact
+        )
+        #expect(launched.title == "Good Morning Protocol")
     }
 }
 
@@ -145,4 +316,15 @@ private func temporaryRuntimeRoot() -> URL {
             "nmp-native-runtime-workbench-\(UUID().uuidString)",
             isDirectory: true
         )
+}
+
+private func reacquiredInstallation(
+    _ result: NativeRuntimeCatalogInstallResult
+) -> NativeRuntimeCatalogInstallation? {
+    switch result {
+    case let .installed(installation):
+        installation
+    case .refused:
+        nil
+    }
 }

@@ -450,6 +450,7 @@ def main() -> int:
                     "trusted-shell.css",
                     "trusted-shell.html",
                     "trusted-shell-policy.js",
+                    "trusted-shell-prelude-domains.js",
                     "trusted-shell.js",
                 )
             },

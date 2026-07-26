@@ -23,6 +23,7 @@ const output = `<!doctype html>
     <div id="loading" role="status">Preparing verified napplet…</div>
   </main>
   <script src="trusted-shell-policy.js"></script>
+  <script src="trusted-shell-prelude-domains.js"></script>
   <script src="trusted-shell.js"></script>
 </body>
 </html>

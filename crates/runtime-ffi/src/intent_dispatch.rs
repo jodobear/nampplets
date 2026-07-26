@@ -29,7 +29,7 @@ use nmp_native_runtime_app::{PlatformCommand, RuntimeApp};
 use nmp_native_runtime_core::{ExecutionProfile, Principal, SessionState};
 use parking_lot::Mutex;
 
-use crate::installation_capability_requests;
+use crate::controller::support::installation_capability_requests;
 
 /// Native signal that a handler's window should be created (if not already
 /// running) and brought to front. Distinct from the `inc` native-action
@@ -37,6 +37,49 @@ use crate::installation_capability_requests;
 /// otherwise -- this fires *before* any session may exist yet.
 pub trait IntentActivationSink: Send + Sync + fmt::Debug {
     fn focus_or_launch(&self, handler: Principal);
+}
+
+/// Identifies the NAP-INTENT handler a launched/focused window should target.
+/// `Principal` (manifest author + d tag + aggregate hash) already *is* an
+/// exact-build identity, so this maps 1:1 onto a native workspace window
+/// identity with no further resolution.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct NativeIntentActivationRequest {
+    pub manifest_author: String,
+    pub d_tag: String,
+    pub aggregate_hash: String,
+}
+
+/// Native signal fired before any webview session may exist yet: "create (if
+/// needed) and bring to front the window for this handler." Distinct from
+/// `NativeIncActionExecutor`, which is scoped to an already-live session and
+/// refuses otherwise.
+#[uniffi::export(callback_interface)]
+pub trait NativeIntentActivationExecutor: Send + Sync {
+    fn focus_or_launch(&self, handler: NativeIntentActivationRequest);
+}
+
+pub(crate) struct CallbackIntentActivation {
+    pub(crate) callback: Arc<dyn NativeIntentActivationExecutor>,
+}
+
+impl fmt::Debug for CallbackIntentActivation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CallbackIntentActivation")
+            .finish_non_exhaustive()
+    }
+}
+
+impl IntentActivationSink for CallbackIntentActivation {
+    fn focus_or_launch(&self, handler: Principal) {
+        self.callback
+            .focus_or_launch(NativeIntentActivationRequest {
+                manifest_author: handler.manifest_author().to_owned(),
+                d_tag: handler.d_tag().to_owned(),
+                aggregate_hash: handler.aggregate_hash().to_owned(),
+            });
+    }
 }
 
 /// Every capability this MVP grants without a native confirmation prompt or

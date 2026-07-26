@@ -1,6 +1,6 @@
 //! Shared fixtures for `crates/runtime-app` integration tests.
 //!
-//! Both the plain `#[test]` suite (`tests/kernel.rs`) and the cucumber
+//! Both the plain `#[test]` suites (`tests/kernel_*.rs`) and the cucumber
 //! scenario runner (`tests/bdd.rs`) drive the exact same `Rig` so that BDD
 //! scenarios exercise the identical bootstrap path as the existing tests
 //! they were ported from. Each binary only exercises a subset of this
@@ -300,18 +300,51 @@ pub fn open_app_with_shell_domains(
     )
 }
 
+pub fn open_app_with_limits(
+    store: Arc<RuntimeStore>,
+    host: Arc<FakeHostDataPlane>,
+    provider: Arc<CapturingProvider>,
+    limits: AppLimits,
+) -> (Arc<RuntimeApp>, Arc<ShellProvider>) {
+    open_app_with_shell_source_and_limits(
+        store,
+        host,
+        provider,
+        Arc::new(FixedShellEnvironment {
+            override_domains: None,
+        }),
+        limits,
+    )
+}
+
 pub fn open_app_with_shell_source(
     store: Arc<RuntimeStore>,
     host: Arc<FakeHostDataPlane>,
     provider: Arc<CapturingProvider>,
     shell_environment: Arc<dyn ShellEnvironmentSource>,
 ) -> (Arc<RuntimeApp>, Arc<ShellProvider>) {
+    open_app_with_shell_source_and_limits(
+        store,
+        host,
+        provider,
+        shell_environment,
+        AppLimits::default(),
+    )
+}
+
+pub fn open_app_with_shell_source_and_limits(
+    store: Arc<RuntimeStore>,
+    host: Arc<FakeHostDataPlane>,
+    provider: Arc<CapturingProvider>,
+    shell_environment: Arc<dyn ShellEnvironmentSource>,
+    limits: AppLimits,
+) -> (Arc<RuntimeApp>, Arc<ShellProvider>) {
     let data_plane: Arc<dyn nmp_native_runtime_core::HostDataPlane> = host;
     let provider: Arc<dyn Provider> = provider;
     let shell_provider =
         Arc::new(ShellProvider::new(shell_environment, ShellProviderLimits::default()).unwrap());
     let app = RuntimeApp::open(RuntimeAppConfig {
-        limits: AppLimits::default(),
+        limits,
         resource_limits: ResourceLimits::default(),
         grant_limits: GrantLimits::default(),
         bridge_limits: BridgeLimits::default(),
@@ -405,4 +438,13 @@ pub fn wait_for_event(
             .await
             .expect("event-driven app observation timed out")
         })
+}
+
+#[derive(Debug)]
+pub struct WriteReceiptIdForTest;
+
+impl WriteReceiptIdForTest {
+    pub fn value() -> nmp_native_runtime_core::WriteReceiptId {
+        nmp_native_runtime_core::WriteReceiptId(Arc::from("fake-receipt-999"))
+    }
 }

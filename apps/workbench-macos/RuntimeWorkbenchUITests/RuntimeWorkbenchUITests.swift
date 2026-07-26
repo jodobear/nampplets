@@ -5,18 +5,43 @@ final class RuntimeWorkbenchUITests: XCTestCase {
     private static let liveCatalogOptInMarker =
         "/tmp/nampplets-run-live-catalog-ui-test"
     private static let maximumLiveReviewAttempts = 8
+    static let uiTestSigningSecret =
+        String(repeating: "0", count: 63) + "1"
+    static let uiTestSigningPublicKey =
+        "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+
+    /// When the running test method started, so the app-liveness diagnostic
+    /// below can report *how far in* a failure landed. The reported deaths
+    /// are spread across the timeline (1.8s / 3s / 17s / 25s in #137), and
+    /// that spread is only interpretable against a start time.
+    private(set) var testStartedAt = Date()
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
 
         // In UI tests it is usually best to stop immediately when a failure occurs.
         continueAfterFailure = false
+        testStartedAt = Date()
 
         // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
     }
 
     override func tearDownWithError() throws {
         // Put teardown code here. This method is called after the invocation of each test method in the class.
+    }
+
+    /// Captures the app-liveness diagnostic at the instant a failure is
+    /// recorded.
+    ///
+    /// This override is the whole point: `record(_:)` runs while XCTest is
+    /// still recording the issue, which is early enough for "is the app
+    /// still there?" to have a meaningful answer. A `tearDown`-based check
+    /// would be worthless — by then XCTest may already have reaped the app,
+    /// so it would report "gone" for termination and connection loss alike,
+    /// which is precisely the distinction it exists to draw.
+    override func record(_ issue: XCTIssue) {
+        logAppLivenessDiagnostic(for: issue)
+        super.record(issue)
     }
 
     @MainActor
@@ -49,7 +74,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
     }
 
     @MainActor
-    func testLiveCatalogOpensVerifiedNetworkNappletReview() throws {
+    func testLiveCatalogInstallsAndMountsVerifiedNetworkNapplet() throws {
         try XCTSkipUnless(
             Self.liveCatalogTestIsEnabled,
             "The live relay-backed catalog journey is opt-in. Set "
@@ -87,7 +112,7 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         let search = app.textFields["Search napplet catalog"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.click()
-        search.typeText("Chesslet")
+        search.typeText("STL Preview")
         app.buttons["Search"].click()
 
         let catalogEntries = app.buttons.matching(identifier: "catalog-entry")
@@ -156,48 +181,56 @@ final class RuntimeWorkbenchUITests: XCTestCase {
             "At least one bounded network candidate should complete exact verified installation"
         )
 
-        let renderedNapplet = app.groups["bundled-napplet"]
-        if renderedNapplet.waitForExistence(timeout: 30) {
-            XCTAssertTrue(
-                app.groups["napplet-canvas"].exists,
-                "A safely launchable network build must render inside the native canvas"
-            )
-            XCTAssertFalse(
-                app.descendants(matching: .any)
-                    .matching(
-                        NSPredicate(
-                            format: "label BEGINSWITH %@ OR value BEGINSWITH %@",
-                            "Refused:",
-                            "Refused:"
-                        )
-                    )
-                    .firstMatch
-                    .exists,
-                "The selected real build must not be reported as refused after rendering"
-            )
-            return
-        }
-
-        // Do not approve any capability for a network napplet in this test.
-        // Reaching Rust's exact permission review proves installation and is
-        // the furthest safe point when launch requires new grants.
         let permissionConfirm = app.buttons["permission-confirm"]
         XCTAssertTrue(
             permissionConfirm.waitForExistence(timeout: 10),
-            "An installed build that cannot launch grant-free must enter exact permission review"
+            "The installed STL Preview build must enter exact permission review"
         )
         XCTAssertTrue(
             permissionConfirm.isHittable,
             "Permission review must be visibly presented after the catalog closes"
         )
-        let cancelReview = app.buttons["Cancel"].firstMatch
-        XCTAssertTrue(cancelReview.waitForExistence(timeout: 2))
-        cancelReview.click()
+
+        for domain in ["inc", "link", "resource", "theme"] {
+            grantPermission(
+                domain: domain,
+                in: app,
+                message: "The \(domain) switch must be reachable in the native review"
+            )
+        }
+
+        XCTAssertTrue(permissionConfirm.isEnabled)
+        permissionConfirm.click()
         XCTAssertTrue(
-            app.buttons["Review Permissions"].waitForExistence(
-                timeout: 10
-            ),
-            "The verified installation must remain as a recoverable canvas window"
+            waitForNonexistence(of: permissionConfirm, timeout: 20),
+            "The exact permission batch must apply before launch"
+        )
+
+        XCTAssertTrue(
+            app.groups["bundled-napplet"].waitForExistence(timeout: 30),
+            "The verified public artifact must create a trusted napplet surface"
+        )
+        XCTAssertTrue(
+            app.staticTexts["Waiting for an STL to preview..."]
+                .waitForExistence(timeout: 30),
+            "The signed public napplet's own DOM must mount and pass its NAP-INC readiness check"
+        )
+        XCTAssertTrue(
+            app.groups["napplet-canvas"].exists,
+            "The mounted public napplet must remain inside the native canvas"
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)
+                .matching(
+                    NSPredicate(
+                        format: "label BEGINSWITH %@ OR value BEGINSWITH %@",
+                        "Refused:",
+                        "Refused:"
+                    )
+                )
+                .firstMatch
+                .exists,
+            "The installed public build must not be reported as refused"
         )
     }
 
@@ -210,33 +243,4 @@ final class RuntimeWorkbenchUITests: XCTestCase {
             )
     }
 
-    @MainActor
-    private func dismissCatalogReview(in app: XCUIApplication) {
-        let cancel = app.buttons.matching(identifier: "Cancel").firstMatch
-        guard cancel.waitForExistence(timeout: 2), cancel.isHittable else {
-            return
-        }
-        cancel.click()
-        _ = waitForNonexistence(
-            of: app.buttons[
-                "catalog-install-exact-build"
-            ],
-            timeout: 5
-        )
-    }
-
-    @MainActor
-    private func waitForNonexistence(
-        of element: XCUIElement,
-        timeout: TimeInterval
-    ) -> Bool {
-        let expectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"),
-            object: element
-        )
-        return XCTWaiter.wait(
-            for: [expectation],
-            timeout: timeout
-        ) == .completed
-    }
 }

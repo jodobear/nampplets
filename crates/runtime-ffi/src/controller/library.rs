@@ -1,0 +1,296 @@
+//! Artifact verification, installation, and installed-library commands.
+
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, atomic::Ordering},
+};
+
+use base64::Engine as _;
+
+use nmp_native_artifact::{
+    ArtifactMode, ArtifactSourcePolicy, ManifestEventLimits, ManifestEventVerifier,
+    SignedArtifactResolver, VerifiedArtifactHandle,
+};
+use nmp_native_provider_link::IntentHandlerDeclaration;
+use nmp_native_runtime_app::{ExecutableArtifact, PlatformCommand};
+use nmp_native_runtime_core::{BoundedJson, Principal};
+use nmp_native_runtime_store::{InstalledBuild, UninstallCleanupPolicy};
+
+use super::{RuntimeController, support::installation_capability_requests};
+use crate::{
+    ArtifactCoordinate, ArtifactVerification, MAXIMUM_INSTALLED_MANIFEST_METADATA_BYTES,
+    RuntimeExactBuildCoordinate, VerifiedArtifact, projection::map_coordinate,
+    support::bump_signal, workspace::validate_workspace_name,
+};
+
+#[uniffi::export]
+impl RuntimeController {
+    pub fn verify_artifact(
+        &self,
+        event_json: Vec<u8>,
+        coordinate: ArtifactCoordinate,
+    ) -> ArtifactVerification {
+        if self.closed.load(Ordering::Acquire) {
+            return ArtifactVerification {
+                artifact: None,
+                refusal: Some(self.refusal("closed", "runtime is closed")),
+            };
+        }
+        if event_json.len() > self.maximum_manifest_bytes {
+            return ArtifactVerification {
+                artifact: None,
+                refusal: Some(self.refusal(
+                    "manifest-too-large",
+                    format!(
+                        "manifest has {} bytes; the maximum is {}",
+                        event_json.len(),
+                        self.maximum_manifest_bytes
+                    ),
+                )),
+            };
+        }
+        let coordinate = match map_coordinate(coordinate) {
+            Ok(coordinate) => coordinate,
+            Err(detail) => {
+                return ArtifactVerification {
+                    artifact: None,
+                    refusal: Some(self.refusal("invalid-coordinate", detail)),
+                };
+            }
+        };
+        let verifier = match ManifestEventVerifier::new(ManifestEventLimits {
+            maximum_event_bytes: self.maximum_manifest_bytes,
+            ..ManifestEventLimits::default()
+        }) {
+            Ok(verifier) => verifier,
+            Err(error) => {
+                return ArtifactVerification {
+                    artifact: None,
+                    refusal: Some(self.refusal("invalid-limits", error.to_string())),
+                };
+            }
+        };
+        let policy = match ArtifactSourcePolicy::manifest_https_only(self.maximum_blob_sources) {
+            Ok(policy) => policy,
+            Err(error) => {
+                return ArtifactVerification {
+                    artifact: None,
+                    refusal: Some(self.refusal("invalid-source-policy", error.to_string())),
+                };
+            }
+        };
+        let resolver = match SignedArtifactResolver::new(
+            verifier,
+            self.artifact_limits,
+            policy,
+            &self.artifact_source,
+            &self.artifact_cache,
+        ) {
+            Ok(resolver) => resolver,
+            Err(error) => {
+                return ArtifactVerification {
+                    artifact: None,
+                    refusal: Some(self.refusal("invalid-resolver", error.to_string())),
+                };
+            }
+        };
+        match resolver.resolve_json(&event_json, &coordinate) {
+            Ok(handle) => {
+                let handle = Arc::new(handle);
+                let principal = handle.index().d_tag().and_then(|d_tag| {
+                    Principal::new(
+                        handle.index().author().as_str(),
+                        d_tag,
+                        handle.index().aggregate().as_str(),
+                    )
+                    .ok()
+                });
+                ArtifactVerification {
+                    artifact: Some(Arc::new(VerifiedArtifact { handle, principal })),
+                    refusal: None,
+                }
+            }
+            Err(error) => ArtifactVerification {
+                artifact: None,
+                refusal: Some(self.refusal("artifact-verification", error.to_string())),
+            },
+        }
+    }
+
+    pub fn install(&self, artifact: Arc<VerifiedArtifact>) {
+        let Some(principal) = artifact.principal.clone() else {
+            self.record_refusal(
+                "unsupported-manifest-identity",
+                "only verified named manifests currently mint exact-build principals",
+            );
+            return;
+        };
+        let metadata = serde_json::json!({
+            "event_id": artifact.handle.index().event_id().as_str(),
+            "kind": artifact.handle.index().kind(),
+            "mode": match artifact.handle.index().mode() {
+                ArtifactMode::SingleFile => "single-file",
+                ArtifactMode::ExternalAssets => "external-assets",
+            },
+            "paths": artifact.handle.index().entries().len(),
+            // Retained so `reacquire_installed_artifact` can reopen this
+            // exact build after a process restart by re-verifying the same
+            // signed event against the sealed cache, with no network fetch
+            // and no risk of silently accepting a since-republished event.
+            "signed_event_b64": base64::engine::general_purpose::STANDARD
+                .encode(artifact.handle.manifest().signed_event_json()),
+        });
+        let metadata =
+            match BoundedJson::from_value(&metadata, MAXIMUM_INSTALLED_MANIFEST_METADATA_BYTES) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    self.record_refusal("manifest-metadata", error.to_string());
+                    return;
+                }
+            };
+        let title: Arc<str> = Arc::from(
+            artifact
+                .handle
+                .manifest()
+                .title()
+                .unwrap_or("Untitled napplet"),
+        );
+        let capability_requests = match installation_capability_requests(&artifact.handle) {
+            Ok(requests) => requests,
+            Err(error) => {
+                self.record_refusal("invalid-capability-request", error);
+                return;
+            }
+        };
+        self.artifacts
+            .lock()
+            .insert(principal.clone(), Arc::clone(&artifact.handle));
+        let executable: Arc<dyn ExecutableArtifact> = artifact.handle.clone();
+        self.app.dispatch(PlatformCommand::InstallVerified {
+            build: InstalledBuild {
+                principal: principal.clone(),
+                title,
+                manifest_metadata: metadata,
+                capability_requests,
+            },
+            artifact: executable,
+        });
+        self.register_intent_handler(&principal, &artifact.handle);
+        bump_signal(&self.signal);
+    }
+
+    /// Applies the Rust-owned, finite installed-library filter. The resulting
+    /// bounded view is emitted in `RuntimeSnapshot.installed_library`.
+    pub fn set_library_filter(&self, query: String) {
+        self.app.dispatch(PlatformCommand::SetLibraryFilter {
+            query: Arc::from(query),
+        });
+        bump_signal(&self.signal);
+    }
+
+    /// Removes only runtime-owned state for one exact build. NMP canonical
+    /// facts and durable receipts are unreachable from this command, and
+    /// artifact-cache bytes remain until the artifact owner exposes a safe
+    /// exact-build deletion API.
+    pub fn uninstall_build(&self, coordinate: RuntimeExactBuildCoordinate) {
+        let Some(principal) = self.library_principal(coordinate) else {
+            return;
+        };
+        self.app.dispatch(PlatformCommand::Uninstall {
+            principal: principal.clone(),
+            cleanup: UninstallCleanupPolicy::RuntimeOwnedExactBuildState,
+        });
+        let remains_installed = self
+            .app
+            .snapshot()
+            .library
+            .builds
+            .iter()
+            .any(|candidate| candidate.build.principal == principal);
+        if !remains_installed {
+            self.artifacts.lock().remove(&principal);
+            self.intent_provider.unregister_handler(&principal);
+        }
+        bump_signal(&self.signal);
+    }
+
+    /// Assigns one installed exact build to an existing durable workspace.
+    /// The runtime store validates both sides and enforces assignment bounds.
+    pub fn assign_build_to_workspace(
+        &self,
+        workspace_id: String,
+        coordinate: RuntimeExactBuildCoordinate,
+    ) {
+        if let Err(detail) = validate_workspace_name("workspace_id", &workspace_id) {
+            self.record_refusal("invalid-workspace-assignment", detail);
+            return;
+        }
+        let Some(principal) = self.library_principal(coordinate) else {
+            return;
+        };
+        self.app.dispatch(PlatformCommand::AssignWorkspaceBuild {
+            workspace_id: Arc::from(workspace_id),
+            principal,
+        });
+        bump_signal(&self.signal);
+    }
+
+    /// Clears one exact build assignment without deleting the workspace,
+    /// installation, artifact bytes, NMP facts, or retained receipt ids.
+    pub fn clear_build_from_workspace(
+        &self,
+        workspace_id: String,
+        coordinate: RuntimeExactBuildCoordinate,
+    ) {
+        if let Err(detail) = validate_workspace_name("workspace_id", &workspace_id) {
+            self.record_refusal("invalid-workspace-assignment", detail);
+            return;
+        }
+        let Some(principal) = self.library_principal(coordinate) else {
+            return;
+        };
+        self.app.dispatch(PlatformCommand::RemoveWorkspaceBuild {
+            workspace_id: Arc::from(workspace_id),
+            principal,
+        });
+        bump_signal(&self.signal);
+    }
+}
+
+impl RuntimeController {
+    /// Registers this napplet as a NAP-INTENT handler for every archetype it
+    /// declared. Refusals are recorded, not propagated -- an invalid or
+    /// oversized archetype declaration should never block the rest of an
+    /// otherwise-valid install.
+    pub(super) fn register_intent_handler(
+        &self,
+        principal: &Principal,
+        handle: &VerifiedArtifactHandle,
+    ) {
+        let mut by_slug: BTreeMap<Arc<str>, BTreeSet<Arc<str>>> = BTreeMap::new();
+        for declaration in handle.manifest().archetypes() {
+            by_slug
+                .entry(Arc::clone(&declaration.slug))
+                .or_default()
+                .insert(Arc::clone(&declaration.protocol));
+        }
+        if by_slug.is_empty() {
+            return;
+        }
+        let declarations = by_slug
+            .into_iter()
+            .map(|(archetype, conventions)| IntentHandlerDeclaration {
+                archetype,
+                title: None,
+                actions: BTreeSet::from([Arc::from("open")]),
+                conventions,
+            })
+            .collect();
+        if let Err(error) = self
+            .intent_provider
+            .register_handler(principal.clone(), declarations)
+        {
+            self.record_refusal("intent-handler-registration", error.to_string());
+        }
+    }
+}

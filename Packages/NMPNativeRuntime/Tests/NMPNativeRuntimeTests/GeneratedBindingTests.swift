@@ -72,27 +72,11 @@ final class GeneratedBindingTests: XCTestCase {
         let review = try XCTUnwrap(
             controller.permissionReview(coordinate: coordinate).review
         )
-        XCTAssertFalse(review.launchPermitted)
-        XCTAssertEqual(
-            review.capabilities.map(\.domain),
-            ["identity", "inc", "outbox", "resource", "theme", "link"]
-        )
-        let permissionUpdate = controller.applyPermissionDecisions(
-            batch: RuntimePermissionDecisionBatch(
-                coordinate: coordinate,
-                decisions: review.capabilities.map {
-                    RuntimePermissionDecisionSelection(
-                        domain: $0.domain,
-                        decision: $0.requirement == .required
-                            ? .allowExactBuild
-                            : .denied
-                    )
-                }
-            )
-        )
-        XCTAssertTrue(permissionUpdate.applied)
-        XCTAssertTrue(permissionUpdate.review?.launchPermitted == true)
-        XCTAssertNil(permissionUpdate.refusal)
+        // The published fixture declares no `requires` tags and no runtime
+        // code special-cases its identity into a capability profile, so the
+        // review is empty and launch is permitted outright.
+        XCTAssertTrue(review.launchPermitted)
+        XCTAssertTrue(review.capabilities.isEmpty)
         controller.setGrant(
             artifact: artifact,
             capability: "shell",
@@ -226,8 +210,7 @@ final class GeneratedBindingTests: XCTestCase {
             maximumArtifactFileBytes: 1_048_576,
             maximumArtifactTotalBytes: 4_194_304,
             maximumVerifiedReadBytes: 1_048_576,
-            maximumBlobSources: 4,
-            permissionMode: .interactive
+            maximumBlobSources: 4
         )
     }
 

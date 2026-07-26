@@ -1,4 +1,26 @@
-use crate::*;
+//! Rust-owned projections between kernel types and the FFI boundary records.
+
+use std::sync::Arc;
+
+use nmp_native_artifact::ManifestCoordinate;
+use nmp_native_nmp_adapter::{
+    AccountLifecycleError, LocalAccountHandle, LocalAccountKind, LocalAccountSnapshot,
+};
+use nmp_native_providers::{ThemeProviderLimits, ThemeSnapshot};
+use nmp_native_runtime_app::{PermissionPlatformAvailability, PermissionReviewView, PlatformEvent};
+use nmp_native_runtime_core::{
+    CapabilityRequirement, ExecutionProfile, GrantDecision, Sensitivity,
+};
+
+use crate::{
+    ArtifactCoordinate, NativeAppearanceSnapshot, RuntimeAccountFailure, RuntimeAccountHandle,
+    RuntimeAccountKind, RuntimeAccountSnapshot, RuntimeCatalogFailure, RuntimeEvent,
+    RuntimeExactBuildCoordinate, RuntimeExecutionProfile, RuntimeGrantDecision,
+    RuntimePermissionCapabilitySnapshot, RuntimePermissionDecisionOption,
+    RuntimePermissionExistingDecision, RuntimePermissionPlatformAvailability,
+    RuntimePermissionRequirement, RuntimePermissionReviewSnapshot, RuntimePermissionSensitivity,
+};
+
 pub(crate) fn theme_from_appearance(
     appearance: NativeAppearanceSnapshot,
 ) -> Result<ThemeSnapshot, String> {
@@ -122,7 +144,7 @@ pub(crate) fn grant_decision(decision: RuntimeGrantDecision) -> GrantDecision {
     }
 }
 
-pub(crate) fn project_grant_decision(decision: GrantDecision) -> RuntimePermissionExistingDecision {
+fn project_grant_decision(decision: GrantDecision) -> RuntimePermissionExistingDecision {
     match decision {
         GrantDecision::Denied => RuntimePermissionExistingDecision::Denied,
         GrantDecision::AskEveryTime => RuntimePermissionExistingDecision::AskEveryTime,
@@ -132,9 +154,7 @@ pub(crate) fn project_grant_decision(decision: GrantDecision) -> RuntimePermissi
     }
 }
 
-pub(crate) fn project_requested_grant_decision(
-    decision: GrantDecision,
-) -> Option<RuntimeGrantDecision> {
+fn project_requested_grant_decision(decision: GrantDecision) -> Option<RuntimeGrantDecision> {
     match decision {
         GrantDecision::Denied => Some(RuntimeGrantDecision::Denied),
         GrantDecision::AskEveryTime => Some(RuntimeGrantDecision::AskEveryTime),
@@ -203,8 +223,12 @@ pub(crate) fn project_permission_review(
                     }
                 },
                 existing_decision: project_grant_decision(capability.current_decision),
+                is_granted: capability.is_granted,
                 requested_decision: capability
                     .requested_decision
+                    .and_then(project_requested_grant_decision),
+                recommended_decision: capability
+                    .recommended_decision
                     .and_then(project_requested_grant_decision),
                 decision_options: capability
                     .decision_options

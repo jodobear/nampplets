@@ -1,0 +1,204 @@
+//! End-to-end NAP-INTENT dispatch across the UniFFI boundary.
+
+use super::*;
+
+/// End-to-end proof that NAP-INTENT dispatch is real, not hardcoded: an
+/// installed-but-never-launched handler napplet gets launched by the
+/// dispatcher itself in reaction to a caller's `intent.invoke`, and once
+/// the (test-simulated) handler subscribes to its declared convention
+/// topic, receives the invocation payload as a real `inc.event` push and
+/// the caller receives a matching `ok:true` `intent.invoke.result`.
+#[test]
+fn intent_invoke_launches_a_registered_handler_and_delivers_the_payload_via_inc() {
+    let temp = TempDir::new().unwrap();
+    let (handler_event, handler_author, handler_digest) = signed_manifest_event(
+        "nip29-chat-test",
+        b"<html>handler</html>",
+        vec![
+            vec!["requires".to_owned(), "intent".to_owned()],
+            vec!["requires".to_owned(), "inc".to_owned()],
+            vec![
+                "archetype".to_owned(),
+                "nip29-group".to_owned(),
+                "napplet:nip29-group/open".to_owned(),
+            ],
+        ],
+    );
+    let (caller_event, caller_author, caller_digest) = signed_manifest_event(
+        "nip29-groups-test",
+        b"<html>caller</html>",
+        vec![vec!["requires".to_owned(), "intent".to_owned()]],
+    );
+
+    let controller = RuntimeController::open(
+        RuntimeConfig {
+            runtime_store_path: temp.path().join("runtime.sqlite3").display().to_string(),
+            nmp_store_path: None,
+            artifact_cache_path: temp.path().join("artifacts").display().to_string(),
+            ..RuntimeConfig::default()
+        },
+        Box::new(FixtureSource(BTreeMap::from([
+            (handler_digest, b"<html>handler</html>".to_vec()),
+            (caller_digest, b"<html>caller</html>".to_vec()),
+        ]))),
+    )
+    .unwrap();
+
+    // Install the handler but never launch it -- the dispatcher itself
+    // must be the one that launches it.
+    let handler_artifact = controller
+        .verify_artifact(
+            handler_event,
+            ArtifactCoordinate::Named {
+                author: handler_author,
+                d_tag: "nip29-chat-test".to_owned(),
+            },
+        )
+        .artifact
+        .expect("handler manifest verifies");
+    controller.install(Arc::clone(&handler_artifact));
+    for domain in ["intent", "inc"] {
+        controller.set_grant(
+            Arc::clone(&handler_artifact),
+            domain.to_owned(),
+            RuntimeSensitivity::Sensitive,
+            RuntimeGrantDecision::AllowExactBuild,
+        );
+    }
+
+    // Install, grant, and launch the caller.
+    let caller_artifact = controller
+        .verify_artifact(
+            caller_event,
+            ArtifactCoordinate::Named {
+                author: caller_author,
+                d_tag: "nip29-groups-test".to_owned(),
+            },
+        )
+        .artifact
+        .expect("caller manifest verifies");
+    controller.install(Arc::clone(&caller_artifact));
+    controller.set_grant(
+        Arc::clone(&caller_artifact),
+        "intent".to_owned(),
+        RuntimeSensitivity::Sensitive,
+        RuntimeGrantDecision::AllowExactBuild,
+    );
+    controller.launch(
+        Arc::clone(&caller_artifact),
+        RuntimeExecutionProfile::Legacy,
+    );
+    let caller_session = controller.snapshot().sessions[0].id;
+    controller.mapped_envelope(caller_session, br#"{"type":"shell.ready"}"#.to_vec());
+
+    controller.mapped_envelope(
+        caller_session,
+        serde_json::to_vec(&serde_json::json!({
+            "type": "intent.invoke",
+            "id": "invoke-1",
+            "request": {
+                "archetype": "nip29-group",
+                "convention": "napplet:nip29-group/open",
+                "payload": {"group": "abc"}
+            }
+        }))
+        .unwrap(),
+    );
+
+    // The dispatcher launches the handler on a background thread; poll
+    // for its session to appear.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let handler_session = loop {
+        if let Some(session) = controller
+            .snapshot()
+            .sessions
+            .iter()
+            .find(|session| session.id != caller_session)
+        {
+            break session.id;
+        }
+        assert!(Instant::now() < deadline, "handler session never launched");
+        thread::sleep(Duration::from_millis(20));
+    };
+
+    // Simulate the handler napplet's own JS boot: ready, then subscribe
+    // to the exact convention it declared in its manifest.
+    controller.mapped_envelope(handler_session, br#"{"type":"shell.ready"}"#.to_vec());
+    controller.mapped_envelope(
+        handler_session,
+        serde_json::to_vec(&serde_json::json!({
+            "type": "inc.subscribe",
+            "id": "sub-1",
+            "topic": "napplet:nip29-group/open"
+        }))
+        .unwrap(),
+    );
+
+    // The dispatcher's poll loop should now deliver the payload as a
+    // real `inc.event` push and resolve the caller's invocation.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let event = loop {
+        if let Some(event) = controller
+            .app
+            .events_after(0)
+            .events
+            .into_iter()
+            .find_map(|event| match event.event {
+                PlatformEvent::ProviderPush {
+                    session, envelope, ..
+                } if session == SessionId(handler_session)
+                    && envelope.decode().ok()?.get("type")? == "inc.event" =>
+                {
+                    envelope.decode().ok()
+                }
+                _ => None,
+            })
+        {
+            break event;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "handler never received the inc.event push"
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(event["topic"], "napplet:nip29-group/open");
+    assert_eq!(event["sender"], "nip29-groups-test");
+    assert_eq!(event["payload"], serde_json::json!({"group": "abc"}));
+
+    // `intent.invoke.result` is delivered asynchronously as a provider push
+    // to the caller's session (mirroring `inc.event` above), not as a
+    // synchronous `EnvelopeHandled` response to the original `intent.invoke`
+    // call -- `IntentProvider::invoke` returns immediately with no response
+    // and only pushes the result once `complete()` runs.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let result = loop {
+        if let Some(result) = controller
+            .app
+            .events_after(0)
+            .events
+            .into_iter()
+            .find_map(|event| match event.event {
+                PlatformEvent::ProviderPush {
+                    session, envelope, ..
+                } if session == SessionId(caller_session)
+                    && envelope.decode().ok()?.get("type")? == "intent.invoke.result" =>
+                {
+                    envelope.decode().ok()
+                }
+                _ => None,
+            })
+        {
+            break result;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "caller never received intent.invoke.result"
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(result["id"], "invoke-1");
+    assert_eq!(result["result"]["ok"], true);
+    assert_eq!(result["result"]["handled"], true);
+    assert_eq!(result["result"]["archetype"], "nip29-group");
+}

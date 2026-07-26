@@ -69,12 +69,18 @@ python3 conformance/scripts/verify_baseline.py
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace
-node --test --test-timeout=10000 web/trusted-shell/tests/trusted-shell.test.js
+node --test --test-timeout=10000 \
+  web/trusted-shell/tests/trusted-shell.test.js \
+  web/trusted-shell/tests/trusted-shell-apple-snapshot.test.js
 scripts/build-runtime-swift-xcframework.sh --universal --check-bindings
 swift test --package-path Packages/NMPNativeRuntime --parallel
 swift test --package-path platforms/apple --parallel
 swift test --package-path apps/workbench-macos/RuntimeWorkbenchPackage --parallel
 ```
+
+Run `scripts/setup-git-hooks.sh` once per checkout to enforce the AGENTS.md
+600-line file-growth ratchet locally before every commit; CI enforces it
+independently regardless of local setup.
 
 Use the concrete Xcode project and scheme arguments documented by
 `apps/workbench-macos/README.md`. The sibling `~/Work/nmp` checkout is a
