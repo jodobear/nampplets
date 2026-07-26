@@ -40,7 +40,7 @@ public struct ContentView: View {
     let injectedPermissionManager: (any PermissionReviewManaging)?
     let profileAction: WorkbenchProfileActionHandler
 
-    @State var activity = "Getting things ready"
+    @State var activity: WorkbenchActivityStatus = .preparing
     @State var installedArtifacts:
         [WorkbenchExactBuildIdentity: NativeRuntimeInstalledArtifact] = [:]
     @State var permissionTargetIdentity:

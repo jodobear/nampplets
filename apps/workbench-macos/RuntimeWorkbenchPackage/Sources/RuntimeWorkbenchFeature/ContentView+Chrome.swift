@@ -188,113 +188,6 @@ extension ContentView {
         .accessibilityIdentifier("account-switcher")
     }
 
-    private var workspaceActionsMenu: some View {
-        Menu {
-            Button("Installed Napplets", systemImage: "square.stack.3d.up") {
-                isLibrarySheetPresented = true
-            }
-            .keyboardShortcut("l", modifiers: [.command, .shift])
-
-            Button("Activity", systemImage: "waveform.path.ecg") {
-                openActivityDrawer()
-            }
-            .keyboardShortcut("a", modifiers: [.command, .shift])
-
-            Button("Permissions", systemImage: "lock.shield") {
-                openPermissionReview()
-            }
-            .keyboardShortcut("p", modifiers: [.command, .shift])
-
-            Divider()
-
-            Button("Settings", systemImage: "gearshape") {
-                openSettings()
-            }
-            .keyboardShortcut(",", modifiers: [.command])
-        } label: {
-            Label("Workspace Actions", systemImage: "ellipsis.circle")
-        }
-        .labelStyle(.iconOnly)
-        .menuStyle(.borderlessButton)
-        // `.labelStyle(.iconOnly)` drops the label's text from the rendered
-        // control, so the name must be restated for assistive technology —
-        // otherwise this is an unnamed icon under VoiceOver. The identifier
-        // is what every UI test queries by; matching on a localised label is
-        // not a stable contract. This mirrors `account-switcher` above.
-        .accessibilityLabel("Workspace Actions")
-        .accessibilityIdentifier("workspace-actions")
-        .accessibilityHint(
-            "Opens installed napplets, activity, permissions, or settings"
-        )
-    }
-
-    private var availableLayoutModes: [WorkbenchLayoutMode] {
-        #if os(iOS)
-        WorkbenchLayoutMode.allCases
-        #else
-        WorkbenchLayoutMode.allCases.filter { $0 != .fullWindow }
-        #endif
-    }
-
-    private var layoutMenu: some View {
-        Menu {
-            Section("Window layout") {
-                ForEach(availableLayoutModes, id: \.self) { mode in
-                    Button {
-                        setLayoutMode(mode)
-                    } label: {
-                        if layout.mode == mode {
-                            Label(mode.title, systemImage: "checkmark")
-                        } else {
-                            Label(mode.title, systemImage: mode.systemImage)
-                        }
-                    }
-                }
-            }
-        } label: {
-            Label(layout.mode.title, systemImage: layout.mode.systemImage)
-        }
-        .accessibilityHint(
-            "Switches between freely arranged, automatically tiled, and full "
-                + "window napplet display"
-        )
-        .accessibilityIdentifier("layout-mode-menu")
-    }
-
-    var activityBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: activitySymbol)
-                .foregroundStyle(activityColor)
-            Text(activity)
-            if let layoutNotice = layoutPersistenceError ?? layout.capacityWarningMessage {
-                Divider()
-                    .frame(height: 16)
-                Label(layoutNotice, systemImage: "externaldrive.badge.exclamationmark")
-                    .foregroundStyle(.orange)
-            }
-            Spacer()
-            Text("Napplets use only the access you approve")
-                .foregroundStyle(.secondary)
-        }
-        .font(.caption)
-        .padding(.horizontal, 16)
-        .frame(height: 34)
-        .background(.bar)
-        .accessibilityIdentifier("runtime-activity")
-    }
-
-    private var activitySymbol: String {
-        activity.hasPrefix("Refused") || activity.contains("crashed")
-            ? "exclamationmark.triangle.fill"
-            : "checkmark.shield.fill"
-    }
-
-    private var activityColor: Color {
-        activity.hasPrefix("Refused") || activity.contains("crashed")
-            ? .orange
-            : .green
-    }
-
     private var activeAccountLabel: String {
         guard
             let activeHandle = accountSnapshot.activeHandle,
@@ -335,7 +228,7 @@ extension ContentView {
     }
 
     @MainActor
-    private func setLayoutMode(_ mode: WorkbenchLayoutMode) {
+    func setLayoutMode(_ mode: WorkbenchLayoutMode) {
         mutateLayout { $0.setMode(mode) }
         if mode == .fullWindow {
             fullWindowRootID = layout.selectedWindow?.id

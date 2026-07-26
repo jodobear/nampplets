@@ -66,3 +66,24 @@ private final class RefusingActivitySubscription: ActivitySubscription {
     #expect(model.snapshot == initial)
     #expect(model.refreshRefusal == refusal)
 }
+
+@MainActor
+@Test func refusalEvidenceKeepsExactRuntimeCodeAndDetailSeparate() {
+    let banner = ActivityRefreshRefusalBanner(
+        refusal: .snapshotRefused(
+            code: "snapshot-integrity-missing-build-session",
+            detail: "build references session 42, but it is absent"
+        )
+    )
+
+    #expect(banner.evidenceFields == [
+        NappletField(
+            "Code",
+            "snapshot-integrity-missing-build-session"
+        ),
+        NappletField(
+            "Detail",
+            "build references session 42, but it is absent"
+        ),
+    ])
+}

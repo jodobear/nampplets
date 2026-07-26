@@ -1,228 +1,238 @@
 import SwiftUI
 
+enum CatalogInstallPlainCopy {
+    static let optionalHeading = "The napplet lists these as optional"
+    static let reassurance =
+        "Adding doesn't grant access or open the napplet. "
+        + "Access is reviewed separately."
+}
+
+/// What a person sees before adding a napplet.
+///
+/// Adding acquires verified bytes and grants nothing -- the runtime asks for
+/// capability at first run, not here. So this surface is deliberately light:
+/// it says what the napplet is, who made it, and what it will ask for later,
+/// and it puts every hash, coordinate and provenance record behind one
+/// deliberate move. See `docs/adr/0008-verdicts-on-the-path.md`.
 struct CatalogInstallReviewSheet: View {
     let review: CatalogInstallReview
     let isInstalling: Bool
-    let issue: CatalogIssue?
+    let issuePresentation: CatalogIssueNotice.Presentation?
     let onCancel: () -> Void
     let onConfirm: () -> Void
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    reviewIdentity
-                    Divider()
-                    sources
-                    Divider()
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(review.title)
+                        .font(NappletType.display)
+                        .nappletDisplayFace()
+                        .foregroundStyle(NappletInk.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(byline)
+                        .font(NappletType.lede)
+                        .foregroundStyle(NappletInk.inkSecondary)
+                        .padding(.top, NappletMetrics.tight)
+
+                    NappletNotice(verdict: verdict)
+                        .padding(.top, NappletMetrics.roomy)
+
+                    if let issuePresentation {
+                        CatalogIssueNotice(presentation: issuePresentation)
+                            .padding(.top, NappletMetrics.snug)
+                    }
+
                     capabilities
-                    Divider()
-                    compatibility
-                    Divider()
-                    updateRelationship
+                        .padding(.top, NappletMetrics.spacious)
 
-                    if !review.warnings.isEmpty {
-                        Divider()
-                        warnings
+                    reassurance
+                        .padding(.top, NappletMetrics.roomy)
+
+                    NappletEvidence {
+                        CatalogInstallEvidence(review: review)
                     }
-
-                    if let issue {
-                        Divider()
-                        CatalogIssueView(issue: issue)
-                    }
-
-                    Text(
-                        "Installing does not launch this napplet or grant any capability."
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(
-                        "Installing does not launch the napplet or grant capabilities"
-                    )
+                    .font(NappletType.caption)
+                    .padding(.top, NappletMetrics.roomy)
                 }
-                .padding()
+                .frame(maxWidth: NappletMetrics.measure, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, NappletMetrics.generous)
+                .padding(.top, NappletMetrics.generous)
+                .padding(.bottom, NappletMetrics.spacious)
             }
-            .navigationTitle("Review \(review.title)")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
-                        .keyboardShortcut(.cancelAction)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Install Exact Build", action: onConfirm)
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(!review.canInstall || isInstalling)
-                        .accessibilityIdentifier("catalog-install-exact-build")
-                        .accessibilityHint(
-                            "Installs only the hash shown in this review"
-                        )
-                }
-            }
+
+            actions
         }
+        .background(NappletInk.paperRaised)
         #if os(macOS)
-        .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 720)
+        .frame(minWidth: 560, idealWidth: 620, minHeight: 480, idealHeight: 660)
         #endif
         .interactiveDismissDisabled(isInstalling)
     }
 
-    private var reviewIdentity: some View {
-        GroupBox("Verified build") {
-            VStack(alignment: .leading, spacing: 8) {
-                LabeledContent("Publisher", value: review.publisher.visibleName)
-                LabeledContent("Public key", value: review.publisher.publicKey)
-                LabeledContent("Coordinate", value: review.coordinate)
-                LabeledContent("Exact hash", value: review.exactAggregateHash)
+    /// The accent appears here and nowhere else on this screen.
+    private var actions: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(NappletInk.rule)
+                .frame(height: 1)
+            AdaptiveActionPair {
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+            } trailing: {
+                Button(
+                    isInstalling ? "Adding…" : "Add Napplet",
+                    action: onConfirm
+                )
+                .buttonStyle(.borderedProminent)
+                .tint(NappletInk.accent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!review.canInstall || isInstalling)
+                .accessibilityIdentifier("catalog-install-exact-build")
+                .accessibilityHint(
+                    "Adds this napplet. It cannot do anything until you open it."
+                )
             }
-            .font(.body)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, NappletMetrics.generous)
+            .padding(.vertical, NappletMetrics.comfortable)
         }
     }
 
-    private var sources: some View {
-        CatalogReviewSection(title: "Sources and provenance") {
-            if review.sources.isEmpty {
-                Text("No source provenance was supplied.")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(review.sources) { source in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(source.kind.rawValue)
-                            .font(.headline)
-                        Text(source.source)
-                            .font(.body.monospaced())
-                            .textSelection(.enabled)
-                        Text(source.evidence)
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-        }
+    private var byline: String {
+        NappletIdentityPresentation.publisherIsUnnamed(
+            displayName: review.publisher.displayName,
+            publicKey: review.publisher.publicKey
+        )
+            ? "From a publisher who hasn't given a name"
+            : "by " + NappletIdentityPresentation.publisherName(
+                displayName: review.publisher.displayName,
+                publicKey: review.publisher.publicKey
+            )
     }
 
+    /// The one thing a person is actually deciding about.
+    /// The napplet's claim about itself, so it is set as a card. The group
+    /// headings live on the page outside it: heading-card-heading-card nesting
+    /// is the grouped-Form look this redesign exists to escape.
+    @ViewBuilder
     private var capabilities: some View {
-        CatalogReviewSection(title: "Capabilities") {
-            domainGroup(title: "Required", domains: review.requiredDomains)
-            domainGroup(title: "Optional", domains: review.optionalDomains)
-        }
-    }
-
-    private func domainGroup(title: String, domains: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.headline)
-            if domains.isEmpty {
-                Text("None")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(domains.joined(separator: ", "))
-                    .textSelection(.enabled)
+        if review.requiredDomains.isEmpty, review.optionalDomains.isEmpty {
+            VStack(alignment: .leading, spacing: NappletMetrics.snug) {
+                Text("What it will ask for")
+                    .font(NappletType.heading)
+                    .foregroundStyle(NappletInk.ink)
+                Text("Nothing. This napplet doesn't ask for access to anything.")
+                    .font(NappletType.secondary)
+                    .foregroundStyle(NappletInk.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-        }
-    }
+        } else {
+            VStack(alignment: .leading, spacing: NappletMetrics.snug) {
+                Text("What it will ask for")
+                    .font(NappletType.heading)
+                    .foregroundStyle(NappletInk.ink)
 
-    private var compatibility: some View {
-        CatalogReviewSection(title: "Platform compatibility") {
-            if review.platformCompatibility.isEmpty {
-                Text("No platform compatibility evidence was projected.")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(review.platformCompatibility) { platform in
-                    HStack(alignment: .firstTextBaseline) {
-                        Image(systemName: platformSymbol(platform.status))
-                            .foregroundStyle(platformColor(platform.status))
-                        Text(platform.platform)
-                            .font(.headline)
-                        Text(platform.detail)
-                            .foregroundStyle(.secondary)
-                        Spacer()
+                VStack(alignment: .leading, spacing: NappletMetrics.comfortable) {
+                    if !review.requiredDomains.isEmpty {
+                        capabilityList(review.requiredDomains)
                     }
-                    .accessibilityElement(children: .combine)
+                    if !review.optionalDomains.isEmpty {
+                        VStack(alignment: .leading, spacing: NappletMetrics.snug) {
+                            Text(CatalogInstallPlainCopy.optionalHeading)
+                                .font(NappletType.caption)
+                                .foregroundStyle(NappletInk.inkSecondary)
+                            capabilityList(review.optionalDomains)
+                        }
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(NappletMetrics.comfortable)
+                .background(
+                    NappletInk.fillQuiet,
+                    in: RoundedRectangle(
+                        cornerRadius: NappletMetrics.cardCorner,
+                        style: .continuous
+                    )
+                )
             }
         }
     }
 
-    private var updateRelationship: some View {
-        CatalogReviewSection(title: "Install relationship") {
-            Text(review.updateRelationship.title)
-                .font(.headline)
-            if let detail = review.updateRelationship.detail {
-                Text(detail)
-                    .foregroundStyle(.secondary)
-            }
-            if let installedHash = review.updateRelationship.installedHash {
-                LabeledContent("Installed hash", value: installedHash)
-                    .textSelection(.enabled)
-            }
-        }
-    }
-
-    private var warnings: some View {
-        CatalogReviewSection(title: "Warnings") {
-            ForEach(review.warnings) { warning in
-                Label(warning.message, systemImage: warningSymbol(warning.severity))
-                    .foregroundStyle(warningColor(warning.severity))
+    private func capabilityList(_ domains: [String]) -> some View {
+        VStack(alignment: .leading, spacing: NappletMetrics.snug) {
+            ForEach(domains, id: \.self) { domain in
+                let phrase = NappletVocabulary.phrase(forDomain: domain)
+                Label {
+                    Text(phrase.sentence)
+                        .foregroundStyle(NappletInk.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: phrase.symbol)
+                        .foregroundStyle(NappletInk.inkSecondary)
+                }
+                .font(NappletType.secondary)
+                .accessibilityElement(children: .combine)
             }
         }
     }
 
-    private func platformSymbol(_ status: CatalogPlatformStatus) -> String {
-        switch status {
-        case .compatible:
-            "checkmark.circle"
-        case .incompatible:
-            "xmark.circle"
-        case .unavailable:
-            "questionmark.circle"
+    private var reassurance: some View {
+        Text(
+            CatalogInstallPlainCopy.reassurance
+        )
+        .font(NappletType.secondary)
+        .foregroundStyle(NappletInk.inkSecondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Verdicts only, and only when there is something to say. Rust owns
+    /// whether an install may proceed (`canInstall`) and which warnings are
+    /// blocking; this reads those decisions rather than re-deriving them.
+    var verdict: NappletTrustVerdict {
+        if review.warnings.contains(where: { $0.severity == .blocking }) {
+            return .blocked("This napplet can't be added right now.")
+        }
+        if currentPlatformIsIncompatible {
+            return .blocked("This napplet doesn't run on this device.")
+        }
+        if !review.canInstall {
+            return .blocked("This napplet can't be added right now.")
+        }
+        if review.warnings.contains(where: { $0.severity == .caution }) {
+            return .caution("There's something to review before adding this napplet.")
+        }
+        return relationshipVerdict
+    }
+
+    private var relationshipVerdict: NappletTrustVerdict {
+        switch review.updateRelationship {
+        case .sameBuild:
+            .caution("You already have this napplet.")
+        case .rollback:
+            .caution("This is an older version than the one you already have.")
+        case .differentBuild:
+            .caution(
+                "You already have a different version of this napplet. "
+                    + "Adding this one replaces it."
+            )
+        case .update, .firstInstall, .unknown:
+            .settled
         }
     }
 
-    private func platformColor(_ status: CatalogPlatformStatus) -> Color {
-        switch status {
-        case .compatible:
-            .green
-        case .incompatible:
-            .red
-        case .unavailable:
-            .orange
-        }
-    }
-
-    private func warningSymbol(_ severity: CatalogWarningSeverity) -> String {
-        switch severity {
-        case .information:
-            "info.circle"
-        case .caution:
-            "exclamationmark.triangle"
-        case .blocking:
-            "xmark.octagon"
-        }
-    }
-
-    private func warningColor(_ severity: CatalogWarningSeverity) -> Color {
-        switch severity {
-        case .information:
-            .secondary
-        case .caution:
-            .orange
-        case .blocking:
-            .red
-        }
-    }
-}
-
-private struct CatalogReviewSection<Content: View>: View {
-    let title: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.title3.bold())
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    private var currentPlatformIsIncompatible: Bool {
+        #if os(macOS)
+        let current = "macos"
+        #else
+        let current = "ios"
+        #endif
+        return review.platformCompatibility.contains(where: { row in
+                row.platform
+                    .lowercased()
+                    .replacingOccurrences(of: " ", with: "") == current
+                    && row.status == .incompatible
+            })
     }
 }

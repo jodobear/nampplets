@@ -150,9 +150,13 @@ extension WorkbenchRuntimeProfile: RuntimeWorkbenchCatalogProfileBacking {
             }
             return CatalogEntry(
                 id: entry.eventId,
-                title: entry.title ?? entry.dTag ?? "Untitled napplet",
-                summary: entry.description
-                    ?? "Signed public napplet manifest from the current NMP window.",
+                title: CatalogTitlePresentation.displayTitle(entry.title),
+                // A napplet with no description has none. Standing a sentence
+                // about NMP windows in its place put runtime vocabulary in the
+                // most-read position on the busiest screen, and told the
+                // reader nothing about the napplet. Absence renders as
+                // absence; the card omits the line entirely.
+                summary: entry.description ?? "",
                 publisher: CatalogPublisher(
                     displayName: nil,
                     publicKey: entry.manifestAuthor
@@ -259,81 +263,4 @@ extension WorkbenchRuntimeProfile: RuntimeWorkbenchCatalogProfileBacking {
         return .page(projected)
     }
 
-    private static func projectCatalogReview(
-        _ review: NativeRuntimeCatalogReview
-    ) -> CatalogInstallReview? {
-        let lookupSources = review.provenance.enumerated().map {
-            index,
-            fact in
-            let evidence: String
-            switch fact.state {
-            case let .observed(rows):
-                evidence = "Observed \(rows) matching canonical row(s)."
-            case let .shortfall(reason):
-                evidence = "Source shortfall: \(reason)"
-            case let .selected(eventID):
-                evidence = "Selected exact signed event \(eventID)."
-            }
-            return CatalogSourceProvenance(
-                id: "lookup-\(index)",
-                kind: .manifestEvent,
-                source: fact.source,
-                evidence: evidence
-            )
-        }
-        let blobSources = review.blobSources.enumerated().map {
-            index,
-            source in
-            CatalogSourceProvenance(
-                id: "artifact-\(index)",
-                kind: .artifact,
-                source: source,
-                evidence: "HTTPS source declared by the exact signed manifest."
-            )
-        }
-        let requiredDomains = review.capabilities.compactMap {
-            $0.requirement == .required ? $0.domain : nil
-        }
-        let optionalDomains = review.capabilities.compactMap {
-            $0.requirement == .optional ? $0.domain : nil
-        }
-        let eligibility = review.installEligibility
-        return CatalogInstallReview(
-            id: review.token,
-            title: review.title ?? review.dTag ?? "Untitled napplet",
-            publisher: CatalogPublisher(
-                displayName: nil,
-                publicKey: review.manifestAuthor
-            ),
-            coordinate: review.coordinate,
-            exactAggregateHash: review.aggregateHash,
-            sources: lookupSources + blobSources,
-            requiredDomains: requiredDomains,
-            optionalDomains: optionalDomains,
-            platformCompatibility: [
-                CatalogPlatformCompatibility(
-                    id: "native-runtime",
-                    platform: "Native macOS runtime",
-                    status: .compatible,
-                    detail: "Rust verified the exact signed manifest and immutable artifact bytes."
-                ),
-            ],
-            warnings: WorkbenchCatalogInstallEligibility.warnings(for: eligibility),
-            updateRelationship: .unknown(
-                reason: "The exact installed-library relationship is resolved during installation."
-            ),
-            canInstall: eligibility.canInstall
-        )
-    }
-
-    private static func catalogIssue(
-        _ failure: NativeRuntimeCatalogFailure
-    ) -> CatalogIssue {
-        CatalogIssue(
-            title: failure.code == "cancelled"
-                ? "Catalog operation cancelled"
-                : "Catalog operation refused",
-            message: failure.detail
-        )
-    }
 }

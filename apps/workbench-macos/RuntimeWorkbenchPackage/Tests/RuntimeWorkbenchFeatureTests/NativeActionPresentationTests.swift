@@ -7,8 +7,8 @@ struct NativeActionPresentationTests {
     private let aggregate = String(repeating: "b", count: 64)
 
     @Test
-    func notePayloadProjectsOnlyTheBoundedEventTarget() {
-        let eventID = String(repeating: "c", count: 64)
+    func notePresentationDoesNotInterpretPayload() {
+        let payload = #"{"target":{"id":"not-validated-in-swift"}}"#
         let action = NativeWorkbenchAction(
             manifestAuthor: author,
             dTag: "good-morning",
@@ -16,19 +16,39 @@ struct NativeActionPresentationTests {
             sessionID: 4,
             sourceWindowID: 8,
             kind: .noteOpen,
-            payloadJSON: "{\"target\":{\"type\":\"event\",\"id\":\"\(eventID)\",\"kind\":1,\"pubkey\":\"\(author)\"},\"extra\":{\"secret\":\"ignored\"}}"
+            payloadJSON: payload
         )
 
-        let notice = NativeActionNotice.decode(action)
+        let notice = NativeActionNotice.presentation(action)
 
-        #expect(notice?.title == "Note requested")
-        #expect(notice?.target.contains("kind 1") == true)
-        #expect(notice?.detail.contains(author) == true)
+        #expect(notice.title == "Open a post")
+        #expect(notice.summary == "This napplet wants to show you a post.")
+        #expect(notice.evidence.contains {
+            $0.label == "Payload JSON" && $0.value == payload
+        })
+        #expect(notice.evidence.contains {
+            $0.label == "Action kind" && $0.value == "note-open"
+        })
+        #expect(notice.evidence.contains {
+            $0.label == "Manifest author" && $0.value == author
+        })
+        #expect(notice.evidence.contains {
+            $0.label == "dTag" && $0.value == action.dTag
+        })
+        #expect(notice.evidence.contains {
+            $0.label == "Aggregate hash" && $0.value == aggregate
+        })
+        #expect(notice.evidence.contains {
+            $0.label == "Source session" && $0.value == "4"
+        })
+        #expect(notice.evidence.contains {
+            $0.label == "Source window" && $0.value == "8"
+        })
     }
 
     @Test
-    func malformedProfilePayloadFailsClosed() {
-        let action = NativeWorkbenchAction(
+    func malformedAndNovelPayloadsCannotChangeThePlainVerdict() {
+        let malformed = NativeWorkbenchAction(
             manifestAuthor: author,
             dTag: "good-morning",
             aggregateHash: aggregate,
@@ -37,13 +57,26 @@ struct NativeActionPresentationTests {
             kind: .profileOpen,
             payloadJSON: #"{"pubkey":"not-a-pubkey"}"#
         )
+        let novel = NativeWorkbenchAction(
+            manifestAuthor: author,
+            dTag: "good-morning",
+            aggregateHash: aggregate,
+            sessionID: 4,
+            sourceWindowID: 8,
+            kind: .profileOpen,
+            payloadJSON: #"["novel",{"shape":true}]"#
+        )
 
-        #expect(NativeActionNotice.decode(action) == nil)
+        let first = NativeActionNotice.presentation(malformed)
+        let second = NativeActionNotice.presentation(novel)
+        #expect(first.title == second.title)
+        #expect(first.summary == second.summary)
+        #expect(first.evidence.last?.value == malformed.payloadJSON)
+        #expect(second.evidence.last?.value == novel.payloadJSON)
     }
 
     @Test
-    func composePayloadIsDisplayedWithoutCreatingAComposer() {
-        let eventID = String(repeating: "d", count: 64)
+    func composePresentationDoesNotInferReplySemantics() {
         let action = NativeWorkbenchAction(
             manifestAuthor: author,
             dTag: "good-morning",
@@ -51,13 +84,13 @@ struct NativeActionPresentationTests {
             sessionID: 4,
             sourceWindowID: 8,
             kind: .composeOpen,
-            payloadJSON: "{\"intent\":\"reply\",\"replyTo\":{\"id\":\"\(eventID)\"}}"
+            payloadJSON: #"{"replyTo":{"id":"opaque"}}"#
         )
 
-        let notice = NativeActionNotice.decode(action)
-
-        #expect(notice?.title == "Compose requested")
-        #expect(notice?.detail == "The Workbench does not provide a composer.")
-        #expect(notice?.target.contains(eventID) == true)
+        let notice = NativeActionNotice.presentation(action)
+        #expect(notice.title == "Write something")
+        #expect(notice.summary.contains("write a post"))
+        #expect(!notice.summary.contains("reply"))
+        #expect(notice.evidence.last?.value == action.payloadJSON)
     }
 }

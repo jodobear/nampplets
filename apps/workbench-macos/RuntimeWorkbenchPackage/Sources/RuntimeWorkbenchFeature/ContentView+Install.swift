@@ -67,7 +67,7 @@ extension ContentView {
         if review.launchPermitted {
             launchInstalledIfPermitted(identity)
         } else {
-            activity = "Permission review required before launch"
+            activity = .waitingForPermission
             switch presentation {
             case .immediate:
                 isPermissionSheetPresented = true
@@ -86,7 +86,7 @@ extension ContentView {
         presentation: InstalledArtifactPresentation
     ) async -> Bool {
         guard let profile else {
-            activity = "Refused: the application runtime profile is unavailable"
+            activity = .failed(detail: "The app isn't ready yet.")
             return false
         }
         guard
@@ -96,14 +96,16 @@ extension ContentView {
             return false
         }
         reacquiringIdentities.insert(identity)
-        activity = "Reopening installed exact build"
+        activity = .reopening
         let result = await Task.detached {
             profile.reacquirePersistedCanvasArtifact(for: identity)
         }.value
         reacquiringIdentities.remove(identity)
         switch result {
         case let .refused(failure):
-            activity = "Refused: \(failure.code): \(failure.detail)"
+            activity = .refused(
+                detail: "\(failure.code): \(failure.detail)"
+            )
             return false
         case let .installed(installation):
             guard
@@ -122,7 +124,7 @@ extension ContentView {
                 )
                 return true
             } catch {
-                activity = "Refused: \(error.localizedDescription)"
+                activity = .failed(detail: error.localizedDescription)
                 return false
             }
         }
@@ -134,9 +136,7 @@ extension ContentView {
         guard !plan.identities.isEmpty else {
             return false
         }
-        activity =
-            "Reopening \(plan.identities.count) persisted napplet"
-            + (plan.identities.count == 1 ? "" : "s")
+        activity = .restoring(count: plan.identities.count)
         for identity in plan.identities {
             _ = await reacquireInstalledArtifact(
                 identity,
@@ -166,11 +166,11 @@ extension ContentView {
         guard review.refusal == nil,
               review.review?.launchPermitted == true
         else {
-            activity = "Permission review still requires a decision"
+            activity = .waitingForPermission
             return
         }
         launchingIdentities.insert(identity)
-        activity = "Launching signed exact build"
+        activity = .opening
         Task {
             defer { launchingIdentities.remove(identity) }
             do {
@@ -186,9 +186,9 @@ extension ContentView {
                 if permissionTargetIdentity == identity {
                     permissionTargetIdentity = nil
                 }
-                activity = "Signed exact-build session ready"
+                activity = .ready
             } catch {
-                activity = "Refused: \(error.localizedDescription)"
+                activity = .failed(detail: error.localizedDescription)
             }
         }
     }

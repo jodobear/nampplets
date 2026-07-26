@@ -49,7 +49,7 @@ import Testing
 }
 
 @MainActor
-@Test func selectAllRecommendedChoosesTheBroadestValidDecisionAndConfirmLaunches() async {
+@Test func selectAllRecommendedUsesRustsValidDecisionAndConfirmLaunches() async {
     let initial = permissionSnapshot()
     let manager = RecordingPermissionManager(snapshot: initial)
     manager.response = PermissionReviewSnapshot(
@@ -82,57 +82,33 @@ import Testing
 }
 
 @MainActor
-@Test func managedCapabilityNoLongerBlocksConfirmation() async {
-    let managed = PermissionCapabilityReview(
-        domain: "config",
-        title: "Config",
-        requirement: .optional,
-        sensitivity: .ordinary,
-        rationale: "Reads napplet-scoped configuration.",
-        dependencies: [],
-        platformAvailability: .available,
-        existingDecision: .managed,
-        isGranted: false,
-        requestedDecision: nil,
-        recommendedDecision: nil,
-        decisionOptions: validOptions(unavailable: Set(PermissionRequestedDecision.allCases))
-    )!
-    let identity = PermissionCapabilityReview(
-        domain: "identity",
-        title: "Identity",
-        requirement: .required,
-        sensitivity: .sensitive,
-        rationale: "Reads the active public key and follow list.",
-        dependencies: [],
-        platformAvailability: .available,
-        existingDecision: .denied,
-        isGranted: false,
-        requestedDecision: .askEveryTime,
-        recommendedDecision: .allowExactBuild,
-        decisionOptions: validOptions()
-    )!
-    let review = PermissionReview(
-        principal: permissionPrincipal(hash: "e"),
-        publisherDisplayName: "Alice",
-        nappletTitle: "Good Morning",
-        capabilities: [managed, identity]
-    )!
-    let initial = PermissionReviewSnapshot(review: review)
-    let manager = RecordingPermissionManager(snapshot: initial)
-    manager.response = PermissionReviewSnapshot(review: review, submissionState: .applied)
-    let model = PermissionReviewSheetModel(manager: manager)
-
-    model.selectAllRecommended()
-    await model.confirm()
-
-    #expect(model.issue == nil)
-    #expect(manager.submissions.count == 1)
-    #expect(
-        manager.submissions.first?.decisions == [
-            PermissionDecisionSelection(domain: "identity", decision: .allowExactBuild)!
-        ]
+@Test func grantSwitchUsesRustsProjectedGrantAndRecommendation() {
+    let model = PermissionReviewSheetModel(
+        manager: RecordingPermissionManager(snapshot: permissionSnapshot())
     )
-    #expect(model.isApplied)
+    let identity = model.review.capabilities[0]
+
+    #expect(!model.isGranted(identity))
+    #expect(model.hasAffirmativeOption(identity))
+
+    model.setGranted(true, for: identity)
+    #expect(model.selection(for: identity) == identity.recommendedDecision)
+    #expect(model.isGranted(identity))
+
+    model.setGranted(false, for: identity)
+    #expect(model.selection(for: identity) == .deny)
+    #expect(!model.isGranted(identity))
+}
+
+@MainActor
+@Test func grantSwitchStaysDisabledWithoutRustAffirmativeRecommendation() {
+    let model = PermissionReviewSheetModel(
+        manager: RecordingPermissionManager(
+            snapshot: unavailablePermissionSnapshot()
+        )
+    )
+
+    #expect(!model.hasAffirmativeOption(model.review.capabilities[0]))
 }
 
 @MainActor
@@ -191,156 +167,90 @@ import Testing
 }
 
 @MainActor
-@Test func permissionReviewSheetBuildsWithInjectedManagerOnly() {
-    let manager = RecordingPermissionManager(snapshot: permissionSnapshot())
-    let view = PermissionReviewSheet(manager: manager)
-
-    #expect(String(describing: type(of: view)) == "PermissionReviewSheet")
-}
-
-@MainActor
-@Test func workbenchAcceptsAnInjectedPermissionManager() {
-    let manager = RecordingPermissionManager(snapshot: permissionSnapshot())
-    let view = ContentView(permissionManager: manager)
-
-    #expect(String(describing: type(of: view)) == "ContentView")
-    #expect(manager.submissions.isEmpty)
-}
-
-@MainActor
-private final class RecordingPermissionManager: PermissionReviewManaging {
-    enum Action: Equatable {
-        case submit
-    }
-
-    private var currentSnapshot: PermissionReviewSnapshot
-    var response: PermissionReviewSnapshot?
-    private(set) var submissions: [PermissionDecisionBatch] = []
-    private(set) var actions: [Action] = []
-
-    init(snapshot: PermissionReviewSnapshot) {
-        currentSnapshot = snapshot
-    }
-
-    func snapshot() -> PermissionReviewSnapshot {
-        currentSnapshot
-    }
-
-    func submit(_ batch: PermissionDecisionBatch) async {
-        submissions.append(batch)
-        actions.append(.submit)
-        if let response {
-            currentSnapshot = response
-        }
-    }
-}
-
-private func permissionPrincipal(hash: Character = "b")
-    -> PermissionExactBuildPrincipal
+@Test func aReviewMixingManagedAndDecidableCapabilitiesStaysNonConfirmable()
+    async
 {
-    PermissionExactBuildPrincipal(
-        manifestAuthorPublicKey: String(repeating: "a", count: 64),
-        dTag: "good-morning",
-        aggregateHash: String(repeating: hash, count: 64)
-    )!
+    let initial = mixedManagedPermissionSnapshot()
+    let manager = RecordingPermissionManager(snapshot: initial)
+    let model = PermissionReviewSheetModel(manager: manager)
+
+    #expect(model.review.capabilities.count == 2)
+    #expect(model.decidableCapabilities.map(\.domain) == ["outbox"])
+    #expect(model.managedCapabilities.map(\.domain) == ["identity"])
+    #expect(!model.canConfirm)
+
+    await model.confirm()
+
+    // Rust requires exact key-set equality while also refusing a user-supplied
+    // managed decision. Swift must not fabricate a partial-batch workaround.
+    #expect(manager.submissions.isEmpty)
+    #expect(!model.isApplied)
+    #expect(model.isManagedReviewBlocked)
 }
 
-private func validOptions(
-    unavailable: Set<PermissionRequestedDecision> = []
-) -> [PermissionDecisionOption] {
-    PermissionRequestedDecision.allCases.map { decision in
-        if unavailable.contains(decision) {
-            PermissionDecisionOption(
-                decision: decision,
-                isValid: false,
-                invalidReason: "This decision is unavailable on the current platform."
-            )!
-        } else {
-            PermissionDecisionOption(
-                decision: decision,
-                isValid: true
-            )!
-        }
-    }
-}
+@MainActor
+@Test func allowingTheRecommendedChoiceSubmitsRustsOwnRecommendation() async {
+    let initial = permissionSnapshot()
+    let manager = RecordingPermissionManager(snapshot: initial)
+    manager.response = PermissionReviewSnapshot(
+        review: initial.review,
+        submissionState: .applied
+    )
+    let model = PermissionReviewSheetModel(manager: manager)
 
-private func permissionSnapshot() -> PermissionReviewSnapshot {
-    let identity = PermissionCapabilityReview(
-        domain: "identity",
-        title: "Identity",
-        requirement: .required,
-        sensitivity: .sensitive,
-        rationale: "Reads the active public key and follow list.",
-        dependencies: [
-            PermissionCapabilityDependency(
+    await model.allowRecommended()
+
+    // Every submitted decision is the `recommendedDecision` Rust projected --
+    // the sheet never invents or ranks one of its own.
+    #expect(
+        manager.submissions.first?.decisions == [
+            PermissionDecisionSelection(
+                domain: "identity",
+                decision: .allowExactBuild
+            )!,
+            PermissionDecisionSelection(
                 domain: "outbox",
-                reason: "Routes identity reads through author relay policy."
-            )!
-        ],
-        platformAvailability: .available,
-        existingDecision: .denied,
-        isGranted: false,
-        requestedDecision: .askEveryTime,
-        recommendedDecision: .allowExactBuild,
-        decisionOptions: validOptions()
-    )!
-    let outbox = PermissionCapabilityReview(
-        domain: "outbox",
-        title: "Outbox",
-        requirement: .required,
-        sensitivity: .sensitive,
-        rationale: "Publishes approved replies through NMP.",
-        dependencies: [],
-        platformAvailability: .available,
-        existingDecision: .askEveryTime,
-        isGranted: false,
-        requestedDecision: .askEveryTime,
-        recommendedDecision: .allowExactBuild,
-        decisionOptions: validOptions()
-    )!
-    let review = PermissionReview(
-        principal: permissionPrincipal(),
-        publisherDisplayName: "Alice",
-        nappletTitle: "Good Morning",
-        capabilities: [identity, outbox]
-    )!
-    return PermissionReviewSnapshot(review: review)
+                decision: .allowExactBuild
+            )!,
+        ]
+    )
+    #expect(model.isApplied)
 }
 
-private func noCapabilitiesPermissionSnapshot() -> PermissionReviewSnapshot {
-    let review = PermissionReview(
-        principal: permissionPrincipal(hash: "d"),
-        publisherDisplayName: nil,
-        nappletTitle: "Good Morning",
-        capabilities: []
-    )!
-    return PermissionReviewSnapshot(review: review)
+@MainActor
+@Test func allowingTheRecommendedChoiceNeverWidensBeyondAnOfferedOption()
+    async
+{
+    // `resource` recommends `.deny` and offers nothing broader, so the one
+    // gesture must leave it denied rather than reaching for a wider grant.
+    let initial = unavailablePermissionSnapshot()
+    let manager = RecordingPermissionManager(snapshot: initial)
+    manager.response = PermissionReviewSnapshot(
+        review: initial.review,
+        submissionState: .applied
+    )
+    let model = PermissionReviewSheetModel(manager: manager)
+
+    await model.allowRecommended()
+
+    #expect(
+        manager.submissions.first?.decisions == [
+            PermissionDecisionSelection(domain: "resource", decision: .deny)!,
+        ]
+    )
 }
 
-private func unavailablePermissionSnapshot() -> PermissionReviewSnapshot {
-    let resource = PermissionCapabilityReview(
-        domain: "resource",
-        title: "Resource",
-        requirement: .optional,
-        sensitivity: .ordinary,
-        rationale: "Loads bounded avatar resources.",
-        dependencies: [],
-        platformAvailability: .unavailable(
-            reason: "No native resource executor is installed."
-        ),
-        existingDecision: .denied,
-        isGranted: false,
-        requestedDecision: .deny,
-        recommendedDecision: .deny,
-        decisionOptions: validOptions(
-            unavailable: [.askEveryTime, .allowSession, .allowExactBuild]
-        )
-    )!
-    let review = PermissionReview(
-        principal: permissionPrincipal(hash: "c"),
-        publisherDisplayName: nil,
-        nappletTitle: "Good Morning",
-        capabilities: [resource]
-    )!
-    return PermissionReviewSnapshot(review: review)
+@MainActor
+@Test func sensitiveCapabilitiesArePresentedWhereTheyWillBeRead() {
+    let manager = RecordingPermissionManager(
+        snapshot: orderingPermissionSnapshot()
+    )
+    let model = PermissionReviewSheetModel(manager: manager)
+
+    // Rust owns sensitivity and requirement; the sheet only orders by them.
+    #expect(
+        model.orderedCapabilities.map(\.domain) == ["outbox", "theme", "link"]
+    )
+    #expect(model.requiredCapabilities.map(\.domain) == ["outbox", "theme"])
+    #expect(model.optionalCapabilities.map(\.domain) == ["link"])
 }

@@ -4,7 +4,7 @@ extension ContentView {
     var nappletInspector: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Label("Napplet Inspector", systemImage: "info.circle")
+                Label("Details", systemImage: "info.circle")
                     .font(.headline)
                 Spacer()
                 Button {
@@ -25,7 +25,6 @@ extension ContentView {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .accessibilityIdentifier("inspector-tab-picker")
 
             Divider()
 
@@ -43,38 +42,50 @@ extension ContentView {
         .padding(16)
         .frame(width: 290)
         .background(.bar)
-        .accessibilityIdentifier("napplet-inspector")
     }
 
     @ViewBuilder
     private var inspectorOverviewTab: some View {
         if let window = layout.selectedWindow {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: NappletMetrics.snug) {
                 Text(window.title)
                     .font(.title3.weight(.semibold))
                 LabeledContent(
                     "Status",
                     value: window.exactBuild.flatMap {
                         runningArtifacts[$0]
-                    } == nil ? "Not running" : "Running"
+                    } == nil ? "Not open" : "Running"
                 )
                 LabeledContent("Layout", value: layout.mode.title)
                 LabeledContent(
-                    "Window",
+                    "Size",
                     value: "\(Int(window.frame.width)) × \(Int(window.frame.height))"
                 )
+
+                // A twelve-character prefix of a hash is the worst of both:
+                // meaningless to a person, and useless for the comparison a
+                // technical reader would want. The whole value lives here.
                 if let exactBuild = window.exactBuild {
-                    LabeledContent("Build") {
-                        Text(String(exactBuild.aggregateHash.prefix(12)))
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
+                    NappletEvidence {
+                        NappletFieldGrid(fields: [
+                            NappletField(
+                                "Publisher key",
+                                exactBuild.manifestAuthor
+                            ),
+                            NappletField("dTag", exactBuild.dTag),
+                            NappletField(
+                                "Aggregate hash",
+                                exactBuild.aggregateHash
+                            ),
+                        ])
                     }
+                    .font(.caption)
                 }
             }
 
             if let nativeActionNotice {
                 Divider()
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: NappletMetrics.tight) {
                     Label(
                         nativeActionNotice.title,
                         systemImage: nativeActionNotice.kind == .composeOpen
@@ -82,33 +93,37 @@ extension ContentView {
                             : "arrow.up.right"
                     )
                     .font(.subheadline.weight(.semibold))
-                    Text(nativeActionNotice.target)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                    Text(nativeActionNotice.detail)
+                    Text(nativeActionNotice.summary)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !nativeActionNotice.evidence.isEmpty {
+                        NappletEvidence {
+                            NappletFieldGrid(
+                                fields: nativeActionNotice.evidence
+                            )
+                        }
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Dismiss action") {
+                    }
+                    Button("Dismiss") {
                         self.nativeActionNotice = nil
                     }
                     .buttonStyle(.borderless)
                 }
-                .accessibilityIdentifier("native-action-notice")
             }
 
             Divider()
 
-            Button("Review Permissions", systemImage: "lock.shield") {
+            Button("Permissions", systemImage: "lock.shield") {
                 openPermissionReview()
             }
-            Button("View Activity", systemImage: "waveform.path.ecg") {
+            Button("Activity", systemImage: "waveform.path.ecg") {
                 openActivityDrawer()
             }
         } else {
             ContentUnavailableView(
-                "No napplet selected",
+                "Nothing selected",
                 systemImage: "cursorarrow.click",
-                description: Text("Select a napplet window to inspect it.")
+                description: Text("Pick a napplet window to see its details.")
             )
         }
     }
@@ -132,13 +147,20 @@ extension ContentView {
                 source: RuntimeWorkbenchRelayDiagnosticsSource(profile: profile)
             )
         } else {
-            ContentUnavailableView(
-                "Relays unavailable",
-                systemImage: "antenna.radiowaves.left.and.right.slash",
-                description: Text(
-                    bootstrapError ?? "The application runtime profile is unavailable."
-                )
+            let presentation = WorkbenchUnavailablePresentation.relays(
+                detail: bootstrapError ?? "No runtime profile was available."
             )
+            VStack(alignment: .leading, spacing: NappletMetrics.snug) {
+                ContentUnavailableView(
+                    presentation.title,
+                    systemImage: presentation.symbol,
+                    description: Text(presentation.message)
+                )
+                NappletEvidence {
+                    NappletFieldGrid(fields: presentation.evidenceFields)
+                }
+                .font(.caption)
+            }
         }
     }
 }

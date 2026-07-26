@@ -5,11 +5,11 @@ extension ContentView {
     @MainActor
     func bootstrapProfile() async {
         if let bootstrapError {
-            activity = "Refused: \(bootstrapError)"
+            activity = .failed(detail: bootstrapError)
             return
         }
         guard let profile else {
-            activity = "Getting things ready"
+            activity = .preparing
             return
         }
         profile.native.setIncActionHandler { action in
@@ -33,7 +33,7 @@ extension ContentView {
                 "NMP_WORKBENCH_UI_TEST_SCENARIO"
             ]
         ) else {
-            activity = "Ready · add a napplet"
+            activity = .readyToAdd
             return
         }
         do {
@@ -50,7 +50,7 @@ extension ContentView {
                 )
             )
         } catch {
-            activity = "Refused: \(error.localizedDescription)"
+            activity = .failed(detail: error.localizedDescription)
         }
     }
 
@@ -65,7 +65,8 @@ extension ContentView {
         }
         guard let scope = selectedActivityScope else {
             activitySheetPresentation = .unavailable(
-                reason: "Select an exact-build napplet window to view its activity."
+                reason: "Select a napplet window first — activity is shown one "
+                    + "napplet at a time."
             )
             return
         }
@@ -76,7 +77,8 @@ extension ContentView {
             )
             activitySheetPresentation = .admitted(
                 source: source,
-                scope: scope
+                scope: scope,
+                title: layout.selectedWindow?.title
             )
         } catch {
             activitySheetPresentation = .unavailable(
@@ -90,7 +92,9 @@ extension ContentView {
         _ build: CatalogInstalledBuild
     ) {
         guard let profile else {
-            activity = "Refused: the application runtime profile is unavailable"
+            activity = .failed(
+                detail: "The application runtime profile is unavailable."
+            )
             return
         }
         let identity = WorkbenchExactBuildIdentity(
@@ -101,8 +105,9 @@ extension ContentView {
         guard
             let installed = profile.installedCatalogArtifact(for: identity)
         else {
-            activity =
-                "Refused: the verified artifact handle is unavailable for this profile"
+            activity = .failed(
+                detail: "The verified artifact handle is unavailable for this profile."
+            )
             return
         }
         do {
@@ -112,7 +117,7 @@ extension ContentView {
                 presentation: .afterCatalogDismiss
             )
         } catch {
-            activity = "Refused: \(error.localizedDescription)"
+            activity = .failed(detail: error.localizedDescription)
         }
     }
 
@@ -207,13 +212,12 @@ extension ContentView {
         guard let window = layout.windows.first(where: {
             $0.exactBuild == identity
         }) else {
-            activity = "Refused: INC action came from an unopened exact build"
+            activity = .refused(
+                detail: "INC action came from an unopened exact build."
+            )
             return
         }
-        guard let notice = NativeActionNotice.decode(action) else {
-            activity = "Refused: INC action payload was not recognized"
-            return
-        }
+        let notice = NativeActionNotice.presentation(action)
         let previouslyDisplayed = fullWindowPath.last ?? fullWindowRootID
         nativeActionNotice = notice
         mutateLayout { $0.bringToFront(window.id) }
@@ -222,7 +226,10 @@ extension ContentView {
             previouslyDisplayed: previouslyDisplayed
         )
         isInspectorPresented = true
-        activity = "\(notice.title) from \(window.title)"
+        activity = .nativeAction(
+            title: notice.title,
+            nappletTitle: window.title
+        )
     }
 
     /// Handles a NAP-INTENT "create (if needed) and bring to front" signal.
@@ -235,7 +242,9 @@ extension ContentView {
         _ request: NativeIntentActivationHandlerRequest
     ) {
         guard let profile else {
-            activity = "Refused: the application runtime profile is unavailable"
+            activity = .failed(
+                detail: "The application runtime profile is unavailable."
+            )
             return
         }
         let identity = WorkbenchExactBuildIdentity(
@@ -244,7 +253,9 @@ extension ContentView {
             aggregateHash: request.aggregateHash
         )
         guard let installed = profile.installedCatalogArtifact(for: identity) else {
-            activity = "Refused: intent handler napplet is not installed"
+            activity = .refused(
+                detail: "The requested napplet is not installed."
+            )
             return
         }
         do {
@@ -254,7 +265,7 @@ extension ContentView {
                 presentation: .afterCatalogDismiss
             )
         } catch {
-            activity = "Refused: \(error.localizedDescription)"
+            activity = .failed(detail: error.localizedDescription)
         }
     }
 }
