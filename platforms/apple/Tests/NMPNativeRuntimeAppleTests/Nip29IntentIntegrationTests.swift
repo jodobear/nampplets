@@ -89,7 +89,7 @@ final class Nip29IntentIntegrationTests: XCTestCase {
         )
         XCTAssertTrue(chatGrant.applied)
         XCTAssertTrue(
-            profile.snapshotForTesting.sessions.isEmpty,
+            try profile.snapshotForTesting.sessions.isEmpty,
             "granting permissions must never launch the handler"
         )
 
@@ -174,14 +174,14 @@ final class Nip29IntentIntegrationTests: XCTestCase {
         // wait for both before asserting either.
         let launchDeadline = Date().addingTimeInterval(15)
         while Date() < launchDeadline {
-            let launched = profile.snapshotForTesting.sessions
+            let launched = try profile.snapshotForTesting.sessions
                 .contains { $0.dTag == "nip29-chat" }
             if launched, !activatedHandlers.values.isEmpty {
                 break
             }
             try await Task.sleep(nanoseconds: 200_000_000)
         }
-        let sessions = profile.snapshotForTesting.sessions
+        let sessions = try profile.snapshotForTesting.sessions
         let chatSession = sessions.first { $0.dTag == "nip29-chat" }
         XCTAssertNotNil(
             chatSession,
