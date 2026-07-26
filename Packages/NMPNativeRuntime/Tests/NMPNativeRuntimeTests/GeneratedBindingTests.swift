@@ -195,6 +195,34 @@ final class GeneratedBindingTests: XCTestCase {
         controller.close()
     }
 
+    func testCallbackRacingStopAndTeardownReachesSafeTerminalState() throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = try RuntimeController.open(
+            config: config(root: root),
+            artifactSource: RefusingArtifactSource()
+        )
+        let observer = TeardownRuntimeObserver()
+        let observation = try XCTUnwrap(
+            controller.observe(observer: observer).observation
+        )
+        XCTAssertTrue(
+            observer.waitForCallbackEntry(timeout: 2),
+            observer.lastState
+        )
+
+        observer.cancel()
+        observation.stop()
+        controller.close()
+        observer.releaseCallback()
+
+        XCTAssertTrue(
+            observer.waitForTerminalState(timeout: 2),
+            observer.lastState
+        )
+        XCTAssertEqual(observer.ignoredFramesAfterCancellation, 1)
+    }
+
     private func temporaryRoot() throws -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("nmp-native-runtime-\(UUID().uuidString)")
