@@ -39,7 +39,8 @@ let package = Package(
                 "RuntimeWorkbenchFeature",
                 .product(name: "Quick", package: "Quick"),
                 .product(name: "Nimble", package: "Nimble"),
-            ]
+            ],
+            resources: [.process("Resources")]
         )
     ]
 )
