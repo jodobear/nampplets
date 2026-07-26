@@ -10,6 +10,7 @@ members = [
     "crates/provider-link",
     "crates/provider-resource",
     "crates/providers",
+    "crates/performance-harness",
     "crates/runtime-app",
     "crates/runtime-core",
     "crates/runtime-ffi",

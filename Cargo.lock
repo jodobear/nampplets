@@ -1866,6 +1866,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nmp-native-performance-harness"
+version = "0.1.0"
+dependencies = [
+ "cucumber",
+ "nmp-native-runtime-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "nmp-native-provider-identity"
 version = "0.1.0"
 dependencies = [
