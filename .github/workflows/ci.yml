@@ -285,7 +285,7 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
 
       - name: Test the generated Swift binding package
-        run: swift test --package-path Packages/NMPNativeRuntime --parallel
+        run: scripts/tests/test-generated-binding-parallel-repeat.sh
 
       - name: Test the Apple host package
         run: swift test --package-path platforms/apple --parallel
