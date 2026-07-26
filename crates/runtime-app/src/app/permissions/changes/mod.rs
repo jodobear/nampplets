@@ -72,16 +72,13 @@ impl RuntimeApp {
                 now,
             ));
         }
-        let validated = match self.validate_permission_changes(
+        let validated = self.validate_permission_changes(
             state,
             &request.principal,
             &current,
             request.decisions,
             now,
-        ) {
-            Ok(validated) => validated,
-            Err(refusal) => return Err(refusal),
-        };
+        )?;
         if validated.decisions.is_empty() {
             return Ok(PermissionChangeSuccess {
                 changed: false,
@@ -111,7 +108,7 @@ impl RuntimeApp {
         PermissionChangeRefusal {
             code,
             detail,
-            current_review,
+            current_review: current_review.map(Box::new),
         }
     }
 }

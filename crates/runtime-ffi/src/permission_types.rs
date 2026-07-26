@@ -52,6 +52,12 @@ pub enum RuntimePermissionExistingDecision {
     Managed,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RuntimePermissionDecisionController {
+    User,
+    HostPolicy { reason: String },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct RuntimePermissionDecisionOption {
     pub decision: RuntimeGrantDecision,
@@ -66,6 +72,7 @@ pub struct RuntimePermissionCapabilitySnapshot {
     pub sensitivity: RuntimePermissionSensitivity,
     pub dependencies: Vec<String>,
     pub platform_availability: RuntimePermissionPlatformAvailability,
+    pub controller: RuntimePermissionDecisionController,
     pub existing_decision: RuntimePermissionExistingDecision,
     /// Rust's own answer to "is this capability granted?". Callers render it;
     /// they never rebuild it by matching decision names.
@@ -82,8 +89,10 @@ pub struct RuntimePermissionCapabilitySnapshot {
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct RuntimePermissionReviewSnapshot {
     pub coordinate: RuntimeExactBuildCoordinate,
+    pub revision: String,
     pub title: String,
     pub capabilities: Vec<RuntimePermissionCapabilitySnapshot>,
+    pub read_only: bool,
     pub launch_permitted: bool,
 }
 
@@ -102,12 +111,40 @@ pub struct RuntimePermissionDecisionSelection {
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct RuntimePermissionDecisionBatch {
     pub coordinate: RuntimeExactBuildCoordinate,
+    pub review_revision: String,
     pub decisions: Vec<RuntimePermissionDecisionSelection>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RuntimePermissionChangeRefusalCode {
+    Closed,
+    NotInstalled,
+    StaleReview,
+    EmptyChanges,
+    DuplicateCapability,
+    UnknownCapability,
+    ManagedCapability,
+    InvalidDecision,
+    DecisionUnavailable,
+    DependencyDenied,
+    Grant,
+    Store,
+    InvalidCoordinate,
+    InvalidRevision,
+    InvalidDomain,
+    Capacity,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct RuntimePermissionChangeRefusal {
+    pub code: RuntimePermissionChangeRefusalCode,
+    pub detail: String,
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct RuntimePermissionBatchUpdate {
     pub applied: bool,
+    pub changed: bool,
     pub review: Option<RuntimePermissionReviewSnapshot>,
-    pub refusal: Option<RuntimeRefusal>,
+    pub refusal: Option<RuntimePermissionChangeRefusal>,
 }

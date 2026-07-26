@@ -28,8 +28,8 @@ pub use receipt::{AppReceipt, ReceiptObserver};
 pub use views::{
     AppErrorCode, AppErrorFact, AppSnapshot, AppTerminalReason, BindingView,
     InstalledBuildAvailability, InstalledBuildView, InstalledLibraryView, PermissionCapabilityView,
-    PermissionChangeRefusalCode, PermissionChangeResult, PermissionChangeSuccess,
-    PermissionChangeRefusal, PermissionDecision, PermissionDecisionController,
+    PermissionChangeRefusal, PermissionChangeRefusalCode, PermissionChangeResult,
+    PermissionChangeSuccess, PermissionDecision, PermissionDecisionController,
     PermissionDecisionOption, PermissionPlatformAvailability, PermissionReviewError,
     PermissionReviewView, ProviderPushLaneView, ProviderWriteProposalView, ReceiptDeliveryState,
     ReceiptView, SectionRevisions, SessionDomainView, SnapshotSection, WorkspaceView,

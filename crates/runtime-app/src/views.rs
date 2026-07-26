@@ -204,7 +204,7 @@ pub enum PermissionChangeRefusalCode {
 pub struct PermissionChangeRefusal {
     pub code: PermissionChangeRefusalCode,
     pub detail: Arc<str>,
-    pub current_review: Option<PermissionReviewView>,
+    pub current_review: Option<Box<PermissionReviewView>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
