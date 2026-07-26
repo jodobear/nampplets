@@ -17,7 +17,7 @@ mod verifier;
 mod tests;
 
 pub use blob::{BlobFetchRequest, BlobFetchResponse, ManifestBlobSource};
-pub use embedded::embedded_requirements;
+pub use embedded::{embedded_config_schema, embedded_requirements};
 pub use error::ManifestError;
 pub use index::{VerifiedArtifactHandle, VerifiedArtifactIndex, VerifiedArtifactIndexEntry};
 pub use policy::ArtifactSourcePolicy;

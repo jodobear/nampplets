@@ -14,7 +14,8 @@
 
 use super::KNOWN_REQUIREMENTS;
 
-const REQUIRES_META_NAME: &str = "napplet-requires";
+const REQUIRES_META_NAME: &[u8] = b"napplet-requires";
+const CONFIG_SCHEMA_META_NAME: &[u8] = b"napplet-config-schema";
 /// Generous enough for the largest declaration the trusted shell will read
 /// back out of the same head, so no legal element truncates the scan.
 const MAXIMUM_ELEMENT_BYTES: usize = 256 * 1024;
@@ -27,13 +28,41 @@ const MAXIMUM_ELEMENT_BYTES: usize = 256 * 1024;
 /// refusing to install a build whose signed tags already verified.
 pub fn embedded_requirements(document: &[u8]) -> Vec<&'static str> {
     let mut domains: Vec<&'static str> = Vec::new();
+    let Some(content) = head_meta_content(document, REQUIRES_META_NAME) else {
+        return domains;
+    };
+    for field in content.split(',') {
+        if domains.len() == KNOWN_REQUIREMENTS.len() {
+            break;
+        }
+        let field = field.trim();
+        let Some(known) = KNOWN_REQUIREMENTS
+            .iter()
+            .find(|known| field.eq_ignore_ascii_case(known))
+        else {
+            continue;
+        };
+        if !domains.contains(known) {
+            domains.push(known);
+        }
+    }
+    domains
+}
+
+/// Extracts the raw JSON text declared by `<meta name="napplet-config-schema">`
+/// in the head of one verified entry document. The caller parses and validates
+/// it; this only undoes the HTML attribute escaping.
+pub fn embedded_config_schema(document: &[u8]) -> Option<String> {
+    head_meta_content(document, CONFIG_SCHEMA_META_NAME)
+}
+
+/// Returns the unescaped `content` of the first head `<meta>` with this name.
+fn head_meta_content(document: &[u8], meta_name: &[u8]) -> Option<String> {
     let mut cursor = 0usize;
     while cursor < document.len() {
-        let Some(open) = next_tag(document, cursor) else {
-            break;
-        };
+        let open = next_tag(document, cursor)?;
         if starts_with_ignoring_case(&document[open..], b"<!--") {
-            cursor = skip_until(document, open + 4, b"-->").unwrap_or(document.len());
+            cursor = skip_until(document, open + 4, b"-->")?;
             continue;
         }
         let Some(name_end) = tag_name_end(document, open) else {
@@ -42,55 +71,85 @@ pub fn embedded_requirements(document: &[u8]) -> Vec<&'static str> {
         };
         let name = &document[open + 1..name_end];
         if equals_ignoring_case(name, b"body") || equals_ignoring_case(name, b"/head") {
-            break;
+            return None;
         }
-        let Some(close) = element_end(document, name_end) else {
-            break;
-        };
-        if equals_ignoring_case(name, b"meta") {
-            read_meta(&document[name_end..close], &mut domains);
+        let close = element_end(document, name_end)?;
+        if equals_ignoring_case(name, b"meta")
+            && let Some(content) = meta_content(&document[name_end..close], meta_name)
+        {
+            return Some(content);
         }
         cursor = close + 1;
         if is_raw_text(name) {
-            let mut terminator = Vec::with_capacity(name.len() + 3);
+            let mut terminator = Vec::with_capacity(name.len() + 2);
             terminator.extend_from_slice(b"</");
             terminator.extend_from_slice(name);
-            cursor = skip_until(document, cursor, &terminator).unwrap_or(document.len());
+            cursor = skip_until(document, cursor, &terminator)?;
         }
     }
-    domains
+    None
 }
 
-fn read_meta(attributes: &[u8], domains: &mut Vec<&'static str>) {
-    let mut is_requires = false;
+fn meta_content(attributes: &[u8], meta_name: &[u8]) -> Option<String> {
+    let mut matches_name = false;
     let mut content: Option<&[u8]> = None;
     let mut cursor = 0usize;
     while let Some((name, value, next)) = next_attribute(attributes, cursor) {
         if equals_ignoring_case(name, b"name") {
-            is_requires = equals_ignoring_case(value, REQUIRES_META_NAME.as_bytes());
+            matches_name = equals_ignoring_case(value, meta_name);
         } else if equals_ignoring_case(name, b"content") {
             content = Some(value);
         }
         cursor = next;
     }
-    let (true, Some(content)) = (is_requires, content) else {
-        return;
-    };
-    for field in content.split(|byte| *byte == b',') {
-        if domains.len() == KNOWN_REQUIREMENTS.len() {
-            return;
-        }
-        let field = trim_ascii(field);
-        let Some(known) = KNOWN_REQUIREMENTS
-            .iter()
-            .find(|known| equals_ignoring_case(field, known.as_bytes()))
-        else {
+    matches_name
+        .then_some(content)
+        .flatten()
+        .map(unescape_attribute)
+}
+
+/// Undoes the attribute escaping every HTML serializer emits. Unrecognized
+/// references are kept verbatim so nothing is silently rewritten.
+fn unescape_attribute(value: &[u8]) -> String {
+    let text = String::from_utf8_lossy(value);
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_ref();
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let Some(end) = rest[..rest.len().min(12)].find(';') else {
+            out.push('&');
+            rest = &rest[1..];
             continue;
         };
-        if !domains.contains(known) {
-            domains.push(known);
+        match &rest[1..end] {
+            "amp" => out.push('&'),
+            "lt" => out.push('<'),
+            "gt" => out.push('>'),
+            "quot" => out.push('"'),
+            "apos" => out.push('\''),
+            reference => match numeric_reference(reference) {
+                Some(character) => out.push(character),
+                None => {
+                    out.push('&');
+                    rest = &rest[1..];
+                    continue;
+                }
+            },
         }
+        rest = &rest[end + 1..];
     }
+    out.push_str(rest);
+    out
+}
+
+fn numeric_reference(reference: &str) -> Option<char> {
+    let digits = reference.strip_prefix('#')?;
+    let code = match digits.strip_prefix(['x', 'X']) {
+        Some(hexadecimal) => u32::from_str_radix(hexadecimal, 16).ok()?,
+        None => digits.parse::<u32>().ok()?,
+    };
+    char::from_u32(code)
 }
 
 /// Reads one `name="value"` pair, returning the offset just past it.
@@ -213,16 +272,4 @@ fn equals_ignoring_case(left: &[u8], right: &[u8]) -> bool {
             .iter()
             .zip(right)
             .all(|(left, right)| left.eq_ignore_ascii_case(right))
-}
-
-fn trim_ascii(value: &[u8]) -> &[u8] {
-    let mut start = 0usize;
-    let mut end = value.len();
-    while start < end && value[start].is_ascii_whitespace() {
-        start += 1;
-    }
-    while end > start && value[end - 1].is_ascii_whitespace() {
-        end -= 1;
-    }
-    &value[start..end]
 }

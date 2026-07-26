@@ -394,3 +394,25 @@ fn documents_without_a_declaration_yield_no_requirements() {
     assert!(embedded_requirements(b"<html><head></head></html>").is_empty());
     assert!(embedded_requirements(b"").is_empty());
 }
+
+#[test]
+fn declared_config_schema_survives_html_attribute_escaping() {
+    // Serializers escape the JSON a config schema carries, and the trusted
+    // shell reads it back through a real parser. The runtime must agree.
+    let document = concat!(
+        "<head><meta name=\"napplet-config-schema\" content=\"{&quot;type&quot;:",
+        "&quot;object&quot;,&quot;properties&quot;:{&quot;relays&quot;:{&quot;type&quot;:",
+        "&quot;array&quot;,&quot;default&quot;:[&quot;wss://groups.0xchat.com&quot;]}}}\">",
+        "</head>"
+    );
+    let schema: Value =
+        serde_json::from_str(&embedded_config_schema(document.as_bytes()).unwrap()).unwrap();
+    assert_eq!(
+        schema["properties"]["relays"]["default"][0],
+        Value::String("wss://groups.0xchat.com".to_owned())
+    );
+    assert_eq!(
+        embedded_config_schema(b"<head><meta name=\"napplet-type\" content=\"x\"></head>"),
+        None
+    );
+}
