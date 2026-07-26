@@ -216,6 +216,41 @@ fn default_handler_receives_exact_validated_dispatch_and_result_is_pushed() {
 }
 
 #[test]
+fn protocol_field_is_accepted_as_a_convention_alias() {
+    // Real published napplets are built against the `@napplet/nap` SDK,
+    // whose `intent.open(archetype, payload, { protocol })` sugar sends
+    // the wire field as `protocol`, not the vendored spec's `convention`.
+    let rig = Rig::new(Arc::new(CancelIntentChoice));
+    let handler = principal("note-viewer", 'c');
+    rig.provider
+        .register_handler(handler.clone(), vec![note_declaration()])
+        .unwrap();
+    rig.provider
+        .set_default("note", Some(handler.clone()))
+        .unwrap();
+    let _ = rig.observer.drain(16).unwrap();
+
+    assert_eq!(
+        rig.dispatch(json!({
+            "type":"intent.invoke",
+            "id":"invoke-protocol-1",
+            "request":{
+                "archetype":"note",
+                "action":"open",
+                "protocol":"napplet:note/open",
+                "payload":{"target":"abc"}
+            }
+        }))
+        .unwrap(),
+        None
+    );
+    let requests = rig.dispatcher.requests.lock();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].handler, handler);
+    drop(requests);
+}
+
+#[test]
 fn undeclared_choice_and_specific_target_execute_nothing() {
     let rig = Rig::new(Arc::new(FixedChoice(Arc::from("spoofed"))));
     rig.provider

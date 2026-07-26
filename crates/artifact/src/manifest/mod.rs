@@ -19,7 +19,10 @@ mod tests;
 pub use blob::{BlobFetchRequest, BlobFetchResponse, ManifestBlobSource};
 pub use embedded::{embedded_config_schema, embedded_requirements};
 pub use error::ManifestError;
-pub use index::{VerifiedArtifactHandle, VerifiedArtifactIndex, VerifiedArtifactIndexEntry};
+pub use index::{
+    VerifiedArtifactHandle, VerifiedArtifactIndex, VerifiedArtifactIndexEntry,
+    reopen_verified_artifact,
+};
 pub use policy::ArtifactSourcePolicy;
 pub use resolver::SignedArtifactResolver;
 pub use verified::VerifiedManifest;
@@ -112,6 +115,7 @@ pub struct ManifestEventLimits {
     pub maximum_tag_string_bytes: usize,
     pub maximum_requirements: usize,
     pub maximum_sources: usize,
+    pub maximum_archetypes: usize,
 }
 
 impl Default for ManifestEventLimits {
@@ -123,6 +127,7 @@ impl Default for ManifestEventLimits {
             maximum_tag_string_bytes: 16 * 1_024,
             maximum_requirements: KNOWN_REQUIREMENTS.len(),
             maximum_sources: 32,
+            maximum_archetypes: 128,
         }
     }
 }

@@ -64,4 +64,5 @@ public enum TrustedNappletActivity: Sendable, Equatable {
     case request(type: String)
     case refused(reason: String)
     case crashed
+    case consoleEntry(level: String, message: String)
 }

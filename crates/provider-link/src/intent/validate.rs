@@ -19,7 +19,7 @@ pub(super) fn validate_invocation(
     if object.keys().any(|field| {
         !matches!(
             field.as_str(),
-            "archetype" | "action" | "convention" | "payload" | "handler" | "behavior"
+            "archetype" | "action" | "convention" | "protocol" | "payload" | "handler" | "behavior"
         )
     }) {
         return Err(invalid(request, "unknown intent request field"));
@@ -45,7 +45,14 @@ pub(super) fn validate_invocation(
         }
         _ => return Err(invalid(request, "`action` is invalid")),
     };
-    let convention = optional_text(request, object, "convention", limits.maximum_text_bytes)?;
+    // The vendored NAP-INTENT spec names this field `convention`, but the
+    // `@napplet/nap` SDK actually deployed by published napplets (whose
+    // `intent.open(archetype, payload, { protocol })` sugar spreads `opts`
+    // directly onto the wire request) sends it as `protocol`. Accept either
+    // spelling so real-world napplets built against that SDK aren't rejected.
+    let convention = optional_text(request, object, "convention", limits.maximum_text_bytes)?.or(
+        optional_text(request, object, "protocol", limits.maximum_text_bytes)?,
+    );
     if convention
         .as_deref()
         .is_some_and(|value| !value.starts_with("napplet:"))

@@ -20,6 +20,8 @@ public struct TrustedNappletView {
     }
 
     @MainActor
+    private struct SandboxFrameUnavailable: Error {}
+
     public final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         private static let bridgeName = "runtimeBridge"
         private static let bridgeWorld = WKContentWorld.world(name: "io.f7z.nmp.native-runtime.bridge")
@@ -35,6 +37,7 @@ public struct TrustedNappletView {
         private var activeTrustedGeneration: UInt64?
         private var stopped = false
         private weak var currentWebView: WKWebView?
+        private var sandboxFrameInfo: WKFrameInfo?
 
         init(
             artifact: NappletArtifact,
@@ -115,6 +118,20 @@ public struct TrustedNappletView {
                 contentWorld: Self.bridgeWorld
             )
             webView.configuration.userContentController.removeAllUserScripts()
+        }
+
+        /// Diagnostic-only: evaluates script inside the sandboxed napplet
+        /// iframe rather than the trusted outer document. Production code
+        /// never needs this -- native/sandbox communication is entirely
+        /// message-based -- but tooling that inspects a napplet's own
+        /// rendered DOM (e.g. an inspector or an integration test driving a
+        /// real click) has no other way to reach it, since the sandbox's
+        /// opaque origin blocks ordinary `iframe.contentDocument` access.
+        public func evaluateJavaScriptInSandbox(_ script: String) async throws -> Any? {
+            guard let webView = currentWebView, let frame = sandboxFrameInfo else {
+                throw SandboxFrameUnavailable()
+            }
+            return try await webView.evaluateJavaScript(script, in: frame, contentWorld: .page)
         }
 
         public func userContentController(
@@ -230,7 +247,14 @@ public struct TrustedNappletView {
         /// characters before it reaches a user-facing activity string.
         private static func mountFailureReason(_ error: Error) -> String {
             let fallback = "The trusted shell refused the artifact"
-            let detail = (error as NSError).localizedDescription
+            let nsError = error as NSError
+            // `callAsyncJavaScript` reports a thrown mount-time exception as a
+            // bare WKError whose `localizedDescription` is the unhelpful
+            // generic "A JavaScript exception occurred" -- the actual message
+            // (and, often, source location) lives in `userInfo` instead.
+            let detail =
+                (nsError.userInfo["WKJavaScriptExceptionMessage"] as? String)
+                ?? nsError.localizedDescription
             let sanitized = String(
                 detail.unicodeScalars.filter { scalar in
                     !CharacterSet.newlines.contains(scalar)
@@ -263,6 +287,7 @@ public struct TrustedNappletView {
             }
 
             if url.scheme == "about", !isMainFrame {
+                sandboxFrameInfo = navigationAction.targetFrame
                 decisionHandler(.allow)
                 return
             }
@@ -289,10 +314,27 @@ public struct TrustedNappletView {
             return candidate.resolvingSymlinksInPath().standardizedFileURL == trustedShellURL
         }
 
+        /// `debug.console` mirrors the sandboxed napplet iframe's own
+        /// console/error output for the Napplet Inspector. It is diagnostic
+        /// only -- native reports it straight to `onActivity` and never
+        /// forwards it to Rust, since it carries no NAP domain authority and
+        /// isn't part of the verified envelope protocol.
+        private static let consoleMessageType = "debug.console"
+
         private func route(
             messageType: String,
             encodedEnvelope: Data
         ) {
+            if messageType == Self.consoleMessageType {
+                if let envelope = try? JSONSerialization.jsonObject(with: encodedEnvelope)
+                    as? [String: Any],
+                    let level = envelope["level"] as? String,
+                    let message = envelope["message"] as? String
+                {
+                    onActivity(.consoleEntry(level: level, message: message))
+                }
+                return
+            }
             onActivity(.request(type: messageType))
             artifact.runtimeSession?.mappedEnvelope(encodedEnvelope)
         }

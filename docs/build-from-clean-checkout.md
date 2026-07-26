@@ -36,7 +36,9 @@ python3 conformance/scripts/verify_baseline.py
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace
-node --test --test-timeout=10000 web/trusted-shell/tests/trusted-shell.test.js
+node --test --test-timeout=10000 \
+  web/trusted-shell/tests/trusted-shell.test.js \
+  web/trusted-shell/tests/trusted-shell-apple-snapshot.test.js
 
 scripts/tests/test-build-runtime-swift-xcframework.sh
 scripts/build-runtime-swift-xcframework.sh --universal --check-bindings

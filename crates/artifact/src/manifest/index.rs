@@ -2,8 +2,11 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use super::{ArtifactMode, verified::VerifiedManifest};
-use crate::{ArtifactError, CachedArtifact, Sha256Digest};
+use super::{
+    ArtifactMode, ManifestCoordinate, ManifestError, verified::VerifiedManifest,
+    verifier::ManifestEventVerifier,
+};
+use crate::{ArtifactError, CachedArtifact, FileArtifactCache, Sha256Digest};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct VerifiedArtifactIndexEntry {
@@ -124,4 +127,26 @@ impl VerifiedArtifactHandle {
     ) -> Result<Vec<u8>, ArtifactError> {
         self.cached.read_verified(logical_path, maximum_bytes)
     }
+}
+
+/// Reopens one already-installed exact build entirely from previously
+/// retained local state: the exact signed manifest event bytes captured at
+/// original install time (see `VerifiedManifest::signed_event_json`) and the
+/// sealed artifact bytes already committed to `cache`. No network access.
+///
+/// Re-verifies the signature and coordinate exactly as a fresh install
+/// would, so a corrupted or substituted `event_json` is refused the same
+/// way as any other invalid manifest. Callers that need the reopened
+/// build to also match a specific previously-installed identity (author,
+/// d tag, aggregate, capability inventory) must check that separately
+/// against the returned handle's `index()`.
+pub fn reopen_verified_artifact(
+    verifier: &ManifestEventVerifier,
+    event_json: &[u8],
+    coordinate: &ManifestCoordinate,
+    cache: &FileArtifactCache,
+) -> Result<VerifiedArtifactHandle, ManifestError> {
+    let manifest = verifier.verify_json(event_json, coordinate)?;
+    let cached = cache.reopen(manifest.aggregate())?;
+    VerifiedArtifactHandle::new(manifest, cached).map_err(ManifestError::Artifact)
 }

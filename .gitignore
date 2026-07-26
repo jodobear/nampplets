@@ -5,3 +5,7 @@
 .DS_Store
 __pycache__/
 *.pyc
+
+# Xcode derived data from local build/test gates.
+/.build-derived/
+/.build-derived-ios/

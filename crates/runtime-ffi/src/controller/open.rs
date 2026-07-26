@@ -7,19 +7,23 @@ use std::sync::{
 use std::{collections::BTreeMap, path::PathBuf};
 
 use nmp::EngineConfig;
-use nmp_native_artifact::FileArtifactCache;
+use nmp_native_artifact::{FileArtifactCache, VerifiedArtifactHandle};
 use nmp_native_nap_bridge::{BridgeLimits, Provider};
 use nmp_native_nmp_adapter::{NapNostrProviderLimits, NapNostrProviderSet, NmpDataPlane};
 use nmp_native_provider_identity::{
     IdentityDataPlane, IdentityProvider, IdentityProviderLimits, NoopIdentityDiagnostics,
 };
 use nmp_native_provider_inc::{AllowAllIncAcl, IncProvider, IncProviderLimits, NoopIncActivity};
+use nmp_native_provider_link::{
+    CancelIntentChoice, IntentProvider, IntentProviderLimits, NativeIntentDispatcher,
+    NoopIntentActivity,
+};
 use nmp_native_providers::{
     ConfigProvider, ConfigProviderLimits, ShellProvider, ShellProviderLimits, StorageProvider,
     StorageProviderLimits, ThemeProvider, ThemeProviderLimits,
 };
 use nmp_native_runtime_app::{AppLimits, BoundedFacts, RuntimeApp, RuntimeAppConfig};
-use nmp_native_runtime_core::{GrantLimits, ResourceLimits};
+use nmp_native_runtime_core::{GrantLimits, Principal, ResourceLimits};
 use nmp_native_runtime_store::{RuntimeStore, StoreLimits};
 use nmp_native_surface::BindingLimits;
 use parking_lot::Mutex;
@@ -27,10 +31,15 @@ use tokio::sync::watch;
 
 use super::{RuntimeController, RuntimeShellEnvironment, SystemClock};
 use crate::{
-    ArtifactSource, NativeAppearanceSource, NativeIncActionExecutor, NativeSettingsExecutor,
-    RuntimeConfig, RuntimeOpenError, RuntimeProfilePreferences,
+    ArtifactSource, NativeAppearanceSource, NativeIncActionExecutor,
+    NativeIntentActivationExecutor, NativeSettingsExecutor, RuntimeConfig, RuntimeOpenError,
+    RuntimeProfilePreferences,
     catalog::RuntimeCatalogService,
     diagnostics::RuntimeDiagnosticsService,
+    intent_dispatch::{
+        CallbackIntentActivation, DefaultOnlyIntentPolicy, IntentActivationSink,
+        RuntimeIntentDispatcher,
+    },
     native_capabilities::{
         CallbackArtifactSource, CallbackIncNativeActions, CallbackSettingsExecutor,
         RuntimeThemeSource,
@@ -46,7 +55,7 @@ impl RuntimeController {
         config: RuntimeConfig,
         artifact_source: Box<dyn ArtifactSource>,
     ) -> Result<Arc<Self>, RuntimeOpenError> {
-        open_runtime_controller(config, artifact_source, None, None, None)
+        open_runtime_controller(config, artifact_source, None, None, None, None)
     }
 
     #[uniffi::constructor]
@@ -59,6 +68,7 @@ impl RuntimeController {
             config,
             artifact_source,
             Some(Arc::from(appearance_source)),
+            None,
             None,
             None,
         )
@@ -76,6 +86,7 @@ impl RuntimeController {
             None,
             Some(Arc::from(settings_executor)),
             None,
+            None,
         )
     }
 
@@ -91,6 +102,7 @@ impl RuntimeController {
             artifact_source,
             Some(Arc::from(appearance_source)),
             Some(Arc::from(settings_executor)),
+            None,
             None,
         )
     }
@@ -109,6 +121,26 @@ impl RuntimeController {
             Some(Arc::from(appearance_source)),
             Some(Arc::from(settings_executor)),
             Some(Arc::from(inc_action_executor)),
+            None,
+        )
+    }
+
+    #[uniffi::constructor]
+    pub fn open_with_intent_activation(
+        config: RuntimeConfig,
+        artifact_source: Box<dyn ArtifactSource>,
+        appearance_source: Box<dyn NativeAppearanceSource>,
+        settings_executor: Box<dyn NativeSettingsExecutor>,
+        inc_action_executor: Box<dyn NativeIncActionExecutor>,
+        intent_activation_executor: Box<dyn NativeIntentActivationExecutor>,
+    ) -> Result<Arc<Self>, RuntimeOpenError> {
+        open_runtime_controller(
+            config,
+            artifact_source,
+            Some(Arc::from(appearance_source)),
+            Some(Arc::from(settings_executor)),
+            Some(Arc::from(inc_action_executor)),
+            Some(Arc::from(intent_activation_executor)),
         )
     }
 }
@@ -119,6 +151,7 @@ pub(super) fn open_runtime_controller(
     appearance_source: Option<Arc<dyn NativeAppearanceSource>>,
     settings_executor: Option<Arc<dyn NativeSettingsExecutor>>,
     inc_action_executor: Option<Arc<dyn NativeIncActionExecutor>>,
+    intent_activation_executor: Option<Arc<dyn NativeIntentActivationExecutor>>,
 ) -> Result<Arc<RuntimeController>, RuntimeOpenError> {
     let config = config.validated()?;
     let runtime_store = Arc::new(
@@ -205,7 +238,7 @@ pub(super) fn open_runtime_controller(
     .map_err(|error| RuntimeOpenError::Runtime {
         detail: error.to_string(),
     })?;
-    let inc_provider: Arc<dyn Provider> = match inc_action_executor {
+    let inc_provider_concrete: Arc<IncProvider> = match inc_action_executor {
         Some(callback) => Arc::new(
             IncProvider::with_native_actions(
                 Arc::new(AllowAllIncAcl),
@@ -228,6 +261,29 @@ pub(super) fn open_runtime_controller(
             })?,
         ),
     };
+    let inc_provider: Arc<dyn Provider> = inc_provider_concrete.clone();
+    let artifacts: Arc<Mutex<BTreeMap<Principal, Arc<VerifiedArtifactHandle>>>> =
+        Arc::new(Mutex::new(BTreeMap::new()));
+    let intent_dispatcher =
+        RuntimeIntentDispatcher::new(Arc::clone(&inc_provider_concrete), Arc::clone(&artifacts));
+    if let Some(callback) = intent_activation_executor {
+        let activation: Arc<dyn IntentActivationSink> =
+            Arc::new(CallbackIntentActivation { callback });
+        intent_dispatcher.set_activation(Some(activation));
+    }
+    let intent_provider = Arc::new(
+        IntentProvider::new(
+            Arc::new(DefaultOnlyIntentPolicy),
+            Arc::new(CancelIntentChoice),
+            intent_dispatcher.clone() as Arc<dyn NativeIntentDispatcher>,
+            Arc::new(NoopIntentActivity),
+            IntentProviderLimits::default(),
+        )
+        .map_err(|error| RuntimeOpenError::Runtime {
+            detail: error.to_string(),
+        })?,
+    );
+    let intent_provider_erased: Arc<dyn Provider> = intent_provider.clone();
     let nostr_providers =
         NapNostrProviderSet::new(data_plane.clone(), NapNostrProviderLimits::default()).map_err(
             |error| RuntimeOpenError::Runtime {
@@ -272,6 +328,7 @@ pub(super) fn open_runtime_controller(
         storage_provider,
         identity_provider,
         inc_provider,
+        intent_provider_erased,
         outbox_provider,
         relay_provider,
     ];
@@ -301,6 +358,7 @@ pub(super) fn open_runtime_controller(
     .map_err(|error| RuntimeOpenError::Runtime {
         detail: error.to_string(),
     })?;
+    intent_dispatcher.bind(&app, &intent_provider);
     let (signal, _) = watch::channel(0_u64);
     let controller = Arc::new(RuntimeController {
         app,
@@ -322,7 +380,8 @@ pub(super) fn open_runtime_controller(
         theme_source,
         theme_provider,
         config_provider,
-        artifacts: Mutex::new(BTreeMap::new()),
+        intent_provider,
+        artifacts,
         boundary_refusals: Mutex::new(BoundedFacts::with_capacity(config.maximum_boundary_events)),
         projection_fault_latch: Mutex::new(Default::default()),
         maximum_boundary_events: config.maximum_boundary_events,

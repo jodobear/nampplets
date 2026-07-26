@@ -254,33 +254,27 @@ private struct WorkbenchNappletWindow<Content: View>: View {
         .accessibilityIdentifier("napplet-window-\(window.id.rawValue)")
     }
 
+    // Napplets carry no chrome by default -- no icon, no title text, no
+    // filled bar -- only the selection/hover border below. This strip stays
+    // just tall enough to remain a drag handle in Freeform layout and to
+    // host the close control; it renders no visible background of its own.
     private var windowBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "app.dashed")
-                .foregroundStyle(.tint)
-            Text(window.title)
-                .font(.headline)
-                .lineLimit(1)
+        HStack(spacing: 0) {
             Spacer()
-            if isSelected {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 7))
-                    .foregroundStyle(.tint)
-                    .accessibilityHidden(true)
-            }
             Button(action: close) {
                 Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13))
             }
             .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.secondary.opacity(0.55))
             .accessibilityLabel("Close \(window.title)")
             .accessibilityHint(
                 "Closes this window without uninstalling the napplet"
             )
         }
-        .padding(.horizontal, 11)
-        .frame(height: 38)
-        .background(.bar)
+        .padding(.horizontal, 8)
+        .padding(.top, 5)
+        .frame(height: 22)
         .contentShape(Rectangle())
         .gesture(moveGesture)
         .accessibilityLabel("\(window.title) title bar")

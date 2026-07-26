@@ -1968,6 +1968,7 @@ dependencies = [
 name = "nmp-native-runtime-ffi"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "nmp",
  "nmp-native-artifact",
  "nmp-native-catalog-resolver",
@@ -1975,11 +1976,13 @@ dependencies = [
  "nmp-native-nmp-adapter",
  "nmp-native-provider-identity",
  "nmp-native-provider-inc",
+ "nmp-native-provider-link",
  "nmp-native-providers",
  "nmp-native-runtime-app",
  "nmp-native-runtime-core",
  "nmp-native-runtime-store",
  "nmp-native-surface",
+ "nostr",
  "parking_lot",
  "serde",
  "serde_json",

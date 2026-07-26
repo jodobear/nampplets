@@ -18,9 +18,9 @@
   "testTargets" : [
     {
       "target" : {
-        "containerPath" : "container:RuntimeWorkbenchiOSPackage",
-        "identifier" : "RuntimeWorkbenchiOSFeatureTests",
-        "name" : "RuntimeWorkbenchiOSFeatureTests"
+        "containerPath" : "container:RuntimeWorkbenchPackage",
+        "identifier" : "RuntimeWorkbenchFeatureTests",
+        "name" : "RuntimeWorkbenchFeatureTests"
       }
     },
     {

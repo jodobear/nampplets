@@ -683,12 +683,16 @@ public protocol RuntimeControllerProtocol: AnyObject, Sendable {
      * Reopens one installed exact build from its retained verifier handle.
      *
      * Native supplies only the exact library coordinate. Rust checks the
-     * unfiltered persistent installation and returns the already-attached
-     * immutable handle only when its signed event, coordinate, aggregate, and
-     * capability inventory still match. After process restart this fails
-     * closed until the artifact owner exposes an exact persistent-cache reopen
-     * seam; this boundary never resolves a newer replaceable manifest as a
-     * substitute for the installed event.
+     * unfiltered persistent installation and returns a handle only when its
+     * signed event, coordinate, aggregate, and capability inventory still
+     * match. If this process already holds the verified handle from a
+     * prior install or reopen, that handle is reused directly. Otherwise
+     * (typically: first reopen after a process restart) this reconstructs
+     * it entirely from local state -- the exact signed manifest event bytes
+     * retained at original install time, re-verified, and the sealed
+     * artifact bytes already committed to the local artifact cache. No
+     * network access, and this never resolves a newer replaceable manifest
+     * as a substitute for the installed event.
      *
      * This call is blocking and must be invoked away from a native UI thread.
      */
@@ -877,6 +881,19 @@ public static func openWithAppearance(config: RuntimeConfig, artifactSource: Art
         FfiConverterTypeRuntimeConfig_lower(config),
         FfiConverterCallbackInterfaceArtifactSource_lower(artifactSource),
         FfiConverterCallbackInterfaceNativeAppearanceSource_lower(appearanceSource),$0
+    )
+})
+}
+
+public static func openWithIntentActivation(config: RuntimeConfig, artifactSource: ArtifactSource, appearanceSource: NativeAppearanceSource, settingsExecutor: NativeSettingsExecutor, incActionExecutor: NativeIncActionExecutor, intentActivationExecutor: NativeIntentActivationExecutor)throws  -> RuntimeController  {
+    return try  FfiConverterTypeRuntimeController_lift(try rustCallWithError(FfiConverterTypeRuntimeOpenError_lift) {
+    uniffi_nmp_native_runtime_ffi_fn_constructor_runtimecontroller_open_with_intent_activation(
+        FfiConverterTypeRuntimeConfig_lower(config),
+        FfiConverterCallbackInterfaceArtifactSource_lower(artifactSource),
+        FfiConverterCallbackInterfaceNativeAppearanceSource_lower(appearanceSource),
+        FfiConverterCallbackInterfaceNativeSettingsExecutor_lower(settingsExecutor),
+        FfiConverterCallbackInterfaceNativeIncActionExecutor_lower(incActionExecutor),
+        FfiConverterCallbackInterfaceNativeIntentActivationExecutor_lower(intentActivationExecutor),$0
     )
 })
 }
@@ -1182,12 +1199,16 @@ open func profilePreferences() -> RuntimeProfilePreferences  {
      * Reopens one installed exact build from its retained verifier handle.
      *
      * Native supplies only the exact library coordinate. Rust checks the
-     * unfiltered persistent installation and returns the already-attached
-     * immutable handle only when its signed event, coordinate, aggregate, and
-     * capability inventory still match. After process restart this fails
-     * closed until the artifact owner exposes an exact persistent-cache reopen
-     * seam; this boundary never resolves a newer replaceable manifest as a
-     * substitute for the installed event.
+     * unfiltered persistent installation and returns a handle only when its
+     * signed event, coordinate, aggregate, and capability inventory still
+     * match. If this process already holds the verified handle from a
+     * prior install or reopen, that handle is reused directly. Otherwise
+     * (typically: first reopen after a process restart) this reconstructs
+     * it entirely from local state -- the exact signed manifest event bytes
+     * retained at original install time, re-verified, and the sealed
+     * artifact bytes already committed to the local artifact cache. No
+     * network access, and this never resolves a newer replaceable manifest
+     * as a substitute for the installed event.
      *
      * This call is blocking and must be invoked away from a native UI thread.
      */
@@ -2464,6 +2485,90 @@ public func FfiConverterTypeNativeIncActionRequest_lift(_ buf: RustBuffer) throw
 #endif
 public func FfiConverterTypeNativeIncActionRequest_lower(_ value: NativeIncActionRequest) -> RustBuffer {
     return FfiConverterTypeNativeIncActionRequest.lower(value)
+}
+
+
+/**
+ * Identifies the NAP-INTENT handler a launched/focused window should target.
+ * `Principal` (manifest author + d tag + aggregate hash) already *is* an
+ * exact-build identity, so this maps 1:1 onto a native workspace window
+ * identity with no further resolution.
+ */
+public struct NativeIntentActivationRequest {
+    public var manifestAuthor: String
+    public var dTag: String
+    public var aggregateHash: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(manifestAuthor: String, dTag: String, aggregateHash: String) {
+        self.manifestAuthor = manifestAuthor
+        self.dTag = dTag
+        self.aggregateHash = aggregateHash
+    }
+}
+
+#if compiler(>=6)
+extension NativeIntentActivationRequest: Sendable {}
+#endif
+
+
+extension NativeIntentActivationRequest: Equatable, Hashable {
+    public static func ==(lhs: NativeIntentActivationRequest, rhs: NativeIntentActivationRequest) -> Bool {
+        if lhs.manifestAuthor != rhs.manifestAuthor {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
+            return false
+        }
+        if lhs.aggregateHash != rhs.aggregateHash {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(manifestAuthor)
+        hasher.combine(dTag)
+        hasher.combine(aggregateHash)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeIntentActivationRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeIntentActivationRequest {
+        return
+            try NativeIntentActivationRequest(
+                manifestAuthor: FfiConverterString.read(from: &buf),
+                dTag: FfiConverterString.read(from: &buf),
+                aggregateHash: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeIntentActivationRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.manifestAuthor, into: &buf)
+        FfiConverterString.write(value.dTag, into: &buf)
+        FfiConverterString.write(value.aggregateHash, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeIntentActivationRequest_lift(_ buf: RustBuffer) throws -> NativeIntentActivationRequest {
+    return try FfiConverterTypeNativeIntentActivationRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeIntentActivationRequest_lower(_ value: NativeIntentActivationRequest) -> RustBuffer {
+    return FfiConverterTypeNativeIntentActivationRequest.lower(value)
 }
 
 
@@ -6249,13 +6354,15 @@ public func FfiConverterTypeRuntimeProviderUpdate_lower(_ value: RuntimeProvider
 
 public struct RuntimeReceiptSnapshot {
     public var receiptId: String
+    public var status: RuntimeReceiptStatus
     public var delivery: String
     public var latestStateJson: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(receiptId: String, delivery: String, latestStateJson: String?) {
+    public init(receiptId: String, status: RuntimeReceiptStatus, delivery: String, latestStateJson: String?) {
         self.receiptId = receiptId
+        self.status = status
         self.delivery = delivery
         self.latestStateJson = latestStateJson
     }
@@ -6271,6 +6378,9 @@ extension RuntimeReceiptSnapshot: Equatable, Hashable {
         if lhs.receiptId != rhs.receiptId {
             return false
         }
+        if lhs.status != rhs.status {
+            return false
+        }
         if lhs.delivery != rhs.delivery {
             return false
         }
@@ -6282,6 +6392,7 @@ extension RuntimeReceiptSnapshot: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(receiptId)
+        hasher.combine(status)
         hasher.combine(delivery)
         hasher.combine(latestStateJson)
     }
@@ -6297,6 +6408,7 @@ public struct FfiConverterTypeRuntimeReceiptSnapshot: FfiConverterRustBuffer {
         return
             try RuntimeReceiptSnapshot(
                 receiptId: FfiConverterString.read(from: &buf),
+                status: FfiConverterTypeRuntimeReceiptStatus.read(from: &buf),
                 delivery: FfiConverterString.read(from: &buf),
                 latestStateJson: FfiConverterOptionString.read(from: &buf)
         )
@@ -6304,6 +6416,7 @@ public struct FfiConverterTypeRuntimeReceiptSnapshot: FfiConverterRustBuffer {
 
     public static func write(_ value: RuntimeReceiptSnapshot, into buf: inout [UInt8]) {
         FfiConverterString.write(value.receiptId, into: &buf)
+        FfiConverterTypeRuntimeReceiptStatus.write(value.status, into: &buf)
         FfiConverterString.write(value.delivery, into: &buf)
         FfiConverterOptionString.write(value.latestStateJson, into: &buf)
     }
@@ -9943,6 +10056,76 @@ extension RuntimePermissionSensitivity: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
+public enum RuntimeReceiptStatus {
+
+    case pending
+    case delivered
+}
+
+
+#if compiler(>=6)
+extension RuntimeReceiptStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeReceiptStatus: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeReceiptStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeReceiptStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .pending
+
+        case 2: return .delivered
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeReceiptStatus, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .pending:
+            writeInt(&buf, Int32(1))
+
+
+        case .delivered:
+            writeInt(&buf, Int32(2))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptStatus_lift(_ buf: RustBuffer) throws -> RuntimeReceiptStatus {
+    return try FfiConverterTypeRuntimeReceiptStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptStatus_lower(_ value: RuntimeReceiptStatus) -> RustBuffer {
+    return FfiConverterTypeRuntimeReceiptStatus.lower(value)
+}
+
+
+extension RuntimeReceiptStatus: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 public enum RuntimeRelayAccess {
 
     case `public`
@@ -11008,6 +11191,128 @@ public func FfiConverterCallbackInterfaceNativeIncActionExecutor_lift(_ handle: 
 #endif
 public func FfiConverterCallbackInterfaceNativeIncActionExecutor_lower(_ v: NativeIncActionExecutor) -> UInt64 {
     return FfiConverterCallbackInterfaceNativeIncActionExecutor.lower(v)
+}
+
+
+
+
+/**
+ * Native signal fired before any webview session may exist yet: "create (if
+ * needed) and bring to front the window for this handler." Distinct from
+ * `NativeIncActionExecutor`, which is scoped to an already-live session and
+ * refuses otherwise.
+ */
+public protocol NativeIntentActivationExecutor: AnyObject, Sendable {
+
+    func focusOrLaunch(handler: NativeIntentActivationRequest)
+
+}
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceNativeIntentActivationExecutor {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // This creates 1-element array, since this seems to be the only way to construct a const
+    // pointer that we can pass to the Rust code.
+    static let vtable: [UniffiVTableCallbackInterfaceNativeIntentActivationExecutor] = [UniffiVTableCallbackInterfaceNativeIntentActivationExecutor(
+        focusOrLaunch: { (
+            uniffiHandle: UInt64,
+            handler: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceNativeIntentActivationExecutor.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.focusOrLaunch(
+                     handler: try FfiConverterTypeNativeIntentActivationRequest_lift(handler)
+                )
+            }
+
+
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            let result = try? FfiConverterCallbackInterfaceNativeIntentActivationExecutor.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface NativeIntentActivationExecutor: handle missing in uniffiFree")
+            }
+        }
+    )]
+}
+
+private func uniffiCallbackInitNativeIntentActivationExecutor() {
+    uniffi_nmp_native_runtime_ffi_fn_init_callback_vtable_nativeintentactivationexecutor(UniffiCallbackInterfaceNativeIntentActivationExecutor.vtable)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfaceNativeIntentActivationExecutor {
+    fileprivate static let handleMap = UniffiHandleMap<NativeIntentActivationExecutor>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfaceNativeIntentActivationExecutor : FfiConverter {
+    typealias SwiftType = NativeIntentActivationExecutor
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceNativeIntentActivationExecutor_lift(_ handle: UInt64) throws -> NativeIntentActivationExecutor {
+    return try FfiConverterCallbackInterfaceNativeIntentActivationExecutor.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceNativeIntentActivationExecutor_lower(_ v: NativeIntentActivationExecutor) -> UInt64 {
+    return FfiConverterCallbackInterfaceNativeIntentActivationExecutor.lower(v)
 }
 
 
@@ -12631,7 +12936,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_profile_preferences() != 20905) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_reacquire_installed_artifact() != 18436) {
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_reacquire_installed_artifact() != 16446) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_read_verified() != 14937) {
@@ -12730,6 +13035,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_appearance() != 25867) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_intent_activation() != 10985) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_native_runtime_ffi_checksum_constructor_runtimecontroller_open_with_native_capabilities() != 18420) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12748,6 +13056,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_nativeincactionexecutor_session_ended() != 28145) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_nativeintentactivationexecutor_focus_or_launch() != 42580) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_nativesettingsexecutor_try_open() != 19890) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12761,6 +13072,7 @@ private let initializationResult: InitializationResult = {
     uniffiCallbackInitArtifactSource()
     uniffiCallbackInitNativeAppearanceSource()
     uniffiCallbackInitNativeIncActionExecutor()
+    uniffiCallbackInitNativeIntentActivationExecutor()
     uniffiCallbackInitNativeSettingsExecutor()
     uniffiCallbackInitRuntimeObserver()
     uniffiCallbackInitRuntimeRelayDiagnosticsObserver()

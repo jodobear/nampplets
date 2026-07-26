@@ -48,6 +48,7 @@ final class NativeRuntimeWriteReceiptObserverTests: RuntimeNappletSessionTestCas
         snapshot.receipts = [
             RuntimeReceiptSnapshot(
                 receiptId: "receipt-1",
+                status: .pending,
                 delivery: "pending",
                 latestStateJson: #"{"status":"queued"}"#
             )

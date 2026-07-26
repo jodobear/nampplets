@@ -4,6 +4,7 @@ mod accounts;
 mod artifact;
 mod catalog;
 mod envelope;
+mod intent;
 mod library;
 mod native_capabilities;
 mod permissions;
@@ -13,14 +14,23 @@ mod snapshot_integrity;
 mod test_support;
 mod workspace;
 
-use std::{collections::BTreeMap, fs, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    fs,
+    sync::Arc,
+    thread,
+    time::{Duration, Instant},
+};
 
-use nmp_native_artifact::ManifestCoordinate;
+use nmp_native_artifact::{
+    AggregateVerifier as _, ManifestCoordinate, Nip5aPathTagsAggregate, Sha256Digest, VerifiedFile,
+};
 use nmp_native_runtime_app::{AppLimits, ExecutableArtifact, PlatformCommand, PlatformEvent};
 use nmp_native_runtime_core::{
     BoundedJson, Capability, CapabilityRequest, CapabilityRequirement, Principal, SessionId,
 };
 use nmp_native_runtime_store::{InstalledBuild, WorkspaceRecord};
+use nostr::{EventBuilder, Keys, Kind, Tag};
 use parking_lot::Mutex;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -282,4 +292,51 @@ fn response_of_type(controller: &RuntimeController, expected: &str) -> Value {
             _ => None,
         })
         .unwrap_or_else(|| panic!("missing `{expected}` response"))
+}
+
+/// Signs a synthetic single-file napplet manifest locally so a test can
+/// declare exactly the `requires`/`archetype` tags it needs without
+/// depending on any published fixture's immutable tag set.
+fn signed_manifest_event(
+    d_tag: &str,
+    content: &[u8],
+    extra_tags: Vec<Vec<String>>,
+) -> (Vec<u8>, String, String) {
+    let digest = Sha256Digest::of(content);
+    let aggregate = Nip5aPathTagsAggregate
+        .compute(&[VerifiedFile {
+            path: Arc::from("/index.html"),
+            digest: digest.clone(),
+            bytes: Arc::from(content),
+        }])
+        .unwrap();
+    let mut tags = vec![
+        vec!["d".to_owned(), d_tag.to_owned()],
+        vec![
+            "path".to_owned(),
+            "/index.html".to_owned(),
+            digest.as_str().to_owned(),
+        ],
+        vec![
+            "x".to_owned(),
+            aggregate.as_str().to_owned(),
+            "aggregate".to_owned(),
+        ],
+        vec!["server".to_owned(), "https://blossom.example/".to_owned()],
+    ];
+    tags.extend(extra_tags);
+    let keys = Keys::generate();
+    let event = EventBuilder::new(Kind::Custom(35_129), "")
+        .tags(
+            tags.into_iter()
+                .map(|tag| Tag::parse(tag).unwrap())
+                .collect::<Vec<_>>(),
+        )
+        .sign_with_keys(&keys)
+        .unwrap();
+    (
+        serde_json::to_vec(&event).unwrap(),
+        event.pubkey.to_hex(),
+        digest.as_str().to_owned(),
+    )
 }

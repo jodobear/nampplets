@@ -66,6 +66,14 @@ pub enum ManifestError {
     RequirementCount { actual: usize, maximum: usize },
     #[error("manifest declares {actual} blob sources; the maximum is {maximum}")]
     SourceCount { actual: usize, maximum: usize },
+    #[error("invalid archetype slug {0:?}")]
+    InvalidArchetypeSlug(String),
+    #[error("invalid archetype protocol {0:?}: must be a bounded string in the napplet: namespace")]
+    InvalidArchetypeProtocol(String),
+    #[error("invalid archetype kind hint(s) {0:?}: expected kind:<digits>")]
+    InvalidArchetypeKind(String),
+    #[error("manifest declares {actual} archetypes; the maximum is {maximum}")]
+    ArchetypeCount { actual: usize, maximum: usize },
     #[error("manifest source metadata is not an absolute credential-free HTTP(S) URL")]
     InvalidSourceUrl,
     #[error("blob server URL violates source policy")]

@@ -23,8 +23,7 @@ final class TrustedShellOutboxTests: RuntimeNappletSessionTestCase {
         let index = try Data(contentsOf: fixture.appendingPathComponent("index.html"))
         let profile = try NativeRuntimeProfile.open(
             configuration: NativeRuntimeProfileConfiguration(
-                storageRoot: root,
-                permissionMode: .demoPinnedGoodMorning
+                storageRoot: root
             )
         )
         defer { profile.close() }
@@ -36,14 +35,14 @@ final class TrustedShellOutboxTests: RuntimeNappletSessionTestCase {
         XCTAssertTrue(registration.accepted)
         XCTAssertTrue(profile.activateLocalAccount(handle: handle).accepted)
 
-        let installed = try profile.installSignedNamed(
+        let launched = try profile.openSignedNamed(
             title: "Good Morning Shell Write",
             eventJSON: event,
             author: author,
             dTag: "good-morning",
-            blobsBySHA256: [indexDigest: index]
+            blobsBySHA256: [indexDigest: index],
+            grantDomains: requiredGoodMorningDomains
         )
-        let launched = try profile.launchInstalled(installed)
         let artifact = NappletArtifact(
             title: "Outbox bridge probe",
             reader: InMemoryVerifiedArtifactReader(files: [
@@ -158,8 +157,7 @@ final class TrustedShellOutboxTests: RuntimeNappletSessionTestCase {
         )
         let profile = try NativeRuntimeProfile.open(
             configuration: NativeRuntimeProfileConfiguration(
-                storageRoot: root,
-                permissionMode: .demoPinnedGoodMorning
+                storageRoot: root
             )
         )
         defer { profile.close() }
@@ -171,14 +169,14 @@ final class TrustedShellOutboxTests: RuntimeNappletSessionTestCase {
         XCTAssertTrue(registration.accepted)
         XCTAssertTrue(profile.activateLocalAccount(handle: handle).accepted)
 
-        let installed = try profile.installSignedNamed(
+        let launched = try profile.openSignedNamed(
             title: "Good Morning Receipt",
             eventJSON: event,
             author: author,
             dTag: "good-morning",
-            blobsBySHA256: [indexDigest: index]
+            blobsBySHA256: [indexDigest: index],
+            grantDomains: requiredGoodMorningDomains
         )
-        let launched = try profile.launchInstalled(installed)
         let artifact = NappletArtifact(
             title: "Outbox receipt probe",
             reader: InMemoryVerifiedArtifactReader(files: [

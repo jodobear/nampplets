@@ -31,7 +31,11 @@ extension ContentView {
             let identity = window.exactBuild,
             let artifact = runningArtifacts[identity]
         {
-            nappletSurface(artifact, title: window.title)
+            nappletSurface(
+                artifact,
+                title: window.title,
+                identity: identity
+            )
         } else if
             let identity = window.exactBuild,
             launchingIdentities.contains(identity)
@@ -95,7 +99,8 @@ extension ContentView {
     @ViewBuilder
     private func nappletSurface(
         _ artifact: NappletArtifact,
-        title: String
+        title: String,
+        identity: WorkbenchExactBuildIdentity
     ) -> some View {
         TrustedNappletView(artifact: artifact) { event in
             switch event {
@@ -109,6 +114,8 @@ extension ContentView {
                 activity = "Refused: \(reason)"
             case .crashed:
                 activity = "\(title) WebView crashed"
+            case .consoleEntry(let level, let message):
+                consoleLog.append(level: level, message: message, for: identity)
             }
         }
         .accessibilityIdentifier("bundled-napplet")

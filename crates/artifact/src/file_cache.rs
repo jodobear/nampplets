@@ -30,6 +30,14 @@ impl FileArtifactCache {
             commit_lock: Mutex::new(()),
         })
     }
+
+    /// Reconstructs a previously committed `CachedArtifact` from disk alone,
+    /// re-hashing every blob against its recorded digest. No network access
+    /// and no fresh `VerifiedFile` set is required; this is the offline half
+    /// of reopening an already-installed exact build in a new process.
+    pub fn reopen(&self, aggregate: &Sha256Digest) -> Result<CachedArtifact, ArtifactError> {
+        inspect_cached_artifact(&self.root.join(aggregate.as_str()), aggregate, None)
+    }
 }
 
 impl ArtifactCache for FileArtifactCache {

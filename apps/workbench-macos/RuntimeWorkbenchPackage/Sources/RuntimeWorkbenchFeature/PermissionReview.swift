@@ -89,6 +89,58 @@ final class PermissionReviewSheetModel {
         transientIssue = nil
     }
 
+    /// Applies the decision Rust itself recommends for this capability, or
+    /// denies. This layer never ranks `decisionOptions` on its own:
+    /// session-vs-exact-build scope is a runtime policy question, and
+    /// `recommendedDecision` is Rust's answer to it.
+    func setGranted(_ granted: Bool, for capability: PermissionCapabilityReview) {
+        guard granted else {
+            if capability.option(for: .deny)?.isValid == true {
+                select(.deny, for: capability)
+            }
+            return
+        }
+        guard let recommended = grantingRecommendation(for: capability) else {
+            return
+        }
+        select(recommended, for: capability)
+    }
+
+    /// Whether this capability currently reads as granted. Before the user
+    /// edits anything that is Rust's own `isGranted` classification of the
+    /// decision in force; afterwards it is whether the pending selection is
+    /// the runtime's recommended grant.
+    func isGranted(_ capability: PermissionCapabilityReview) -> Bool {
+        guard let selected = selection(for: capability) else {
+            return capability.isGranted
+        }
+        guard selected != capability.requestedDecision else {
+            return capability.isGranted
+        }
+        return selected == grantingRecommendation(for: capability)
+    }
+
+    func hasAffirmativeOption(_ capability: PermissionCapabilityReview) -> Bool {
+        grantingRecommendation(for: capability) != nil
+    }
+
+    /// Rust's recommended decision, but only when that recommendation is an
+    /// actual grant. A capability the runtime recommends denying offers the
+    /// user nothing to switch on.
+    private func grantingRecommendation(
+        for capability: PermissionCapabilityReview
+    ) -> PermissionRequestedDecision? {
+        guard
+            let recommended = capability.recommendedDecision,
+            recommended != .deny,
+            recommended != .askEveryTime,
+            capability.option(for: recommended)?.isValid == true
+        else {
+            return nil
+        }
+        return recommended
+    }
+
     /// Discards only transient native form state. It never calls the manager.
     func cancel() {
         selections = Dictionary(
@@ -99,6 +151,29 @@ final class PermissionReviewSheetModel {
                 }
             }
         )
+        transientIssue = nil
+    }
+
+    /// Selects, for every capability the runtime lets the user decide, the
+    /// decision Rust itself recommends -- never one this model invents by
+    /// ranking `decisionOptions`. Managed capabilities (no
+    /// `requestedDecision`, and therefore no `recommendedDecision`) are
+    /// untouched; they carry no user-selectable option at all. This is the
+    /// one-tap "just let me try it" path: the Rust-requested default is
+    /// `askEveryTime`, which can never satisfy launch, so confirming
+    /// un-edited defaults previously looked like it worked and then
+    /// silently failed to launch.
+    func selectAllRecommended() {
+        for capability in review.capabilities {
+            guard
+                capability.requestedDecision != nil,
+                let recommended = capability.recommendedDecision,
+                capability.option(for: recommended)?.isValid == true
+            else {
+                continue
+            }
+            selections[capability.domain] = recommended
+        }
         transientIssue = nil
     }
 
@@ -113,6 +188,11 @@ final class PermissionReviewSheetModel {
             )
             return
         }
+        // Managed capabilities offer no `requestedDecision` and never appear
+        // in `selections`; only decidable capabilities must be fully covered.
+        let decidableCount = review.capabilities
+            .filter { $0.requestedDecision != nil }
+            .count
         guard
             let batch = PermissionDecisionBatch(
                 principal: review.principal,
@@ -126,7 +206,7 @@ final class PermissionReviewSheetModel {
                     )
                 }
             ),
-            batch.decisions.count == review.capabilities.count
+            batch.decisions.count == decidableCount
         else {
             transientIssue = PermissionReviewIssue(
                 title: "Permission review is incomplete",
@@ -152,6 +232,17 @@ final class PermissionReviewSheetModel {
 
     private var invalidSelections: [String] {
         review.capabilities.compactMap { capability in
+            guard capability.requestedDecision != nil else {
+                // Managed capabilities carry no user-selectable option. A
+                // required one the host has locked out of every valid
+                // decision can never launch, so it still blocks
+                // confirmation; a merely optional one never does.
+                let hostLockedOut = capability.decisionOptions
+                    .allSatisfy { !$0.isValid }
+                return capability.requirement == .required && hostLockedOut
+                    ? capability.domain
+                    : nil
+            }
             guard
                 let selected = selection(for: capability),
                 capability.option(for: selected)?.isValid == true
@@ -163,9 +254,15 @@ final class PermissionReviewSheetModel {
     }
 }
 
+/// A permission sheet built for the person launching a napplet, not for the
+/// person who wrote it: no key material, no hashes, no NAP jargon on the
+/// primary screen. Every capability gets one plain-English question and one
+/// switch. Anything a developer would want -- the publisher's key, the exact
+/// build hash -- is one disclosure tap away, never the default view.
 public struct PermissionReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State var model: PermissionReviewSheetModel
+    @State private var showsTechnicalDetails = false
 
     @MainActor
     public init(manager: any PermissionReviewManaging) {
@@ -182,20 +279,17 @@ public struct PermissionReviewSheet: View {
                         scrollAnchorRow(proxy: proxy)
                     }
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            exactBuildIdentity
-                            Divider()
-                            capabilityReview
+                        VStack(alignment: .leading, spacing: 22) {
+                            header
+                            capabilityList
                             if let issue = model.issue {
-                                Divider()
                                 issueView(issue)
                             }
                         }
-                        .padding(24)
+                        .padding(20)
                     }
                 }
             }
-            .navigationTitle("Review Permissions")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -209,7 +303,8 @@ public struct PermissionReviewSheet: View {
                     )
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Confirm Decisions") {
+                    Button("Allow All") {
+                        model.selectAllRecommended()
                         Task {
                             await model.confirm()
                             if model.isApplied {
@@ -221,320 +316,199 @@ public struct PermissionReviewSheet: View {
                     .disabled(!model.canConfirm)
                     .accessibilityIdentifier("permission-confirm")
                     .accessibilityHint(
-                        "Saves this bounded permission batch without launching the napplet"
+                        "Allows every capability this napplet can be granted, at the "
+                            + "broadest scope available, and saves the decision"
                     )
                 }
             }
         }
         .frame(
-            minWidth: 680,
-            idealWidth: 780,
-            minHeight: 560,
-            idealHeight: 720
+            minWidth: 440,
+            idealWidth: 500,
+            minHeight: 380,
+            idealHeight: 560
         )
         .interactiveDismissDisabled(model.isSubmitting)
     }
 
-    private var exactBuildIdentity: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(model.review.nappletTitle, systemImage: "checkmark.seal")
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(model.review.nappletTitle)
                 .font(.title2.bold())
-
-            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
-                identityRow(
-                    label: "Publisher",
-                    value: model.review.publisherDisplayName
-                        ?? model.review.principal.manifestAuthorPublicKey
-                )
-                identityRow(
-                    label: "Public key",
-                    value: model.review.principal.manifestAuthorPublicKey
-                )
-                identityRow(
-                    label: "dTag",
-                    value: model.review.principal.dTag
-                )
-                identityRow(
-                    label: "Exact build hash",
-                    value: model.review.principal.aggregateHash
-                )
-            }
-            .font(.callout)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Exact build identity")
-    }
-
-    private func identityRow(label: String, value: String) -> some View {
-        GridRow {
-            Text(label)
+            Text(publisherLine)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text(value)
-                .fontDesign(.monospaced)
-                .textSelection(.enabled)
-                .lineLimit(2)
+            technicalDetailsDisclosure
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(model.review.nappletTitle), \(publisherLine)")
+    }
+
+    private var publisherLine: String {
+        if let name = model.review.publisherDisplayName, !name.isEmpty {
+            "by \(name)"
+        } else {
+            "by an unverified developer"
         }
     }
 
-    private var capabilityReview: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Capability Decisions")
-                .font(.headline)
+    /// The publisher's key and this exact build's hash are real,
+    /// verification-relevant facts -- just not ones a normal user should
+    /// ever have to look at to decide whether to open a napplet. They stay
+    /// available, one tap away, instead of on the primary screen.
+    private var technicalDetailsDisclosure: some View {
+        DisclosureGroup("Technical details", isExpanded: $showsTechnicalDetails) {
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+                GridRow {
+                    Text("Developer key").foregroundStyle(.secondary)
+                    Text(model.review.principal.manifestAuthorPublicKey)
+                        .fontDesign(.monospaced)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                GridRow {
+                    Text("Exact build").foregroundStyle(.secondary)
+                    Text(model.review.principal.aggregateHash)
+                        .fontDesign(.monospaced)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .font(.caption)
+            .padding(.top, 6)
+        }
+        .font(.caption)
+        .tint(.secondary)
+        .accessibilityIdentifier("permission-technical-details")
+    }
 
+    private var capabilityList: some View {
+        VStack(alignment: .leading, spacing: 10) {
             if model.review.capabilities.isEmpty {
                 Label(
-                    "This napplet does not request any capabilities.",
+                    "This napplet doesn't need any special permissions.",
                     systemImage: "checkmark.shield"
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
             } else {
-                Text(
-                    "Required capabilities must be permitted for the napplet to run. "
-                        + "Optional capabilities may be denied and degrade honestly."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
                 ForEach(model.review.capabilities) { capability in
-                    capabilityCard(capability)
+                    capabilityRow(capability)
                         .id(capability.domain)
                 }
             }
         }
     }
 
-    private func capabilityCard(
+    private func capabilityRow(
         _ capability: PermissionCapabilityReview
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: icon(for: capability.domain))
+                    .font(.title3)
+                    .foregroundStyle(
+                        capability.sensitivity == .sensitive ? .orange : .secondary
+                    )
+                    .frame(width: 22)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(capability.title)
-                        .font(.headline)
-                    Text(capability.domain)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                requirementBadge(capability.requirement)
-                sensitivityBadge(capability.sensitivity)
-            }
-
-            Text(capability.rationale)
-                .font(.callout)
-
-            availabilityRow(capability.platformAvailability)
-
-            if !capability.dependencies.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Dependencies")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(capability.dependencies) { dependency in
-                        Label {
-                            Text("\(dependency.domain): \(dependency.reason)")
-                        } icon: {
-                            Image(systemName: "arrow.triangle.branch")
+                    HStack(spacing: 6) {
+                        Text(capability.title)
+                            .font(.body.weight(.medium))
+                        if capability.requirement == .required {
+                            Text("Required")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
                         }
+                    }
+                    Text(capability.rationale)
                         .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if capability.platformAvailability != .available {
+                        availabilityNote(capability.platformAvailability)
+                    }
+                    if !capability.dependencies.isEmpty {
+                        Text(
+                            "Also needs "
+                                + capability.dependencies
+                                .map { humanDomainTitle($0.domain) }
+                                .joined(separator: ", ")
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     }
                 }
             }
-
-            Divider()
-
-            LabeledContent("Current decision") {
-                Label(
-                    capability.existingDecision.title,
-                    systemImage: capability.isGranted
-                        ? "checkmark.shield"
-                        : "shield.slash"
-                )
-                .foregroundStyle(
-                    capability.isGranted ? Color.green : Color.secondary
-                )
-                .accessibilityLabel(
-                    capability.isGranted
-                        ? "\(capability.existingDecision.title), granted"
-                        : "\(capability.existingDecision.title), not granted"
-                )
-            }
-
-            if capability.requestedDecision == nil {
-                lockedManagedDecision(capability)
-            } else {
-                HStack {
-                    Text("New decision")
-                    Spacer()
-                    decisionMenu(capability)
-                }
-            }
+            // Grouped separately from `trailingControl` below: combining this
+            // description into one VoiceOver element must not swallow the
+            // toggle's own accessible identity, or it silently disappears
+            // from the accessibility tree entirely (confirmed against a live
+            // XCUITest run -- `descendants(matching:)` could no longer find
+            // it once the whole row shared one combined element).
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(capability.title). \(capability.rationale)")
+            Spacer(minLength: 8)
+            trailingControl(capability)
         }
-        .padding(16)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(
-            "\(capability.title), \(capability.requirement.title), "
-                + "\(capability.sensitivity.title)"
-        )
+        .padding(12)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func requirementBadge(
-        _ requirement: PermissionCapabilityRequirement
-    ) -> some View {
-        Text(requirement.title)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                requirement == .required
-                    ? Color.orange.opacity(0.18)
-                    : Color.secondary.opacity(0.12),
-                in: Capsule()
-            )
-            .accessibilityLabel("\(requirement.title) capability")
-    }
-
-    private func sensitivityBadge(
-        _ sensitivity: PermissionCapabilitySensitivity
-    ) -> some View {
-        Label(
-            sensitivity.title,
-            systemImage: sensitivitySystemImage(sensitivity)
-        )
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(sensitivityColor(sensitivity))
-        .accessibilityLabel("\(sensitivity.title) sensitivity")
-    }
-
-    private func availabilityRow(
-        _ availability: PermissionPlatformAvailability
-    ) -> some View {
-        let presentation = availabilityPresentation(availability)
-        return VStack(alignment: .leading, spacing: 3) {
-            Label(
-                availability.title,
-                systemImage: presentation.systemImage
-            )
-            .foregroundStyle(presentation.color)
-            if let detail = availability.detail {
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .font(.callout)
-        .accessibilityElement(children: .combine)
-    }
-
-    private func decisionMenu(
+    @ViewBuilder
+    private func trailingControl(
         _ capability: PermissionCapabilityReview
     ) -> some View {
-        Menu {
-            ForEach(capability.decisionOptions) { option in
-                Button {
-                    model.select(option.decision, for: capability)
-                } label: {
-                    let title = optionTitle(option, in: capability)
-                    if model.selection(for: capability) == option.decision {
-                        Label(title, systemImage: "checkmark")
-                    } else {
-                        Text(title)
-                    }
-                }
-                .disabled(!option.isValid)
-                .accessibilityIdentifier(
-                    "permission-\(capability.domain)-\(option.decision.rawValue)"
-                )
-                .help(option.invalidReason ?? optionTitle(option, in: capability))
-                .accessibilityLabel(optionTitle(option, in: capability))
-                .accessibilityHint(
-                    option.invalidReason
-                        ?? "Selects this decision for \(capability.title)"
-                )
-            }
-        } label: {
-            Text(selectionTitle(for: capability))
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .accessibilityIdentifier("permission-decision-\(capability.domain)")
-        .accessibilityLabel("New decision for \(capability.title)")
-        .accessibilityValue(selectionTitle(for: capability))
-        .accessibilityHint("Shows the decisions permitted by the runtime")
-    }
-
-    private func selectionTitle(
-        for capability: PermissionCapabilityReview
-    ) -> String {
-        model.selection(for: capability)?.title ?? "Managed by host"
-    }
-
-    /// Marks the decision the runtime itself recommends. The preference is
-    /// read from Rust's projected `recommendedDecision`; this sheet never
-    /// ranks `decisionOptions` on its own.
-    private func optionTitle(
-        _ option: PermissionDecisionOption,
-        in capability: PermissionCapabilityReview
-    ) -> String {
-        guard option.decision == capability.recommendedDecision else {
-            return option.decision.title
-        }
-        return "\(option.decision.title) (Recommended)"
-    }
-
-    private func lockedManagedDecision(
-        _ capability: PermissionCapabilityReview
-    ) -> some View {
-        let reason = capability.decisionOptions
-            .compactMap(\.invalidReason)
-            .first
-            ?? "This capability is managed by host policy."
-        return VStack(alignment: .leading, spacing: 5) {
-            Label("Managed by host policy", systemImage: "lock.shield")
-                .font(.callout.weight(.semibold))
-            Text(reason)
+        if capability.requestedDecision == nil {
+            Label("Set by your device", systemImage: "lock.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private func sensitivitySystemImage(
-        _ sensitivity: PermissionCapabilitySensitivity
-    ) -> String {
-        switch sensitivity {
-        case .ordinary:
-            "shield"
-        case .sensitive:
-            "exclamationmark.shield"
-        case .unknown:
-            "questionmark.diamond"
-        }
-    }
-
-    private func sensitivityColor(
-        _ sensitivity: PermissionCapabilitySensitivity
-    ) -> Color {
-        switch sensitivity {
-        case .ordinary:
-            .secondary
-        case .sensitive, .unknown:
-            .orange
+        } else {
+            Toggle(
+                isOn: Binding(
+                    get: { model.isGranted(capability) },
+                    set: { model.setGranted($0, for: capability) }
+                )
+            ) {
+                EmptyView()
+            }
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .disabled(!model.hasAffirmativeOption(capability))
+            .accessibilityIdentifier("permission-toggle-\(capability.domain)")
+            .accessibilityLabel("Allow \(capability.title)")
         }
     }
 
-    private func availabilityPresentation(
+    private func availabilityNote(
         _ availability: PermissionPlatformAvailability
-    ) -> (systemImage: String, color: Color) {
-        switch availability {
-        case .available:
-            ("checkmark.circle", .green)
-        case .unknown:
-            ("questionmark.circle", .orange)
-        case .unavailable:
-            ("xmark.circle", .red)
+    ) -> some View {
+        Label(
+            availability.detail ?? availability.title,
+            systemImage: "exclamationmark.triangle.fill"
+        )
+        .font(.caption2)
+        .foregroundStyle(.orange)
+    }
+
+    private func humanDomainTitle(_ domain: String) -> String {
+        domain.replacingOccurrences(of: "-", with: " ").capitalized
+    }
+
+    private func icon(for domain: String) -> String {
+        switch domain {
+        case "identity": "person.crop.circle"
+        case "outbox": "paperplane.fill"
+        case "relay": "antenna.radiowaves.left.and.right"
+        case "storage": "internaldrive"
+        case "config": "gearshape.fill"
+        case "resource": "photo.on.rectangle"
+        case "link": "link"
+        case "intent": "arrow.triangle.branch"
+        case "inc": "bubble.left.and.bubble.right.fill"
+        case "theme": "paintbrush.fill"
+        default: "shield.fill"
         }
     }
 
@@ -545,9 +519,14 @@ public struct PermissionReviewSheet: View {
                 .foregroundStyle(.orange)
             Text(issue.message)
             if !issue.affectedDomains.isEmpty {
-                Text("Affected: \(issue.affectedDomains.joined(separator: ", "))")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                Text(
+                    "Affected: "
+                        + issue.affectedDomains
+                        .map(humanDomainTitle)
+                        .joined(separator: ", ")
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         }
         .accessibilityElement(children: .combine)

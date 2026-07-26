@@ -28,7 +28,12 @@ use crate::{
 /// bytes are pinned by the signed path digest and aggregate, so the declaration
 /// is as authenticated as a tag; without it such a build would launch with an
 /// empty inventory and no domain to review.
-pub(super) fn installation_capability_requests(
+///
+/// `intent_dispatch::launch_handler` relies on this same derivation: an
+/// intent-launched handler must be admitted with exactly the domains an
+/// interactive launch would ask for, or it starts with capabilities its own
+/// content requires silently missing.
+pub(crate) fn installation_capability_requests(
     artifact: &VerifiedArtifact,
 ) -> Result<Vec<CapabilityRequest>, String> {
     let mut requests = artifact

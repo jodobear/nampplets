@@ -35,48 +35,18 @@ final class RuntimeNappletSessionSignedBridgeTests: RuntimeNappletSessionTestCas
         XCTAssertTrue(registration.accepted)
         XCTAssertTrue(profile.activateLocalAccount(handle: account).accepted)
 
-        let installed = try profile.installSignedNamed(
+        // Grant the pinned required domains explicitly rather than walking
+        // the review sheet: what this test exercises is the signed bridge,
+        // not permission review, and an explicit grant list states exactly
+        // which capabilities the exercise depends on.
+        let launched = try profile.openSignedNamed(
             title: "Good Morning Signed WebView",
             eventJSON: event,
             author: author,
             dTag: "good-morning",
-            blobsBySHA256: [indexDigest: index]
+            blobsBySHA256: [indexDigest: index],
+            grantDomains: requiredGoodMorningDomains
         )
-        let review = try XCTUnwrap(
-            profile.permissionReview(for: installed.permissionCoordinate).review
-        )
-        let decisions = review.capabilities.map { capability in
-            let decision: NativeRuntimeGrantDecision
-            switch capability.platformAvailability {
-            case .available:
-                decision = .allowExactBuild
-            case .unknown, .unavailable:
-                decision = .denied
-            }
-            return NativeRuntimePermissionDecisionSelection(
-                domain: capability.domain,
-                decision: decision
-            )
-        }
-        let permissionUpdate = profile.applyPermissionDecisions(
-            NativeRuntimePermissionDecisionBatch(
-                coordinate: installed.permissionCoordinate,
-                decisions: decisions
-            )
-        )
-        XCTAssertTrue(permissionUpdate.applied)
-        XCTAssertNil(permissionUpdate.refusal)
-        XCTAssertTrue(permissionUpdate.review?.launchPermitted == true)
-        XCTAssertTrue(
-            permissionUpdate.review?.capabilities.allSatisfy { capability in
-                guard case .available = capability.platformAvailability else {
-                    return true
-                }
-                return capability.existingDecision == .allowExactBuild
-            } == true
-        )
-
-        let launched = try profile.launchInstalled(installed)
         let sealed = try XCTUnwrap(
             try launched.reader.readSealed(logicalPath: "/index.html")
         )
