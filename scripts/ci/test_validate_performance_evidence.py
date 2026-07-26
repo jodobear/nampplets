@@ -226,17 +226,24 @@ class PerformanceEvidenceTests(unittest.TestCase):
         self.assertEqual(summary["diagnostic_outlier_sequences"], [3])
         self.assertEqual(summary["disposition"], "diagnostic")
         self.assertEqual(summary["outcome_counts"]["success"], 4)
-    def test_cold_and_warm_results_are_incomparable(self) -> None:
-        warm = result_artifact("warm")
-        cold = result_artifact("cold")
-        self.assertNotEqual(warm["comparison_key"], cold["comparison_key"])
-        comparison = comparison_artifact(warm, cold)
-        report = VALIDATOR.validate_bytes(encoded(comparison))
+    def test_comparison_fixture_binds_result_confidence_and_state(self) -> None:
+        fixtures = MODULE_PATH.parents[2] / "performance/fixtures"
+        raw = (fixtures / "comparison-v1.valid.json").read_bytes()
+        comparison = json.loads(raw)
+        result = json.loads((fixtures / "result-v1.valid.json").read_bytes())
+        report = VALIDATOR.validate_bytes(raw)
         self.assertTrue(report["ok"], report)
-        self.assertEqual(
-            report["computed"]["producer_summary"]["mismatch_codes"],
-            ["state_mismatch"],
-        )
+        self.assertEqual(comparison["producer_summary"], {"disposition": "observed_only", "mismatch_codes": []})
+        self.assertEqual(comparison["confidence"]["disposition"], "not_evaluated")
+        self.assertEqual(comparison["confidence"]["reason"]["code"], "no_ratified_method")
+        self.assertEqual(result["identity"]["state"], "warm")
+        for side in ("baseline", "candidate"):
+            self.assertEqual(comparison[side], reference(result))
+        cold = copy.deepcopy(result["identity"])
+        cold["state"] = "cold"
+        self.assertNotEqual(VALIDATOR.compute_comparison_key(cold), result["comparison_key"])
+        mismatch = VALIDATOR.summarize_comparison(result["identity"], cold)
+        self.assertEqual(mismatch["mismatch_codes"], ["state_mismatch"])
     def test_observed_only_requires_not_evaluated_confidence(self) -> None:
         baseline = result_artifact()
         comparison = comparison_artifact(baseline, result_artifact())
