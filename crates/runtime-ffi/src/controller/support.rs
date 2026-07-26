@@ -131,7 +131,7 @@ pub(super) fn installed_confirmation(
 }
 
 impl RuntimeController {
-    pub(super) fn refusal(
+    pub(crate) fn refusal(
         &self,
         code: impl Into<String>,
         detail: impl Into<String>,
@@ -223,7 +223,7 @@ impl RuntimeController {
         }
     }
 
-    pub(super) fn record_refusal(&self, code: impl Into<String>, detail: impl Into<String>) {
+    pub(crate) fn record_refusal(&self, code: impl Into<String>, detail: impl Into<String>) {
         self.record_boundary_refusal(self.refusal(code, detail));
     }
 

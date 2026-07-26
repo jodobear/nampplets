@@ -657,6 +657,14 @@ public protocol RuntimeControllerProtocol: AnyObject, Sendable {
     func observe(observer: RuntimeObserver)  -> ObservationStart
 
     /**
+     * Opens the typed durable-receipt concern on the controller's single
+     * non-diagnostics slot worker. The authoritative initial projection rides
+     * in the returned start record, so registration never requires a callback
+     * before its cancellation handle exists.
+     */
+    func observeReceipts(observer: RuntimeReceiptsSlotObserver)  -> RuntimeReceiptsSlotObservationStart
+
+    /**
      * Open the NMP diagnostics observation for as long as the returned handle
      * lives. The current read-out is delivered synchronously on registration.
      */
@@ -1136,6 +1144,20 @@ open func observe(observer: RuntimeObserver) -> ObservationStart  {
 }
 
     /**
+     * Opens the typed durable-receipt concern on the controller's single
+     * non-diagnostics slot worker. The authoritative initial projection rides
+     * in the returned start record, so registration never requires a callback
+     * before its cancellation handle exists.
+     */
+open func observeReceipts(observer: RuntimeReceiptsSlotObserver) -> RuntimeReceiptsSlotObservationStart  {
+    return try!  FfiConverterTypeRuntimeReceiptsSlotObservationStart_lift(try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimecontroller_observe_receipts(self.uniffiClonePointer(),
+        FfiConverterCallbackInterfaceRuntimeReceiptsSlotObserver_lower(observer),$0
+    )
+})
+}
+
+    /**
      * Open the NMP diagnostics observation for as long as the returned handle
      * lives. The current read-out is delivered synchronously on registration.
      */
@@ -1583,6 +1605,127 @@ public func FfiConverterTypeRuntimeObservation_lift(_ pointer: UnsafeMutableRawP
 #endif
 public func FfiConverterTypeRuntimeObservation_lower(_ value: RuntimeObservation) -> UnsafeMutableRawPointer {
     return FfiConverterTypeRuntimeObservation.lower(value)
+}
+
+
+
+
+
+
+public protocol RuntimeReceiptsSlotObservationProtocol: AnyObject, Sendable {
+
+    func stop()
+
+}
+open class RuntimeReceiptsSlotObservation: RuntimeReceiptsSlotObservationProtocol, @unchecked Sendable {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_nmp_native_runtime_ffi_fn_clone_runtimereceiptsslotobservation(self.pointer, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_nmp_native_runtime_ffi_fn_free_runtimereceiptsslotobservation(pointer, $0) }
+    }
+
+
+
+
+open func stop()  {try! rustCall() {
+    uniffi_nmp_native_runtime_ffi_fn_method_runtimereceiptsslotobservation_stop(self.uniffiClonePointer(),$0
+    )
+}
+}
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeReceiptsSlotObservation: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = RuntimeReceiptsSlotObservation
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> RuntimeReceiptsSlotObservation {
+        return RuntimeReceiptsSlotObservation(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: RuntimeReceiptsSlotObservation) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeReceiptsSlotObservation {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: RuntimeReceiptsSlotObservation, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptsSlotObservation_lift(_ pointer: UnsafeMutableRawPointer) throws -> RuntimeReceiptsSlotObservation {
+    return try FfiConverterTypeRuntimeReceiptsSlotObservation.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptsSlotObservation_lower(_ value: RuntimeReceiptsSlotObservation) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeRuntimeReceiptsSlotObservation.lower(value)
 }
 
 
@@ -6427,16 +6570,18 @@ public func FfiConverterTypeRuntimeProviderUpdate_lower(_ value: RuntimeProvider
 
 public struct RuntimeReceiptSnapshot {
     public var receiptId: String
-    public var status: RuntimeReceiptStatus
-    public var delivery: String
+    public var outcome: RuntimeReceiptOutcome
+    public var observationLifecycle: RuntimeReceiptObservationLifecycle
+    public var outcomeDetail: String?
     public var latestStateJson: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(receiptId: String, status: RuntimeReceiptStatus, delivery: String, latestStateJson: String?) {
+    public init(receiptId: String, outcome: RuntimeReceiptOutcome, observationLifecycle: RuntimeReceiptObservationLifecycle, outcomeDetail: String?, latestStateJson: String?) {
         self.receiptId = receiptId
-        self.status = status
-        self.delivery = delivery
+        self.outcome = outcome
+        self.observationLifecycle = observationLifecycle
+        self.outcomeDetail = outcomeDetail
         self.latestStateJson = latestStateJson
     }
 }
@@ -6451,10 +6596,13 @@ extension RuntimeReceiptSnapshot: Equatable, Hashable {
         if lhs.receiptId != rhs.receiptId {
             return false
         }
-        if lhs.status != rhs.status {
+        if lhs.outcome != rhs.outcome {
             return false
         }
-        if lhs.delivery != rhs.delivery {
+        if lhs.observationLifecycle != rhs.observationLifecycle {
+            return false
+        }
+        if lhs.outcomeDetail != rhs.outcomeDetail {
             return false
         }
         if lhs.latestStateJson != rhs.latestStateJson {
@@ -6465,8 +6613,9 @@ extension RuntimeReceiptSnapshot: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(receiptId)
-        hasher.combine(status)
-        hasher.combine(delivery)
+        hasher.combine(outcome)
+        hasher.combine(observationLifecycle)
+        hasher.combine(outcomeDetail)
         hasher.combine(latestStateJson)
     }
 }
@@ -6481,16 +6630,18 @@ public struct FfiConverterTypeRuntimeReceiptSnapshot: FfiConverterRustBuffer {
         return
             try RuntimeReceiptSnapshot(
                 receiptId: FfiConverterString.read(from: &buf),
-                status: FfiConverterTypeRuntimeReceiptStatus.read(from: &buf),
-                delivery: FfiConverterString.read(from: &buf),
+                outcome: FfiConverterTypeRuntimeReceiptOutcome.read(from: &buf),
+                observationLifecycle: FfiConverterTypeRuntimeReceiptObservationLifecycle.read(from: &buf),
+                outcomeDetail: FfiConverterOptionString.read(from: &buf),
                 latestStateJson: FfiConverterOptionString.read(from: &buf)
         )
     }
 
     public static func write(_ value: RuntimeReceiptSnapshot, into buf: inout [UInt8]) {
         FfiConverterString.write(value.receiptId, into: &buf)
-        FfiConverterTypeRuntimeReceiptStatus.write(value.status, into: &buf)
-        FfiConverterString.write(value.delivery, into: &buf)
+        FfiConverterTypeRuntimeReceiptOutcome.write(value.outcome, into: &buf)
+        FfiConverterTypeRuntimeReceiptObservationLifecycle.write(value.observationLifecycle, into: &buf)
+        FfiConverterOptionString.write(value.outcomeDetail, into: &buf)
         FfiConverterOptionString.write(value.latestStateJson, into: &buf)
     }
 }
@@ -6508,6 +6659,140 @@ public func FfiConverterTypeRuntimeReceiptSnapshot_lift(_ buf: RustBuffer) throw
 #endif
 public func FfiConverterTypeRuntimeReceiptSnapshot_lower(_ value: RuntimeReceiptSnapshot) -> RustBuffer {
     return FfiConverterTypeRuntimeReceiptSnapshot.lower(value)
+}
+
+
+public struct RuntimeReceiptsSlotObservationStart {
+    public var observation: RuntimeReceiptsSlotObservation?
+    public var initial: RuntimeReceiptsSlotProjection?
+    public var refusal: RuntimeRefusal?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(observation: RuntimeReceiptsSlotObservation?, initial: RuntimeReceiptsSlotProjection?, refusal: RuntimeRefusal?) {
+        self.observation = observation
+        self.initial = initial
+        self.refusal = refusal
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeReceiptsSlotObservationStart: Sendable {}
+#endif
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeReceiptsSlotObservationStart: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeReceiptsSlotObservationStart {
+        return
+            try RuntimeReceiptsSlotObservationStart(
+                observation: FfiConverterOptionTypeRuntimeReceiptsSlotObservation.read(from: &buf),
+                initial: FfiConverterOptionTypeRuntimeReceiptsSlotProjection.read(from: &buf),
+                refusal: FfiConverterOptionTypeRuntimeRefusal.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeReceiptsSlotObservationStart, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeRuntimeReceiptsSlotObservation.write(value.observation, into: &buf)
+        FfiConverterOptionTypeRuntimeReceiptsSlotProjection.write(value.initial, into: &buf)
+        FfiConverterOptionTypeRuntimeRefusal.write(value.refusal, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptsSlotObservationStart_lift(_ buf: RustBuffer) throws -> RuntimeReceiptsSlotObservationStart {
+    return try FfiConverterTypeRuntimeReceiptsSlotObservationStart.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptsSlotObservationStart_lower(_ value: RuntimeReceiptsSlotObservationStart) -> RustBuffer {
+    return FfiConverterTypeRuntimeReceiptsSlotObservationStart.lower(value)
+}
+
+
+public struct RuntimeReceiptsSlotSnapshot {
+    public var revision: UInt64
+    public var closed: Bool
+    public var receipts: [RuntimeReceiptSnapshot]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(revision: UInt64, closed: Bool, receipts: [RuntimeReceiptSnapshot]) {
+        self.revision = revision
+        self.closed = closed
+        self.receipts = receipts
+    }
+}
+
+#if compiler(>=6)
+extension RuntimeReceiptsSlotSnapshot: Sendable {}
+#endif
+
+
+extension RuntimeReceiptsSlotSnapshot: Equatable, Hashable {
+    public static func ==(lhs: RuntimeReceiptsSlotSnapshot, rhs: RuntimeReceiptsSlotSnapshot) -> Bool {
+        if lhs.revision != rhs.revision {
+            return false
+        }
+        if lhs.closed != rhs.closed {
+            return false
+        }
+        if lhs.receipts != rhs.receipts {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(revision)
+        hasher.combine(closed)
+        hasher.combine(receipts)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeReceiptsSlotSnapshot: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeReceiptsSlotSnapshot {
+        return
+            try RuntimeReceiptsSlotSnapshot(
+                revision: FfiConverterUInt64.read(from: &buf),
+                closed: FfiConverterBool.read(from: &buf),
+                receipts: FfiConverterSequenceTypeRuntimeReceiptSnapshot.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeReceiptsSlotSnapshot, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.revision, into: &buf)
+        FfiConverterBool.write(value.closed, into: &buf)
+        FfiConverterSequenceTypeRuntimeReceiptSnapshot.write(value.receipts, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptsSlotSnapshot_lift(_ buf: RustBuffer) throws -> RuntimeReceiptsSlotSnapshot {
+    return try FfiConverterTypeRuntimeReceiptsSlotSnapshot.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptsSlotSnapshot_lower(_ value: RuntimeReceiptsSlotSnapshot) -> RustBuffer {
+    return FfiConverterTypeRuntimeReceiptsSlotSnapshot.lower(value)
 }
 
 
@@ -10300,46 +10585,179 @@ extension RuntimePermissionSensitivity: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
-public enum RuntimeReceiptStatus {
+public enum RuntimeReceiptObservationLifecycle {
 
-    case pending
-    case delivered
+    case observing
+    case notFound
+    case closed
 }
 
 
 #if compiler(>=6)
-extension RuntimeReceiptStatus: Sendable {}
+extension RuntimeReceiptObservationLifecycle: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeRuntimeReceiptStatus: FfiConverterRustBuffer {
-    typealias SwiftType = RuntimeReceiptStatus
+public struct FfiConverterTypeRuntimeReceiptObservationLifecycle: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeReceiptObservationLifecycle
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeReceiptStatus {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeReceiptObservationLifecycle {
         let variant: Int32 = try readInt(&buf)
         switch variant {
 
-        case 1: return .pending
+        case 1: return .observing
 
-        case 2: return .delivered
+        case 2: return .notFound
+
+        case 3: return .closed
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
-    public static func write(_ value: RuntimeReceiptStatus, into buf: inout [UInt8]) {
+    public static func write(_ value: RuntimeReceiptObservationLifecycle, into buf: inout [UInt8]) {
         switch value {
 
 
-        case .pending:
+        case .observing:
+            writeInt(&buf, Int32(1))
+
+
+        case .notFound:
+            writeInt(&buf, Int32(2))
+
+
+        case .closed:
+            writeInt(&buf, Int32(3))
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptObservationLifecycle_lift(_ buf: RustBuffer) throws -> RuntimeReceiptObservationLifecycle {
+    return try FfiConverterTypeRuntimeReceiptObservationLifecycle.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptObservationLifecycle_lower(_ value: RuntimeReceiptObservationLifecycle) -> RustBuffer {
+    return FfiConverterTypeRuntimeReceiptObservationLifecycle.lower(value)
+}
+
+
+extension RuntimeReceiptObservationLifecycle: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RuntimeReceiptOutcome {
+
+    case inProgress
+    case delivered
+    case partialDelivery
+    case exhausted
+    case ambiguous
+    case refused
+    case failed
+    case cancelled
+    case conflict
+    case unavailable
+}
+
+
+#if compiler(>=6)
+extension RuntimeReceiptOutcome: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeReceiptOutcome: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeReceiptOutcome
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeReceiptOutcome {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .inProgress
+
+        case 2: return .delivered
+
+        case 3: return .partialDelivery
+
+        case 4: return .exhausted
+
+        case 5: return .ambiguous
+
+        case 6: return .refused
+
+        case 7: return .failed
+
+        case 8: return .cancelled
+
+        case 9: return .conflict
+
+        case 10: return .unavailable
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeReceiptOutcome, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .inProgress:
             writeInt(&buf, Int32(1))
 
 
         case .delivered:
             writeInt(&buf, Int32(2))
 
+
+        case .partialDelivery:
+            writeInt(&buf, Int32(3))
+
+
+        case .exhausted:
+            writeInt(&buf, Int32(4))
+
+
+        case .ambiguous:
+            writeInt(&buf, Int32(5))
+
+
+        case .refused:
+            writeInt(&buf, Int32(6))
+
+
+        case .failed:
+            writeInt(&buf, Int32(7))
+
+
+        case .cancelled:
+            writeInt(&buf, Int32(8))
+
+
+        case .conflict:
+            writeInt(&buf, Int32(9))
+
+
+        case .unavailable:
+            writeInt(&buf, Int32(10))
+
         }
     }
 }
@@ -10348,19 +10766,101 @@ public struct FfiConverterTypeRuntimeReceiptStatus: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeRuntimeReceiptStatus_lift(_ buf: RustBuffer) throws -> RuntimeReceiptStatus {
-    return try FfiConverterTypeRuntimeReceiptStatus.lift(buf)
+public func FfiConverterTypeRuntimeReceiptOutcome_lift(_ buf: RustBuffer) throws -> RuntimeReceiptOutcome {
+    return try FfiConverterTypeRuntimeReceiptOutcome.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeRuntimeReceiptStatus_lower(_ value: RuntimeReceiptStatus) -> RustBuffer {
-    return FfiConverterTypeRuntimeReceiptStatus.lower(value)
+public func FfiConverterTypeRuntimeReceiptOutcome_lower(_ value: RuntimeReceiptOutcome) -> RustBuffer {
+    return FfiConverterTypeRuntimeReceiptOutcome.lower(value)
 }
 
 
-extension RuntimeReceiptStatus: Equatable, Hashable {}
+extension RuntimeReceiptOutcome: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * A receipt slot either carries one authoritative latest state or a typed
+ * terminal refusal. A revision-exhausted producer never wraps or saturates.
+ */
+
+public enum RuntimeReceiptsSlotProjection {
+
+    case snapshot(snapshot: RuntimeReceiptsSlotSnapshot
+    )
+    case refused(revision: UInt64, closed: Bool, refusal: RuntimeRefusal
+    )
+}
+
+
+#if compiler(>=6)
+extension RuntimeReceiptsSlotProjection: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeReceiptsSlotProjection: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeReceiptsSlotProjection
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeReceiptsSlotProjection {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .snapshot(snapshot: try FfiConverterTypeRuntimeReceiptsSlotSnapshot.read(from: &buf)
+        )
+
+        case 2: return .refused(revision: try FfiConverterUInt64.read(from: &buf), closed: try FfiConverterBool.read(from: &buf), refusal: try FfiConverterTypeRuntimeRefusal.read(from: &buf)
+        )
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeReceiptsSlotProjection, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case let .snapshot(snapshot):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeRuntimeReceiptsSlotSnapshot.write(snapshot, into: &buf)
+
+
+        case let .refused(revision,closed,refusal):
+            writeInt(&buf, Int32(2))
+            FfiConverterUInt64.write(revision, into: &buf)
+            FfiConverterBool.write(closed, into: &buf)
+            FfiConverterTypeRuntimeRefusal.write(refusal, into: &buf)
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptsSlotProjection_lift(_ buf: RustBuffer) throws -> RuntimeReceiptsSlotProjection {
+    return try FfiConverterTypeRuntimeReceiptsSlotProjection.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeReceiptsSlotProjection_lower(_ value: RuntimeReceiptsSlotProjection) -> RustBuffer {
+    return FfiConverterTypeRuntimeReceiptsSlotProjection.lower(value)
+}
+
+
+extension RuntimeReceiptsSlotProjection: Equatable, Hashable {}
 
 
 
@@ -11794,6 +12294,122 @@ public func FfiConverterCallbackInterfaceRuntimeObserver_lower(_ v: RuntimeObser
 
 
 
+public protocol RuntimeReceiptsSlotObserver: AnyObject, Sendable {
+
+    func update(projection: RuntimeReceiptsSlotProjection)
+
+}
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceRuntimeReceiptsSlotObserver {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // This creates 1-element array, since this seems to be the only way to construct a const
+    // pointer that we can pass to the Rust code.
+    static let vtable: [UniffiVTableCallbackInterfaceRuntimeReceiptsSlotObserver] = [UniffiVTableCallbackInterfaceRuntimeReceiptsSlotObserver(
+        update: { (
+            uniffiHandle: UInt64,
+            projection: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceRuntimeReceiptsSlotObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.update(
+                     projection: try FfiConverterTypeRuntimeReceiptsSlotProjection_lift(projection)
+                )
+            }
+
+
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            let result = try? FfiConverterCallbackInterfaceRuntimeReceiptsSlotObserver.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface RuntimeReceiptsSlotObserver: handle missing in uniffiFree")
+            }
+        }
+    )]
+}
+
+private func uniffiCallbackInitRuntimeReceiptsSlotObserver() {
+    uniffi_nmp_native_runtime_ffi_fn_init_callback_vtable_runtimereceiptsslotobserver(UniffiCallbackInterfaceRuntimeReceiptsSlotObserver.vtable)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfaceRuntimeReceiptsSlotObserver {
+    fileprivate static let handleMap = UniffiHandleMap<RuntimeReceiptsSlotObserver>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfaceRuntimeReceiptsSlotObserver : FfiConverter {
+    typealias SwiftType = RuntimeReceiptsSlotObserver
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceRuntimeReceiptsSlotObserver_lift(_ handle: UInt64) throws -> RuntimeReceiptsSlotObserver {
+    return try FfiConverterCallbackInterfaceRuntimeReceiptsSlotObserver.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceRuntimeReceiptsSlotObserver_lower(_ v: RuntimeReceiptsSlotObserver) -> UInt64 {
+    return FfiConverterCallbackInterfaceRuntimeReceiptsSlotObserver.lower(v)
+}
+
+
+
+
 public protocol RuntimeRelayDiagnosticsObserver: AnyObject, Sendable {
 
     func update(snapshot: RuntimeRelayDiagnosticsSnapshot)
@@ -11974,6 +12590,30 @@ fileprivate struct FfiConverterOptionTypeRuntimeObservation: FfiConverterRustBuf
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeRuntimeObservation.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeReceiptsSlotObservation: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeReceiptsSlotObservation?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeReceiptsSlotObservation.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeReceiptsSlotObservation.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -12382,6 +13022,30 @@ fileprivate struct FfiConverterOptionTypeRuntimeGrantDecision: FfiConverterRustB
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeRuntimeGrantDecision.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeReceiptsSlotProjection: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeReceiptsSlotProjection?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeReceiptsSlotProjection.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeReceiptsSlotProjection.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -13189,6 +13853,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_observe() != 59858) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_observe_receipts() != 28298) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimecontroller_observe_relay_diagnostics() != 46414) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -13264,6 +13931,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimeobservation_stop() != 63671) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimereceiptsslotobservation_stop() != 13827) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimerelaydiagnosticsobservation_stop() != 42094) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -13327,6 +13997,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimeobserver_update() != 4341) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimereceiptsslotobserver_update() != 25897) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_native_runtime_ffi_checksum_method_runtimerelaydiagnosticsobserver_update() != 20791) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -13337,6 +14010,7 @@ private let initializationResult: InitializationResult = {
     uniffiCallbackInitNativeIntentActivationExecutor()
     uniffiCallbackInitNativeSettingsExecutor()
     uniffiCallbackInitRuntimeObserver()
+    uniffiCallbackInitRuntimeReceiptsSlotObserver()
     uniffiCallbackInitRuntimeRelayDiagnosticsObserver()
     return InitializationResult.ok
 }()

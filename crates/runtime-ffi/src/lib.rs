@@ -16,6 +16,7 @@ mod permission_types;
 mod profile_preferences;
 mod projection;
 mod receipt_projection;
+mod slots;
 mod snapshot_integrity;
 mod snapshot_types;
 mod support;
@@ -64,6 +65,10 @@ pub use profile_preferences::{
     RuntimeStorageSnapshot,
 };
 pub use receipt_projection::project_receipt;
+pub use slots::{
+    RuntimeReceiptsSlotObservation, RuntimeReceiptsSlotObservationStart,
+    RuntimeReceiptsSlotObserver, RuntimeReceiptsSlotProjection, RuntimeReceiptsSlotSnapshot,
+};
 pub use snapshot_types::{
     ObservationStart, RuntimeBindingSnapshot, RuntimeErrorSnapshot, RuntimeEvent,
     RuntimeExactBuildCoordinate, RuntimeInstalledBuildAvailability, RuntimeInstalledBuildSnapshot,

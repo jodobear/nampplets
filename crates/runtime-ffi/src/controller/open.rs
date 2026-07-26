@@ -46,6 +46,7 @@ use crate::{
     },
     profile_preferences::{project_profile_preferences, validate_configured_profile_preferences},
     projection::theme_from_appearance,
+    slots::SlotHub,
 };
 
 #[uniffi::export]
@@ -360,6 +361,8 @@ pub(super) fn open_runtime_controller(
     })?;
     intent_dispatcher.bind(&app, &intent_provider);
     let (signal, _) = watch::channel(0_u64);
+    let observers = Arc::new(AtomicUsize::new(0));
+    let slot_hub = Arc::new(SlotHub::new(Arc::clone(&observers)));
     let controller = Arc::new(RuntimeController {
         app,
         data_plane,
@@ -386,7 +389,8 @@ pub(super) fn open_runtime_controller(
         projection_fault_latch: Mutex::new(Default::default()),
         maximum_boundary_events: config.maximum_boundary_events,
         signal,
-        observers: Arc::new(AtomicUsize::new(0)),
+        observers,
+        slot_hub,
         maximum_observers: config.maximum_observers,
         profile_preferences: Mutex::new(projected_profile_preferences),
         nmp_store_path,
