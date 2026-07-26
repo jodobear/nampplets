@@ -1,6 +1,11 @@
 import Foundation
 import Observation
 
+enum WorkbenchAccountIdentityUse: Hashable {
+    case signing
+    case readOnly
+}
+
 @MainActor
 @Observable
 final class WorkbenchAccountSheetModel {
@@ -9,7 +14,16 @@ final class WorkbenchAccountSheetModel {
     private(set) var snapshot: WorkbenchAccountSnapshot
     private(set) var errorMessage: String?
     private(set) var isWorking = false
-    var identity = ""
+    var identity = "" {
+        didSet {
+            guard identity != oldValue else {
+                return
+            }
+            ambiguousIdentityUse = nil
+            errorMessage = nil
+        }
+    }
+    var ambiguousIdentityUse: WorkbenchAccountIdentityUse?
 
     init(manager: any WorkbenchAccountManaging) {
         self.manager = manager
@@ -21,13 +35,15 @@ final class WorkbenchAccountSheetModel {
         errorMessage = nil
     }
 
-    var identityLooksSecret: Bool {
-        Self.identityKind(for: identity) == .signingKey
+    var requiresIdentityUseChoice: Bool {
+        Self.identityKind(for: identity) == .ambiguousHex
     }
 
     /// Maps one user intent onto the runtime's separate registration and
-    /// selection actions. Only an nsec-shaped value is treated as signing
-    /// material; every public identity shape takes the read-only path.
+    /// selection actions. Prefix-bearing identities choose an unambiguous
+    /// path. A bare 64-character hex value can be either a secret or a public
+    /// key, so it never reaches either registration path without an explicit
+    /// user choice.
     ///
     /// The field is cleared before the first await so secret-bearing input
     /// cannot remain in observable presentation state during registration.
@@ -35,29 +51,48 @@ final class WorkbenchAccountSheetModel {
         let submittedIdentity = identity.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
-        identity.removeAll(keepingCapacity: false)
         guard !submittedIdentity.isEmpty else {
             errorMessage = "Enter your account key or public profile."
             return false
         }
 
-        switch Self.identityKind(for: submittedIdentity) {
-        case .signingKey:
-            return await registerAndSelect(
-                registrationFailure:
-                    "That account key wasn’t accepted. Check that you copied the complete key."
-            ) {
-                await manager.register(secret: submittedIdentity)
-            }
-        case .publicIdentity:
-            return await registerAndSelect(
-                registrationFailure:
-                    "That profile couldn’t be added. Check the address and try again."
-            ) {
-                await manager.registerReadOnly(
-                    publicIdentity: submittedIdentity
-                )
-            }
+        let identityKind = Self.identityKind(for: submittedIdentity)
+        let selectedUse = ambiguousIdentityUse
+        if identityKind == .ambiguousHex, selectedUse == nil {
+            errorMessage = "Choose how you use this key."
+            return false
+        }
+
+        identity.removeAll(keepingCapacity: false)
+        ambiguousIdentityUse = nil
+
+        switch (identityKind, selectedUse) {
+        case (.signingKey, _):
+            return await registerSigning(submittedIdentity)
+        case (.ambiguousHex, .some(.signing)):
+            return await registerSigning(submittedIdentity)
+        case (.publicIdentity, _), (.ambiguousHex, .some(.readOnly)):
+            return await registerReadOnly(submittedIdentity)
+        case (.ambiguousHex, .none):
+            preconditionFailure("Ambiguous account input requires a choice")
+        }
+    }
+
+    private func registerSigning(_ identity: String) async -> Bool {
+        await registerAndSelect(
+            registrationFailure:
+                "That account key wasn’t accepted. Check that you copied the complete key."
+        ) {
+            await manager.register(secret: identity)
+        }
+    }
+
+    private func registerReadOnly(_ identity: String) async -> Bool {
+        await registerAndSelect(
+            registrationFailure:
+                "That profile couldn’t be added. Check the address and try again."
+        ) {
+            await manager.registerReadOnly(publicIdentity: identity)
         }
     }
 
@@ -92,20 +127,40 @@ final class WorkbenchAccountSheetModel {
 
     func clearTransientState() {
         identity.removeAll(keepingCapacity: false)
+        ambiguousIdentityUse = nil
         errorMessage = nil
     }
 
     private enum IdentityKind {
         case signingKey
         case publicIdentity
+        case ambiguousHex
     }
 
     private static func identityKind(for value: String) -> IdentityKind {
-        value.trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .hasPrefix("nsec1")
+        let normalized = value.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        if isBareHex(normalized, exactLength: 64) {
+            return .ambiguousHex
+        }
+        return normalized.lowercased().hasPrefix("nsec1")
             ? .signingKey
             : .publicIdentity
+    }
+
+    private static func isBareHex(
+        _ value: String,
+        exactLength: Int? = nil
+    ) -> Bool {
+        if let exactLength, value.utf8.count != exactLength {
+            return false
+        }
+        return !value.isEmpty && value.utf8.allSatisfy {
+            (48 ... 57).contains($0)
+                || (65 ... 70).contains($0)
+                || (97 ... 102).contains($0)
+        }
     }
 
     private func registerAndSelect(

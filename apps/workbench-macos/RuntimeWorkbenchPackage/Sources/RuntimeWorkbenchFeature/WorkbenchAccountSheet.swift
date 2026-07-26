@@ -44,6 +44,7 @@ private struct WorkbenchAddAccountView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var model: WorkbenchAccountSheetModel
     @FocusState private var inputFocused: Bool
+    @State private var revealsIdentity = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -121,43 +122,90 @@ private struct WorkbenchAddAccountView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+
+            if model.requiresIdentityUseChoice {
+                identityUseChoice
+            }
         }
+    }
+
+    private var identityUseChoice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("How do you use this key?")
+                .font(.callout.weight(.medium))
+            Text(
+                "Is this a key you sign with, or one you only want to watch?"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Picker(
+                "How do you use this key?",
+                selection: $model.ambiguousIdentityUse
+            ) {
+                Text("Sign and publish")
+                    .tag(WorkbenchAccountIdentityUse?.some(.signing))
+                Text("Browse only")
+                    .tag(WorkbenchAccountIdentityUse?.some(.readOnly))
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+        }
+        .padding(.top, 4)
     }
 
     @ViewBuilder
     private var inputField: some View {
-        Group {
-            if model.identityLooksSecret {
-                SecureField(
-                    "Account key or profile address",
-                    text: $model.identity
-                )
-                .textContentType(.password)
-                .privacySensitive()
-            } else {
-                TextField(
-                    "Account key or profile address",
-                    text: $model.identity
-                )
-                .textContentType(.username)
+        HStack(spacing: 8) {
+            Group {
+                if revealsIdentity {
+                    TextField(
+                        "Account key or profile address",
+                        text: $model.identity
+                    )
+                    .textContentType(.username)
+                } else {
+                    SecureField(
+                        "Account key or profile address",
+                        text: $model.identity
+                    )
+                    .textContentType(.password)
+                }
             }
+            .focused($inputFocused)
+            .onSubmit(continueFromInput)
+            .accessibilityIdentifier("account-identity")
+            .accessibilityLabel("Account")
+            .accessibilityHint(
+                "Enter an account key to sign in or a public profile to browse."
+            )
+
+            Button {
+                revealsIdentity.toggle()
+                inputFocused = true
+            } label: {
+                Image(systemName: revealsIdentity ? "eye.slash" : "eye")
+            }
+            .buttonStyle(.borderless)
+            .help(revealsIdentity ? "Hide account" : "Show account")
+            .accessibilityLabel(
+                revealsIdentity ? "Hide account" : "Show account"
+            )
         }
-        .focused($inputFocused)
-        .onSubmit(continueFromInput)
-        .accessibilityIdentifier("account-identity")
-        .accessibilityLabel("Account")
-        .accessibilityHint(
-            "Enter an account key to sign in or a public profile to browse."
-        )
+        .privacySensitive()
     }
 
     private var canContinue: Bool {
         guard !model.isWorking else {
             return false
         }
-        return !model.identity.trimmingCharacters(
+        let hasIdentity = !model.identity.trimmingCharacters(
             in: .whitespacesAndNewlines
         ).isEmpty
+        let hasRequiredChoice = !model.requiresIdentityUseChoice
+            || model.ambiguousIdentityUse != nil
+        return hasIdentity && hasRequiredChoice
     }
 
     private func continueFromInput() {

@@ -24,7 +24,7 @@ extension RuntimeWorkbenchUITests {
         )
         addSigner.click()
 
-        let identityField = app.textFields["account-identity"]
+        let identityField = app.secureTextFields["account-identity"]
         XCTAssertTrue(identityField.waitForExistence(timeout: 10))
         identityField.click()
         identityField.typeText(Self.uiTestSigningSecret)
@@ -34,6 +34,17 @@ extension RuntimeWorkbenchUITests {
             continueButton.waitForExistence(timeout: 10),
             "The account sheet must offer one Continue control"
         )
+        XCTAssertFalse(
+            continueButton.isEnabled,
+            "Bare hex must not choose a secret or public path by default"
+        )
+
+        let signingUse = app.buttons["Sign and publish"]
+        XCTAssertTrue(
+            signingUse.waitForExistence(timeout: 10),
+            "Bare hex must ask how the account will be used"
+        )
+        signingUse.click()
         XCTAssertTrue(continueButton.isEnabled)
         continueButton.click()
         XCTAssertTrue(

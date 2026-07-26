@@ -83,6 +83,53 @@ import Testing
 }
 
 @MainActor
+@Test func bareHexRequiresAnExplicitUseBeforeRegistration() async {
+    let manager = RecordingAccountManager()
+    let model = WorkbenchAccountSheetModel(manager: manager)
+    let ambiguousKey = String(repeating: "a", count: 64)
+
+    model.identity = ambiguousKey
+
+    #expect(model.requiresIdentityUseChoice)
+    #expect(model.ambiguousIdentityUse == nil)
+    let succeeded = await model.continueWithIdentity()
+    #expect(!succeeded)
+    #expect(model.identity == ambiguousKey)
+    #expect(manager.actions.isEmpty)
+}
+
+@MainActor
+@Test func bareHexCanBeUsedForSigningAfterExplicitChoice() async throws {
+    let manager = RecordingAccountManager()
+    let model = WorkbenchAccountSheetModel(manager: manager)
+
+    model.identity = String(repeating: "a", count: 64)
+    model.ambiguousIdentityUse = .signing
+    let succeeded = await model.continueWithIdentity()
+
+    #expect(succeeded)
+    #expect(model.identity.isEmpty)
+    let handle = try #require(model.snapshot.activeAccount?.handle)
+    #expect(manager.actions == [.register, .activate(handle)])
+}
+
+@MainActor
+@Test func bareHexCanBeReadOnlyAfterExplicitChoice() async throws {
+    let manager = RecordingAccountManager()
+    let model = WorkbenchAccountSheetModel(manager: manager)
+
+    model.identity = String(repeating: "a", count: 64)
+    model.ambiguousIdentityUse = .readOnly
+    let succeeded = await model.continueWithIdentity()
+
+    #expect(succeeded)
+    #expect(model.identity.isEmpty)
+    #expect(model.snapshot.activeAccount?.connectionKind == .readOnly)
+    let handle = try #require(model.snapshot.activeAccount?.handle)
+    #expect(manager.actions == [.registerReadOnly, .activate(handle)])
+}
+
+@MainActor
 @Test func registrationErrorCannotEchoSubmittedSecret() async {
     let manager = EchoingFailureAccountManager()
     let model = WorkbenchAccountSheetModel(manager: manager)
@@ -128,14 +175,18 @@ private final class RecordingAccountManager: WorkbenchAccountManaging {
     }
 
     func register(secret: String) async {
-        guard secret == "nsec1test" else { return }
+        guard secret == "nsec1test"
+            || secret == String(repeating: "a", count: 64)
+        else { return }
         let account = WorkbenchStoredAccount.fixture(handle: "registered")
         accounts.append(account)
         actions.append(.register)
     }
 
     func registerReadOnly(publicIdentity: String) async {
-        guard publicIdentity == "npub1test" else { return }
+        guard publicIdentity == "npub1test"
+            || publicIdentity == String(repeating: "a", count: 64)
+        else { return }
         let account = WorkbenchStoredAccount(
             handle: WorkbenchAccountHandle(
                 opaqueValue: "registered-read-only"
