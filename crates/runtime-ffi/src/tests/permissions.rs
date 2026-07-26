@@ -1,6 +1,85 @@
 use super::*;
 
 #[test]
+fn no_published_build_receives_a_runtime_pinned_capability_profile() {
+    let temp = TempDir::new().unwrap();
+    let controller = controller(&temp);
+    let artifact = controller
+        .verify_artifact(
+            EVENT.to_vec(),
+            ArtifactCoordinate::Named {
+                author: AUTHOR.to_owned(),
+                d_tag: D_TAG.to_owned(),
+            },
+        )
+        .artifact
+        .expect("published fixture verifies");
+    assert!(
+        artifact.requires().is_empty(),
+        "the immutable manifest declares no signed `requires` tags"
+    );
+
+    controller.install(Arc::clone(&artifact));
+    let review = controller
+        .permission_review(exact_coordinate(&artifact))
+        .review
+        .expect("the installed exact build has a permission review");
+    // This exact build is the one the runtime used to special-case by
+    // author/d-tag/aggregate into a pinned identity/inc/outbox-required,
+    // link/resource/theme-optional profile. That pin is gone. The inventory
+    // now comes only from the fixture's own `napplet-requires` meta, inside
+    // bytes the signed path digest and aggregate already pin -- so it is
+    // every declared domain, all required, and nothing the build did not ask
+    // for.
+    assert_eq!(
+        review
+            .capabilities
+            .iter()
+            .map(|capability| (capability.domain.as_str(), capability.requirement))
+            .collect::<Vec<_>>(),
+        GOOD_MORNING_DECLARED_DOMAINS
+            .iter()
+            .map(|domain| (*domain, RuntimePermissionRequirement::Required))
+            .collect::<Vec<_>>(),
+        "the inventory must be the artifact's own declaration, nothing else"
+    );
+    assert!(
+        !review.launch_permitted,
+        "a declared required domain is still enforced before execution"
+    );
+
+    controller.launch(Arc::clone(&artifact), RuntimeExecutionProfile::Legacy);
+    assert!(
+        controller.snapshot_value().sessions.is_empty(),
+        "declared required capabilities are enforced before execution"
+    );
+
+    // Granting exactly what it declared is what lets it run -- its identity
+    // never was and never becomes a shortcut around that.
+    for domain in GOOD_MORNING_DECLARED_DOMAINS {
+        controller.set_grant(
+            Arc::clone(&artifact),
+            domain.to_owned(),
+            RuntimeSensitivity::Sensitive,
+            RuntimeGrantDecision::AllowExactBuild,
+        );
+    }
+    controller.launch(Arc::clone(&artifact), RuntimeExecutionProfile::Legacy);
+    let snapshot = controller.snapshot_value();
+    assert_eq!(snapshot.sessions.len(), 1);
+    // `link` and `resource` have no registered provider in this runtime at
+    // all, so `RuntimeApp::launch` partitions them out and records a
+    // `required-domain-unavailable` activity rather than injecting them. The
+    // session comes up with exactly what the runtime can actually deliver --
+    // the same four domains the removed pin produced.
+    assert_eq!(
+        snapshot.sessions[0].domains,
+        ["identity", "inc", "outbox", "shell"],
+        "only domains with a registered provider may be injected"
+    );
+}
+
+#[test]
 fn permission_review_and_atomic_batch_are_exact_typed_and_restart_safe() {
     let temp = TempDir::new().unwrap();
     let runtime = controller(&temp);
@@ -191,74 +270,4 @@ fn outbox_grant_survives_default_profile_restart() {
         serde_json::json!(["identity", "inc", "outbox", "shell"]),
         "the trusted shell must receive the same Rust-negotiated domain set"
     );
-}
-
-#[test]
-fn demo_profile_repairs_a_persisted_denied_outbox_grant() {
-    let temp = TempDir::new().unwrap();
-    let runtime = controller(&temp);
-    let artifact = runtime
-        .verify_artifact(
-            EVENT.to_vec(),
-            ArtifactCoordinate::Named {
-                author: AUTHOR.to_owned(),
-                d_tag: "good-morning".to_owned(),
-            },
-        )
-        .artifact
-        .expect("published fixture verifies");
-    runtime.install(Arc::clone(&artifact));
-    let coordinate = exact_coordinate(&artifact);
-    let review = runtime
-        .permission_review(coordinate.clone())
-        .review
-        .expect("installed Good Morning has a permission review");
-    let denied = runtime.apply_permission_decisions(RuntimePermissionDecisionBatch {
-        coordinate: coordinate.clone(),
-        decisions: review
-            .capabilities
-            .iter()
-            .map(|capability| RuntimePermissionDecisionSelection {
-                domain: capability.domain.clone(),
-                decision: RuntimeGrantDecision::Denied,
-            })
-            .collect(),
-    });
-    assert!(denied.applied);
-    assert!(!denied.review.unwrap().launch_permitted);
-    runtime.close();
-    drop(runtime);
-
-    let demo = RuntimeController::open(
-        RuntimeConfig {
-            runtime_store_path: temp.path().join("runtime.sqlite3").display().to_string(),
-            nmp_store_path: None,
-            artifact_cache_path: temp.path().join("artifacts").display().to_string(),
-            permission_mode: RuntimePermissionMode::DemoPinnedGoodMorning,
-            ..RuntimeConfig::default()
-        },
-        Box::new(FixtureSource(BTreeMap::from([(
-            DIGEST.to_owned(),
-            INDEX.to_vec(),
-        )]))),
-    )
-    .unwrap();
-    let repaired = demo
-        .permission_review(coordinate)
-        .review
-        .expect("demo startup restores the installed exact build review");
-    for domain in ["identity", "inc", "outbox"] {
-        let capability = repaired
-            .capabilities
-            .iter()
-            .find(|capability| capability.domain == domain)
-            .unwrap_or_else(|| panic!("missing required {domain} capability"));
-        assert_eq!(
-            capability.existing_decision,
-            RuntimePermissionExistingDecision::AllowExactBuild,
-            "demo startup must repair persisted denial for {domain}"
-        );
-    }
-    assert!(repaired.launch_permitted);
-    demo.close();
 }

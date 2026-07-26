@@ -260,7 +260,11 @@ fn install_and_launch(
         .artifact
         .unwrap();
     controller.install(Arc::clone(&artifact));
-    for domain in ["identity", "inc", "outbox"]
+    // Every domain the fixture's own `napplet-requires` meta declares is
+    // required, so all of them must be granted before it will launch. The
+    // runtime no longer softens any of them to optional on the strength of
+    // this build's identity.
+    for domain in GOOD_MORNING_DECLARED_DOMAINS
         .into_iter()
         .chain(domains.iter().copied())
     {

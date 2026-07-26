@@ -135,7 +135,7 @@ fn installed_artifact_reacquisition_reuses_the_live_exact_handle() {
     );
     assert_eq!(confirmation.manifest_author, AUTHOR);
     assert_eq!(confirmation.d_tag.as_deref(), Some("good-morning"));
-    assert_eq!(confirmation.aggregate_hash, GOOD_MORNING_AGGREGATE_HASH);
+    assert_eq!(confirmation.aggregate_hash, AGGREGATE_HASH);
     assert_eq!(
         reopened
             .artifact
@@ -156,7 +156,7 @@ fn persisted_install_reopens_offline_from_the_sealed_cache_after_restart() {
             EVENT.to_vec(),
             ArtifactCoordinate::Named {
                 author: AUTHOR.to_owned(),
-                d_tag: GOOD_MORNING_D_TAG.to_owned(),
+                d_tag: D_TAG.to_owned(),
             },
         )
         .artifact
@@ -175,8 +175,8 @@ fn persisted_install_reopens_offline_from_the_sealed_cache_after_restart() {
     assert!(result.failure.is_none());
     let confirmation = result.confirmation.expect("exact confirmation");
     assert_eq!(confirmation.manifest_author, AUTHOR);
-    assert_eq!(confirmation.d_tag.as_deref(), Some(GOOD_MORNING_D_TAG));
-    assert_eq!(confirmation.aggregate_hash, GOOD_MORNING_AGGREGATE_HASH);
+    assert_eq!(confirmation.d_tag.as_deref(), Some(D_TAG));
+    assert_eq!(confirmation.aggregate_hash, AGGREGATE_HASH);
     assert_eq!(
         result
             .artifact
@@ -204,7 +204,7 @@ fn reacquire_refuses_a_legacy_install_with_no_retained_signed_event() {
             EVENT.to_vec(),
             ArtifactCoordinate::Named {
                 author: AUTHOR.to_owned(),
-                d_tag: GOOD_MORNING_D_TAG.to_owned(),
+                d_tag: D_TAG.to_owned(),
             },
         )
         .artifact

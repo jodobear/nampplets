@@ -2,13 +2,6 @@
 
 use std::{sync::Arc, time::Duration};
 
-use nmp::WindowLoad;
-use nmp_native_artifact::ManifestCoordinate;
-use nmp_native_catalog_resolver::{CoordinateLookupFact, CoordinateLookupState, ResolveError};
-use nmp_native_nmp_adapter::catalog::{
-    CatalogAccessContext, CatalogBrowseFrame, CatalogManifestCandidate, CatalogShortfall,
-    CatalogSourceEvidence, CatalogSourceStatus, ManifestCatalogError,
-};
 use super::types::{
     RuntimeCatalogCapability, RuntimeCatalogEntry, RuntimeCatalogError, RuntimeCatalogFailure,
     RuntimeCatalogLookupState, RuntimeCatalogPage, RuntimeCatalogProvenance,
@@ -16,6 +9,13 @@ use super::types::{
     RuntimeCatalogSourceState, RuntimeCatalogWindowState,
 };
 use crate::RuntimePermissionRequirement;
+use nmp::WindowLoad;
+use nmp_native_artifact::ManifestCoordinate;
+use nmp_native_catalog_resolver::{CoordinateLookupFact, CoordinateLookupState, ResolveError};
+use nmp_native_nmp_adapter::catalog::{
+    CatalogAccessContext, CatalogBrowseFrame, CatalogManifestCandidate, CatalogShortfall,
+    CatalogSourceEvidence, CatalogSourceStatus, ManifestCatalogError,
+};
 
 pub(super) fn candidate_coordinate(
     candidate: &CatalogManifestCandidate,
