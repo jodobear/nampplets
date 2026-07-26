@@ -23,24 +23,20 @@ import Testing
 }
 
 @MainActor
-@Test func readOnlyRegistrationAndActivationRemainSeparateActions()
+@Test func readOnlyContinueRegistersAndSelectsWithOneIntent()
     async throws
 {
     let manager = RecordingAccountManager()
     let model = WorkbenchAccountSheetModel(manager: manager)
 
     model.publicIdentity = "npub1test"
-    await model.registerReadOnly()
+    let succeeded = await model.continueReadOnly()
 
+    #expect(succeeded)
     #expect(model.publicIdentity.isEmpty)
     #expect(model.snapshot.accounts.count == 1)
     #expect(model.snapshot.accounts.first?.connectionKind == .readOnly)
-    #expect(model.snapshot.activeAccount == nil)
-    #expect(manager.actions == [.registerReadOnly])
-
     let handle = try #require(model.snapshot.accounts.first?.handle)
-    await model.activate(handle)
-
     #expect(model.snapshot.activeAccount?.handle == handle)
     #expect(manager.actions == [.registerReadOnly, .activate(handle)])
 }
@@ -71,21 +67,17 @@ import Testing
 }
 
 @MainActor
-@Test func registrationAndActivationRemainExplicitSeparateActions() async throws {
+@Test func secretContinueTrimsRegistersAndSelectsWithOneIntent() async throws {
     let manager = RecordingAccountManager()
     let model = WorkbenchAccountSheetModel(manager: manager)
 
-    model.secret = "test-secret"
-    await model.register()
+    model.secret = " \n test-secret \t"
+    let succeeded = await model.continueWithSecret()
 
+    #expect(succeeded)
     #expect(model.secret.isEmpty)
     #expect(model.snapshot.accounts.count == 1)
-    #expect(model.snapshot.activeAccount == nil)
-    #expect(manager.actions == [.register])
-
     let handle = try #require(model.snapshot.accounts.first?.handle)
-    await model.activate(handle)
-
     #expect(model.snapshot.activeAccount?.handle == handle)
     #expect(manager.actions == [.register, .activate(handle)])
 }
@@ -97,11 +89,12 @@ import Testing
     let submittedSecret = "secret-that-must-not-render"
 
     model.secret = submittedSecret
-    await model.register()
+    let succeeded = await model.continueWithSecret()
 
+    #expect(!succeeded)
     #expect(model.secret.isEmpty)
     #expect(model.errorMessage?.contains(submittedSecret) == false)
-    #expect(model.errorMessage?.contains("••••") == true)
+    #expect(model.errorMessage?.contains("wasn’t accepted") == true)
 }
 
 private extension WorkbenchStoredAccount {
