@@ -73,6 +73,6 @@ ready
 
 ## Hosted Artifacts
 
-- Plan page: Generated after publishing.
+- Plan page: https://pablof7z.github.io/nampplets/plans/issue-159-wkwebview-trust-boundary/
 
 - TTS audio: https://blossom.primal.net/d1d0ce4e08b264ff40e159f8fbfb6de1ff427fbb49032ca30c74fbd06ab5851e.mp3
