@@ -11,8 +11,8 @@ public final class CatalogViewModel {
     public private(set) var evidence: CatalogBrowseEvidence?
     public private(set) var review: CatalogInstallReview?
     public private(set) var installedBuild: CatalogInstalledBuild?
-    private(set) var browseIssue: CatalogIssueNotice.Presentation?
-    private(set) var operationIssue: CatalogIssueNotice.Presentation?
+    var browseIssue: CatalogIssueNotice.Presentation?
+    var operationIssue: CatalogIssueNotice.Presentation?
     var presentedIssue: CatalogIssueNotice.Presentation? {
         operationIssue ?? browseIssue
     }
@@ -20,8 +20,12 @@ public final class CatalogViewModel {
         operationIssue?.intent == .installBlocked ? operationIssue : nil
     }
     public var issue: CatalogIssue? { presentedIssue?.issue }
-    public private(set) var isResolvingReview = false
-    public private(set) var isInstalling = false
+    public internal(set) var isResolvingReview = false
+    public internal(set) var isInstalling = false
+    public internal(set) var feedGenerationExhaustion:
+        CatalogRequestGenerationExhaustion?
+    public internal(set) var operationGenerationExhaustion:
+        CatalogRequestGenerationExhaustion?
 
     /// Live profiles expose a connecting replacement before the first relay
     /// frame arrives, so the UI never turns a permanent subscription into an
@@ -43,11 +47,11 @@ public final class CatalogViewModel {
         )
     }
 
-    private let client: any CatalogClient
+    let client: any CatalogClient
     private let onInstalled: @MainActor (CatalogInstalledBuild) -> Void
-    private var operationGeneration: UInt = 0
-    private var feedGeneration: UInt = 0
-    private var feedObservation: CatalogFeedObservation?
+    var operationGeneration: CatalogRequestGenerationCounter
+    var feedGeneration: CatalogRequestGenerationCounter
+    var feedObservation: CatalogFeedObservation?
     private var started = false
 
     public init(
@@ -58,6 +62,30 @@ public final class CatalogViewModel {
     ) {
         self.client = client
         self.onInstalled = onInstalled
+        operationGeneration = CatalogRequestGenerationCounter(
+            lane: .transientOperation
+        )
+        feedGeneration = CatalogRequestGenerationCounter(lane: .feed)
+    }
+
+    init(
+        client: any CatalogClient,
+        feedGenerationStart: UInt,
+        operationGenerationStart: UInt,
+        onInstalled: @escaping @MainActor (CatalogInstalledBuild) -> Void = {
+            _ in
+        }
+    ) {
+        self.client = client
+        self.onInstalled = onInstalled
+        operationGeneration = CatalogRequestGenerationCounter(
+            lane: .transientOperation,
+            current: operationGenerationStart
+        )
+        feedGeneration = CatalogRequestGenerationCounter(
+            lane: .feed,
+            current: feedGenerationStart
+        )
     }
 
     /// Attaches to the profile-owned permanent feed and renders its latest
@@ -94,7 +122,9 @@ public final class CatalogViewModel {
     /// Stops only this view's bounded native fanout. The profile-owned NMP
     /// subscription remains open until the profile closes.
     public func stop() {
-        feedGeneration &+= 1
+        if feedGeneration.issue() == nil {
+            recordFeedGenerationExhaustion()
+        }
         feedObservation?.cancel()
         feedObservation = nil
         cancelTransientWork()
@@ -118,10 +148,12 @@ public final class CatalogViewModel {
             return
         }
 
-        feedGeneration &+= 1
-        let generation = feedGeneration
+        guard let generation = feedGeneration.issue() else {
+            recordFeedGenerationExhaustion()
+            return
+        }
         let response = await client.search(request)
-        guard generation == feedGeneration else {
+        guard feedGeneration.isCurrent(generation) else {
             return
         }
 
@@ -178,13 +210,15 @@ public final class CatalogViewModel {
             return nil
         }
 
-        let generation = operationGeneration
+        guard let generation = beginTransientOperation() else {
+            return nil
+        }
         isInstalling = true
         operationIssue = nil
         let response = await client.confirmExactVerifiedInstall(
             CatalogInstallConfirmation(review: review)
         )
-        guard generation == operationGeneration else {
+        guard operationGeneration.isCurrent(generation) else {
             return nil
         }
         isInstalling = false
@@ -211,11 +245,13 @@ public final class CatalogViewModel {
         if cancelCurrentWork {
             cancelTransientWork()
         }
-        let generation = operationGeneration
+        guard let generation = beginTransientOperation() else {
+            return
+        }
         isResolvingReview = true
         operationIssue = nil
         let response = await client.resolveReview(target)
-        guard generation == operationGeneration else {
+        guard operationGeneration.isCurrent(generation) else {
             return
         }
         isResolvingReview = false
@@ -233,7 +269,9 @@ public final class CatalogViewModel {
     }
 
     private func cancelTransientWork() {
-        operationGeneration &+= 1
+        if operationGeneration.issue() == nil {
+            recordOperationGenerationExhaustion()
+        }
         isResolvingReview = false
         isInstalling = false
         client.cancelPendingCatalogWork()

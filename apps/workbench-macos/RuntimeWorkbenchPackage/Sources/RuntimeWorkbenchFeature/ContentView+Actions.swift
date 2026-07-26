@@ -25,33 +25,7 @@ extension ContentView {
         if await restorePersistedCanvasWindows() {
             return
         }
-        guard [
-            "good-morning-permission-launch",
-            "full-window-layout-transition",
-        ].contains(
-            ProcessInfo.processInfo.environment[
-                "NMP_WORKBENCH_UI_TEST_SCENARIO"
-            ]
-        ) else {
-            activity = .readyToAdd
-            return
-        }
-        do {
-            let fixture = try GoodMorningFixture.load()
-            let installed = try await Task.detached {
-                try fixture.install(profile: profile)
-            }.value
-            try prepareInstalledArtifact(
-                installed,
-                identity: WorkbenchExactBuildIdentity(
-                    manifestAuthor: GoodMorningFixture.author,
-                    dTag: GoodMorningFixture.dTag,
-                    aggregateHash: GoodMorningFixture.aggregateHash
-                )
-            )
-        } catch {
-            activity = .failed(detail: error.localizedDescription)
-        }
+        activity = .readyToAdd
     }
 
     @MainActor

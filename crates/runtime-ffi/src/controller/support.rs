@@ -1,6 +1,6 @@
 //! Private controller helpers: capability derivation and bounded refusals.
 
-use nmp_native_artifact::{INDEX_PATH, embedded_requirements};
+use nmp_native_artifact::INDEX_PATH;
 use nmp_native_runtime_core::{Capability, CapabilityRequest, CapabilityRequirement, Principal};
 use nmp_native_runtime_store::InstalledBuild;
 
@@ -33,12 +33,13 @@ use crate::{
 pub(crate) fn installation_capability_requests(
     artifact: &VerifiedArtifact,
 ) -> Result<Vec<CapabilityRequest>, String> {
-    let mut requests = artifact
+    let requests = artifact
         .handle
-        .manifest()
-        .requirements()
+        .authenticated_requirements()
+        .map_err(|error| error.to_string())?
+        .into_iter()
         .map(|domain| {
-            Capability::new(domain)
+            Capability::new(&domain)
                 .map(|capability| CapabilityRequest {
                     capability,
                     requirement: CapabilityRequirement::Required,
@@ -47,9 +48,6 @@ pub(crate) fn installation_capability_requests(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    if requests.is_empty() {
-        requests = declared_capability_requests(artifact)?;
-    }
     if requests.len() > MAXIMUM_PERMISSION_DECISIONS {
         return Err(format!(
             "verified capability profile has {} domains; the maximum is {}",
@@ -69,28 +67,6 @@ pub(super) fn declared_config_schema(artifact: &VerifiedArtifact) -> Option<serd
     let document = verified_index_document(artifact).ok()??;
     let schema = nmp_native_artifact::embedded_config_schema(&document)?;
     serde_json::from_str(&schema).ok()
-}
-
-/// Reads the `napplet-requires` declaration out of the verified entry document.
-/// Absent or unreadable bytes yield an empty inventory rather than a refusal:
-/// launch already reports the domains it could not inject.
-fn declared_capability_requests(
-    artifact: &VerifiedArtifact,
-) -> Result<Vec<CapabilityRequest>, String> {
-    let Some(document) = verified_index_document(artifact)? else {
-        return Ok(Vec::new());
-    };
-    embedded_requirements(&document)
-        .into_iter()
-        .map(|domain| {
-            Capability::new(domain)
-                .map(|capability| CapabilityRequest {
-                    capability,
-                    requirement: CapabilityRequirement::Required,
-                })
-                .map_err(|error| error.to_string())
-        })
-        .collect()
 }
 
 /// Reads the verified entry document, or `None` when the artifact has no

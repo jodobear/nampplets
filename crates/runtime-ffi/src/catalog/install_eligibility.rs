@@ -7,14 +7,16 @@
 //! also carries the Rust-owned refusal code and reason text, so native
 //! renders copy instead of authoring its own.
 
-use nmp_native_catalog_resolver::ArtifactReview;
+use nmp_native_artifact::{ManifestCoordinate, VerifiedArtifactHandle};
+use nmp_native_catalog_resolver::CoordinateLookupFact;
 use nmp_native_runtime_core::Principal;
 
 use super::{
     projection::{
-        catalog_coordinate_string, coordinate_identity, project_lookup_facts, review_capabilities,
+        authenticated_review_capabilities, catalog_coordinate_string, coordinate_identity,
+        project_lookup_facts,
     },
-    types::{RuntimeCatalogFailure, RuntimeCatalogReview},
+    types::{RuntimeCatalogError, RuntimeCatalogFailure, RuntimeCatalogReview},
 };
 
 const UNNAMED_MANIFEST_CODE: &str = "named-build-required";
@@ -34,26 +36,50 @@ pub struct RuntimeCatalogInstallEligibility {
     pub blocker: Option<RuntimeCatalogFailure>,
 }
 
-pub(super) fn project_review(token: &str, review: &ArtifactReview) -> RuntimeCatalogReview {
-    let summary = review.summary();
-    let (manifest_author, d_tag) = coordinate_identity(summary.coordinate());
-    let aggregate_hash = summary.aggregate().as_str().to_owned();
+pub(super) fn project_review(
+    token: &str,
+    coordinate: &ManifestCoordinate,
+    handle: &VerifiedArtifactHandle,
+    lookup_facts: &[CoordinateLookupFact],
+) -> Result<RuntimeCatalogReview, RuntimeCatalogError> {
+    verify_exact_binding(coordinate, handle)?;
+    let manifest = handle.manifest();
+    let (manifest_author, d_tag) = coordinate_identity(coordinate);
+    let aggregate_hash = handle.index().aggregate().as_str().to_owned();
     let install_eligibility =
         decide_install_eligibility(&manifest_author, d_tag.as_deref(), &aggregate_hash);
-    RuntimeCatalogReview {
+    Ok(RuntimeCatalogReview {
         token: token.to_owned(),
-        event_id: summary.event_id().as_str().to_owned(),
-        coordinate: catalog_coordinate_string(summary.coordinate()),
+        event_id: handle.index().event_id().as_str().to_owned(),
+        coordinate: catalog_coordinate_string(coordinate),
         manifest_author,
         d_tag,
-        title: summary.title().map(str::to_owned),
-        description: summary.description().map(str::to_owned),
+        title: manifest.title().map(str::to_owned),
+        description: manifest.description().map(str::to_owned),
         aggregate_hash,
-        capabilities: review_capabilities(summary),
-        blob_sources: summary.servers().map(str::to_owned).collect(),
-        provenance: project_lookup_facts(summary.lookup_facts()),
+        capabilities: authenticated_review_capabilities(handle)?,
+        blob_sources: manifest.servers().map(str::to_owned).collect(),
+        provenance: project_lookup_facts(lookup_facts),
         install_eligibility,
+    })
+}
+
+fn verify_exact_binding(
+    coordinate: &ManifestCoordinate,
+    handle: &VerifiedArtifactHandle,
+) -> Result<(), RuntimeCatalogError> {
+    let index = handle.index();
+    let (author, d_tag) = coordinate_identity(coordinate);
+    if index.author().as_str() != author
+        || index.d_tag() != d_tag.as_deref()
+        || index.event_id() != handle.manifest().event_id()
+        || index.aggregate() != handle.manifest().aggregate()
+    {
+        return Err(RuntimeCatalogError::Resolve {
+            reason: "verified bytes do not match the authenticated exact-build review".to_owned(),
+        });
     }
+    Ok(())
 }
 
 fn decide_install_eligibility(

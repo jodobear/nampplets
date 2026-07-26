@@ -26,10 +26,12 @@ use std::{
     time::Duration,
 };
 
-use nmp_native_artifact::{ArtifactLimits, ArtifactSourcePolicy, FileArtifactCache};
+use nmp_native_artifact::{
+    ArtifactLimits, ArtifactSourcePolicy, FileArtifactCache, VerifiedArtifactHandle,
+};
 use nmp_native_catalog_resolver::{
-    ArtifactReview, CatalogResolver, MemorySealedArtifactCache, ResolverLimits,
-    RustHttpsAcquisitionConfig, RustHttpsAcquisitionPort,
+    CatalogResolver, MemorySealedArtifactCache, ResolverLimits, RustHttpsAcquisitionConfig,
+    RustHttpsAcquisitionPort,
 };
 use nmp_native_nmp_adapter::{NmpDataPlane, catalog::CatalogBrowseRequest};
 use parking_lot::Mutex;
@@ -60,7 +62,7 @@ const OPERATION_DEADLINE: Duration = Duration::from_secs(15);
 
 #[derive(Debug)]
 struct StoredReview {
-    review: Arc<ArtifactReview>,
+    handle: VerifiedArtifactHandle,
     projection: RuntimeCatalogReview,
 }
 
@@ -73,8 +75,9 @@ struct ReviewState {
 /// Profile-owned catalog service.
 ///
 /// One bounded NMP browse observation stays open for the lifetime of the
-/// profile and replaces `feed_state` as frames arrive. Exact review and
-/// artifact acquisition remain separately bounded one-shot operations.
+/// profile and replaces `feed_state` as frames arrive. Preparing an exact
+/// review acquires and verifies immutable bytes before exposing requirements;
+/// confirmation only consumes that already-authenticated review.
 pub struct RuntimeCatalogService {
     resolver: Arc<CatalogResolver>,
     feed_state: Arc<Mutex<CatalogFeedState>>,

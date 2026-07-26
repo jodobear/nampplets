@@ -48,6 +48,8 @@ public typealias NativeRuntimePermissionDefault = RuntimePermissionDefault
 public typealias NativeRuntimeProfilePreferences = RuntimeProfilePreferences
 public typealias NativeRuntimeProfilePreferencesUpdate =
     RuntimeProfilePreferencesUpdate
-public typealias NativeRuntimeReceiptStatus = RuntimeReceiptStatus
+public typealias NativeRuntimeReceiptOutcome = RuntimeReceiptOutcome
+public typealias NativeRuntimeReceiptObservationLifecycle =
+    RuntimeReceiptObservationLifecycle
 public typealias NativeRuntimeStorageSnapshot = RuntimeStorageSnapshot
 public typealias NativeRuntimeStorageResetResult = RuntimeStorageResetResult

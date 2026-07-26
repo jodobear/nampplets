@@ -53,7 +53,6 @@ public struct WorkbenchComponentID:
         try container.encode(rawValue)
     }
 
-    public static let goodMorning = Self(rawValue: "good-morning")
 }
 
 public struct WorkbenchWindowID:
@@ -177,24 +176,6 @@ public struct WorkbenchCanvasWindow:
         self.stackingOrder = stackingOrder
     }
 
-    public static let goodMorning = Self(
-        id: WorkbenchWindowID(rawValue: "good-morning"),
-        componentID: .goodMorning,
-        exactBuild: WorkbenchExactBuildIdentity(
-            manifestAuthor: GoodMorningFixture.author,
-            dTag: GoodMorningFixture.dTag,
-            aggregateHash: GoodMorningFixture.aggregateHash
-        ),
-        title: "Good Morning",
-        frame: WorkbenchWindowFrame(
-            x: 40,
-            y: 40,
-            width: 760,
-            height: 520
-        ),
-        stackingOrder: 0
-    )
-
     public static func installed(
         title: String,
         identity: WorkbenchExactBuildIdentity,
@@ -279,30 +260,8 @@ public struct WorkbenchLayoutSnapshot: Codable, Equatable, Sendable {
             forKey: .version
         ) ?? 1
         if decodedVersion == 1 {
-            let assignments = try container.decodeIfPresent(
-                [LegacySlotRole: WorkbenchComponentID].self,
-                forKey: .assignments
-            ) ?? [:]
-            let sizes = try container.decodeIfPresent(
-                [LegacySlotRole: LegacySlotSize].self,
-                forKey: .sizes
-            ) ?? [:]
-            let assignedRole = LegacySlotRole.allCases.first {
-                assignments[$0] == .goodMorning
-            }
-            let restoredSize = assignedRole.flatMap { sizes[$0] }
-            if assignedRole != nil {
-                var window = WorkbenchCanvasWindow.goodMorning
-                if let restoredSize {
-                    window.frame.width = restoredSize.width
-                    window.frame.height = restoredSize.height
-                }
-                windows = [window]
-                selectedWindowID = window.id
-            } else {
-                windows = []
-                selectedWindowID = nil
-            }
+            windows = []
+            selectedWindowID = nil
             version = Self.currentVersion
             mode = .freeform
             return

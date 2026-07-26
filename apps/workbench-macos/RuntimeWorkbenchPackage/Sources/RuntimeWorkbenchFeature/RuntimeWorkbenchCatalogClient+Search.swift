@@ -121,40 +121,31 @@ extension RuntimeWorkbenchCatalogClient {
     private static func publishedRecord(
         fixture: PublishedFixture
     ) throws -> CatalogRecord {
-        guard fixture.name == "good-morning",
-              fixture.artifactMode == "single-file",
-              fixture.aggregateSHA256 == GoodMorningFixture.aggregateHash,
-              fixture.coordinate.author == GoodMorningFixture.author,
-              fixture.coordinate.dTag == GoodMorningFixture.dTag,
+        guard fixture.artifactMode == "single-file",
               fixture.coordinate.kind == 35_129,
-              fixture.eventID
-                == "b330bfaefd2ddf268ebe4196403e6163533c54f41dabc3518bdc1a896c68f40e",
-              fixture.files == [
-                  PublishedFile(
-                      artifactPath: nil,
-                      bytes: 722,
-                      path: "event.json",
-                      sha256:
-                          "66d2a7ed73973e422c86119c3b5c5f1914cb15bad1bfbddecb61cc2edf1c9c17"
-                  ),
-                  PublishedFile(
-                      artifactPath: "/index.html",
-                      bytes: 96_172,
-                      path: "index.html",
-                      sha256: GoodMorningFixture.indexDigest
-                  ),
-              ]
+              !fixture.name.isEmpty,
+              !fixture.coordinate.author.isEmpty,
+              !fixture.coordinate.dTag.isEmpty,
+              !fixture.aggregateSHA256.isEmpty,
+              !fixture.eventID.isEmpty,
+              let eventFile = fixture.files.first(where: {
+                  $0.path == "event.json"
+              }),
+              let indexFile = fixture.files.first(where: {
+                  $0.artifactPath == "/index.html"
+              })
         else {
             throw CatalogResourceError.unexpectedPublishedFixture
         }
 
+        let title = fixture.name.displayCatalogTitle
         let coordinate =
             "\(fixture.coordinate.kind):\(fixture.coordinate.author):"
             + fixture.coordinate.dTag
         guard let entry = CatalogEntry(
             id: "published:\(fixture.eventID)",
-            title: "Good Morning Protocol",
-            summary: "Pinned signed fixture that passes the shell-only legacy "
+            title: title,
+            summary: "Published signed artifact that passes the shell-only legacy "
                 + "host baseline; the complete provider journey is not ratified.",
             publisher: CatalogPublisher(
                 displayName: nil,
@@ -169,7 +160,7 @@ extension RuntimeWorkbenchCatalogClient {
         ),
             let review = CatalogInstallReview(
                 id: "published:\(fixture.eventID):\(fixture.aggregateSHA256)",
-                title: "Good Morning Protocol",
+                title: title,
                 publisher: entry.publisher,
                 coordinate: coordinate,
                 exactAggregateHash: fixture.aggregateSHA256,
@@ -187,21 +178,21 @@ extension RuntimeWorkbenchCatalogClient {
                         source: "kind 35129 event \(fixture.eventID)",
                         evidence: "Publisher \(fixture.coordinate.author) · "
                             + "d=\(fixture.coordinate.dTag) · event.json "
-                            + "SHA-256 \(fixture.files[0].sha256) · 722 bytes"
+                            + "SHA-256 \(eventFile.sha256) · "
+                            + "\(eventFile.bytes) bytes"
                     ),
                     CatalogSourceProvenance(
                         id: "artifact-index",
                         kind: .verifiedArtifactIndex,
                         source: "/index.html",
-                        evidence: "SHA-256 \(fixture.files[1].sha256) · "
-                            + "\(fixture.files[1].bytes) bytes · aggregate "
+                        evidence: "SHA-256 \(indexFile.sha256) · "
+                            + "\(indexFile.bytes) bytes · aggregate "
                             + fixture.aggregateSHA256
                     ),
                     CatalogSourceProvenance(
                         id: "artifact-sources",
                         kind: .artifact,
-                        source: "https://cdn.hzrd149.com · "
-                            + "https://blossom.ditto.pub",
+                        source: "Signed manifest server tags",
                         evidence: "Exact server tags preserved by the bundled "
                             + "signed manifest; no fetch is performed here."
                     ),

@@ -101,7 +101,9 @@ pub struct RuntimeCatalogCapability {
     pub requirement: RuntimePermissionRequirement,
 }
 
-/// An opaque exact review frozen from one verified signed manifest event.
+/// An opaque exact review frozen from one signed manifest and its verified
+/// immutable bytes. `capabilities` is the authenticated exact-build
+/// requirement inventory; native renders it without merging catalog hints.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct RuntimeCatalogReview {
     pub token: String,

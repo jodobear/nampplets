@@ -48,8 +48,9 @@ final class NativeRuntimeWriteReceiptObserverTests: RuntimeNappletSessionTestCas
         snapshot.receipts = [
             RuntimeReceiptSnapshot(
                 receiptId: "receipt-1",
-                status: .pending,
-                delivery: "pending",
+                outcome: .inProgress,
+                observationLifecycle: .observing,
+                outcomeDetail: nil,
                 latestStateJson: #"{"status":"queued"}"#
             )
         ]
@@ -72,6 +73,11 @@ final class NativeRuntimeWriteReceiptObserverTests: RuntimeNappletSessionTestCas
         }
         XCTAssertEqual(predecessorRevision, receiptInitial.revision)
         XCTAssertEqual(receiptNext.receipts.first?.id, "receipt-1")
+        XCTAssertEqual(receiptNext.receipts.first?.outcome, .inProgress)
+        XCTAssertEqual(
+            receiptNext.receipts.first?.observationLifecycle,
+            .observing
+        )
         XCTAssertEqual(
             receiptNext.receipts.first?.latestStateJSON,
             #"{"status":"queued"}"#

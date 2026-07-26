@@ -128,7 +128,7 @@ extension ContentView {
 
             DisclosureGroup("Runtime details") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(activity)
+                    Text(activity.message)
                     if let layoutNotice =
                         layoutPersistenceError
                         ?? layout.capacityWarningMessage

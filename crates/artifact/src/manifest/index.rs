@@ -6,7 +6,10 @@ use super::{
     ArtifactMode, ManifestCoordinate, ManifestError, verified::VerifiedManifest,
     verifier::ManifestEventVerifier,
 };
-use crate::{ArtifactError, CachedArtifact, FileArtifactCache, Sha256Digest};
+use crate::{
+    ArtifactError, CachedArtifact, FileArtifactCache, INDEX_PATH, Sha256Digest,
+    embedded_requirements,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct VerifiedArtifactIndexEntry {
@@ -118,6 +121,37 @@ impl VerifiedArtifactHandle {
 
     pub fn index(&self) -> &VerifiedArtifactIndex {
         &self.index
+    }
+
+    /// Returns the exact requirement inventory authenticated by this sealed
+    /// build.
+    ///
+    /// Signed `requires` tags remain authoritative. When they are absent, the
+    /// bounded `napplet-requires` declaration in the verified `/index.html`
+    /// bytes is used. Those bytes are covered by the signed path digest and
+    /// aggregate, so this fallback does not trust a native hint or unverified
+    /// cache metadata.
+    pub fn authenticated_requirements(&self) -> Result<Vec<String>, ArtifactError> {
+        let signed = self
+            .manifest
+            .requirements()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if !signed.is_empty() {
+            return Ok(signed);
+        }
+        let Some(index) = self
+            .index
+            .entries()
+            .find(|entry| entry.path() == INDEX_PATH)
+        else {
+            return Ok(Vec::new());
+        };
+        let document = self.read_verified(INDEX_PATH, index.bytes())?;
+        Ok(embedded_requirements(&document)
+            .into_iter()
+            .map(str::to_owned)
+            .collect())
     }
 
     pub fn read_verified(

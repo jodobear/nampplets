@@ -64,7 +64,8 @@ impl RuntimeController {
         self.catalog.feed_snapshot(None)
     }
 
-    /// Freezes an exact review from one entry in the most recent bounded page.
+    /// Resolves immutable hash-matching bytes and then freezes an exact review
+    /// from one entry in the most recent bounded page.
     pub fn catalog_review_entry(&self, event_id: String) -> RuntimeCatalogReviewResult {
         if self.closed.load(Ordering::Acquire) {
             return RuntimeCatalogReviewResult {
@@ -84,8 +85,9 @@ impl RuntimeController {
         }
     }
 
-    /// Parses and freezes an exact public manifest coordinate entirely in
-    /// Rust. Native presentation never interprets Nostr coordinate identity.
+    /// Parses, verifies, and freezes an exact public manifest coordinate
+    /// entirely in Rust. Native presentation never interprets Nostr coordinate
+    /// identity or reconstructs requirements.
     pub fn catalog_review_manual(&self, coordinate: String) -> RuntimeCatalogReviewResult {
         if self.closed.load(Ordering::Acquire) {
             return RuntimeCatalogReviewResult {
@@ -138,8 +140,8 @@ impl RuntimeController {
         }
     }
 
-    /// Confirms one opaque frozen review and installs its immutable exact
-    /// bytes. The pinned Good Morning demo profile receives the Rust-owned
+    /// Consumes one opaque review and installs the immutable exact bytes that
+    /// were already verified before review. The pinned Good Morning demo profile receives the Rust-owned
     /// exact-build grant set immediately so the native Workbench can exercise
     /// the complete journey; other builds remain review-gated. This never
     /// launches the napplet.
