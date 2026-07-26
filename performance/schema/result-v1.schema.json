@@ -1,0 +1,645 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:nampplets:performance:result:v1",
+  "title": "Nampplets performance result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "run_id",
+    "identity",
+    "build",
+    "samples",
+    "producer_summary",
+    "comparison_key",
+    "checksum_sha256"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "urn:nampplets:performance:result:v1",
+      "type": "string",
+      "maxLength": 41
+    },
+    "run_id": {
+      "$ref": "#/$defs/id"
+    },
+    "identity": {
+      "$ref": "#/$defs/identity"
+    },
+    "build": {
+      "$ref": "#/$defs/build"
+    },
+    "samples": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/success_sample"
+          },
+          {
+            "$ref": "#/$defs/refused_sample"
+          },
+          {
+            "$ref": "#/$defs/failed_sample"
+          },
+          {
+            "$ref": "#/$defs/deadline_sample"
+          }
+        ]
+      }
+    },
+    "producer_summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "comparison_key": {
+      "$ref": "#/$defs/sha256"
+    },
+    "checksum_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+    },
+    "bounded_string": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "sha256": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "u128_string": {
+      "type": "string",
+      "maxLength": 39,
+      "pattern": "^(0|[1-9][0-9]{0,38})$"
+    },
+    "measurement_availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu_time_ns",
+        "peak_rss_bytes"
+      ],
+      "properties": {
+        "cpu_time_ns": {
+          "type": "string",
+          "enum": [
+            "available",
+            "unavailable"
+          ],
+          "maxLength": 11
+        },
+        "peak_rss_bytes": {
+          "type": "string",
+          "enum": [
+            "available",
+            "unavailable"
+          ],
+          "maxLength": 11
+        }
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sha256",
+        "cardinality"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cardinality": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000
+        }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "warmup_count",
+        "sample_count",
+        "per_sample_deadline_ns",
+        "run_deadline_ns",
+        "outlier_policy"
+      ],
+      "properties": {
+        "warmup_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "sample_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "per_sample_deadline_ns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300000000000
+        },
+        "run_deadline_ns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7200000000000
+        },
+        "outlier_policy": {
+          "const": "tukey_upper_3_iqr_v1",
+          "type": "string",
+          "maxLength": 22
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "benchmark_id",
+        "state",
+        "reset_scopes",
+        "fixture",
+        "protocol",
+        "build_mode",
+        "toolchain",
+        "environment_class",
+        "os",
+        "hardware",
+        "power_state",
+        "thermal_state",
+        "measurement_availability"
+      ],
+      "properties": {
+        "benchmark_id": {
+          "$ref": "#/$defs/id"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "cold",
+            "warm"
+          ],
+          "maxLength": 4
+        },
+        "reset_scopes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
+        },
+        "fixture": {
+          "$ref": "#/$defs/fixture"
+        },
+        "protocol": {
+          "$ref": "#/$defs/protocol"
+        },
+        "build_mode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "toolchain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "environment_class": {
+          "$ref": "#/$defs/id"
+        },
+        "os": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "hardware": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "power_state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "thermal_state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "measurement_availability": {
+          "$ref": "#/$defs/measurement_availability"
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_revision",
+        "artifact_locator",
+        "source_provenance"
+      ],
+      "properties": {
+        "source_revision": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+        },
+        "artifact_locator": {
+          "$ref": "#/$defs/bounded_string"
+        },
+        "source_provenance": {
+          "$ref": "#/$defs/bounded_string"
+        }
+      }
+    },
+    "success_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "outcome",
+        "duration_ns"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9999
+        },
+        "outcome": {
+          "const": "success",
+          "type": "string",
+          "maxLength": 7
+        },
+        "duration_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "cpu_time_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "peak_rss_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        }
+      }
+    },
+    "refusal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "code"
+      ],
+      "properties": {
+        "domain": {
+          "$ref": "#/$defs/id"
+        },
+        "code": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "refused_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "outcome",
+        "duration_ns",
+        "refusal"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9999
+        },
+        "outcome": {
+          "const": "refused",
+          "type": "string",
+          "maxLength": 7
+        },
+        "duration_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "cpu_time_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "peak_rss_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "refusal": {
+          "$ref": "#/$defs/refusal"
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "detail"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/id"
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "failed_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "outcome",
+        "duration_ns",
+        "failure"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9999
+        },
+        "outcome": {
+          "const": "failed",
+          "type": "string",
+          "maxLength": 6
+        },
+        "duration_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "cpu_time_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "peak_rss_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "failure": {
+          "$ref": "#/$defs/failure"
+        }
+      }
+    },
+    "deadline_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "outcome",
+        "duration_ns"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9999
+        },
+        "outcome": {
+          "const": "deadline_exceeded",
+          "type": "string",
+          "maxLength": 17
+        },
+        "duration_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "cpu_time_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "peak_rss_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        }
+      }
+    },
+    "outcome_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "success",
+        "refused",
+        "failed",
+        "deadline_exceeded"
+      ],
+      "properties": {
+        "success": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "refused": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "deadline_exceeded": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "variance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numerator",
+        "denominator"
+      ],
+      "properties": {
+        "numerator": {
+          "$ref": "#/$defs/u128_string"
+        },
+        "denominator": {
+          "type": "string",
+          "maxLength": 9,
+          "pattern": "^[1-9][0-9]{0,8}$"
+        }
+      }
+    },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "count",
+        "p50_ns",
+        "p95_ns",
+        "p99_ns",
+        "max_ns",
+        "population_variance_ns2"
+      ],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "success",
+            "refused",
+            "failed",
+            "deadline_exceeded"
+          ],
+          "maxLength": 17
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "p50_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "p95_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "p99_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "max_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000000000
+        },
+        "population_variance_ns2": {
+          "$ref": "#/$defs/variance"
+        }
+      }
+    },
+    "refusal_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "code",
+        "count"
+      ],
+      "properties": {
+        "domain": {
+          "$ref": "#/$defs/id"
+        },
+        "code": {
+          "$ref": "#/$defs/id"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sample_count",
+        "outcome_counts",
+        "distributions",
+        "refusal_groups",
+        "diagnostic_outlier_sequences",
+        "disposition"
+      ],
+      "properties": {
+        "sample_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "outcome_counts": {
+          "$ref": "#/$defs/outcome_counts"
+        },
+        "distributions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/distribution"
+          }
+        },
+        "refusal_groups": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "$ref": "#/$defs/refusal_group"
+          }
+        },
+        "diagnostic_outlier_sequences": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999
+          }
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "valid",
+            "diagnostic"
+          ],
+          "maxLength": 10
+        }
+      }
+    }
+  }
+}
