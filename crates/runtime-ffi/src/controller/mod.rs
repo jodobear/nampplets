@@ -40,7 +40,7 @@ use tokio::sync::watch;
 use crate::{
     RuntimeProfilePreferences, RuntimeRefusal, catalog::RuntimeCatalogService,
     diagnostics::RuntimeDiagnosticsService, native_capabilities::CallbackArtifactSource,
-    native_capabilities::RuntimeThemeSource, support::now_millis,
+    native_capabilities::RuntimeThemeSource, slots::SlotHub, support::now_millis,
 };
 
 #[derive(Debug, Default)]
@@ -75,6 +75,7 @@ pub struct RuntimeController {
     maximum_boundary_events: usize,
     signal: watch::Sender<u64>,
     observers: Arc<AtomicUsize>,
+    slot_hub: Arc<SlotHub>,
     maximum_observers: usize,
     profile_preferences: Mutex<RuntimeProfilePreferences>,
     nmp_store_path: Option<PathBuf>,
@@ -101,6 +102,7 @@ impl Drop for RuntimeController {
     }
 }
 
+#[derive(Debug)]
 struct ObserverPermit(Arc<AtomicUsize>);
 
 impl Drop for ObserverPermit {

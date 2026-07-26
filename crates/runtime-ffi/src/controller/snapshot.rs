@@ -10,10 +10,9 @@ use crate::activity::activity_snapshot;
 use crate::{
     RuntimeBindingSnapshot, RuntimeErrorSnapshot, RuntimeExactBuildCoordinate,
     RuntimeInstalledBuildAvailability, RuntimeInstalledBuildSnapshot,
-    RuntimeInstalledLibrarySnapshot, RuntimePendingWriteSnapshot, RuntimeReceiptSnapshot,
-    RuntimeSessionSnapshot, RuntimeSnapshot, RuntimeSnapshotProjection, project_receipt,
-    projection::project_profile, snapshot_integrity::check_snapshot_integrity,
-    workspace::workspace_from_view,
+    RuntimeInstalledLibrarySnapshot, RuntimePendingWriteSnapshot, RuntimeSessionSnapshot,
+    RuntimeSnapshot, RuntimeSnapshotProjection, project_receipt, projection::project_profile,
+    snapshot_integrity::check_snapshot_integrity, workspace::workspace_from_view,
 };
 
 struct ProjectedWorkspaces {

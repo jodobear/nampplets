@@ -13,8 +13,10 @@ use nmp_native_runtime_app::PlatformCommand;
 use super::{ObserverPermit, RuntimeController};
 use crate::{
     ObservationStart, RuntimeObservation, RuntimeObservationFrame, RuntimeObserver,
+    RuntimeReceiptsSlotObservationStart, RuntimeReceiptsSlotObserver,
     RuntimeRelayDiagnosticsObservationStart, RuntimeRelayDiagnosticsObserver,
-    RuntimeRelayDiagnosticsSnapshot, projection::project_event, support::bump_signal,
+    RuntimeRelayDiagnosticsSnapshot, projection::project_event, slots::project_receipts,
+    support::bump_signal,
 };
 
 #[uniffi::export]
@@ -135,6 +137,61 @@ impl RuntimeController {
         ObservationStart {
             observation: Some(handle),
             refusal: None,
+        }
+    }
+
+    /// Opens the typed durable-receipt concern on the controller's single
+    /// non-diagnostics slot worker. The authoritative initial projection rides
+    /// in the returned start record, so registration never requires a callback
+    /// before its cancellation handle exists.
+    pub fn observe_receipts(
+        self: Arc<Self>,
+        observer: Box<dyn RuntimeReceiptsSlotObserver>,
+    ) -> RuntimeReceiptsSlotObservationStart {
+        let admitted = self
+            .observers
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                (active < self.maximum_observers).then_some(active + 1)
+            });
+        if admitted.is_err() {
+            return RuntimeReceiptsSlotObservationStart::refused(self.refusal(
+                "receipts-slot-observer-capacity",
+                format!(
+                    "global observer capacity {} is full",
+                    self.maximum_observers
+                ),
+            ));
+        }
+
+        let app_observer = self.app.observe();
+        let source = app_observer.latest();
+        let initial = project_receipts(&self, &source);
+        if let Some(refusal) = initial.refusal() {
+            self.observers.fetch_sub(1, Ordering::AcqRel);
+            return RuntimeReceiptsSlotObservationStart::refused(refusal);
+        }
+        if source.closed {
+            self.observers.fetch_sub(1, Ordering::AcqRel);
+            return RuntimeReceiptsSlotObservationStart::refused(
+                self.refusal("receipts-slot-closed", "runtime is closed"),
+            );
+        }
+
+        match self.slot_hub.register_receipts(
+            Arc::clone(&self),
+            Arc::from(observer),
+            source.revisions.receipts,
+            app_observer,
+        ) {
+            Ok(observation) => RuntimeReceiptsSlotObservationStart {
+                observation: Some(observation),
+                initial: Some(initial),
+                refusal: None,
+            },
+            Err(refusal) => {
+                self.observers.fetch_sub(1, Ordering::AcqRel);
+                RuntimeReceiptsSlotObservationStart::refused(refusal)
+            }
         }
     }
 
