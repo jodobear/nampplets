@@ -6,28 +6,25 @@ use nmp_native_runtime_store::InstalledBuild;
 
 use super::RuntimeController;
 use crate::{
-    GOOD_MORNING_AGGREGATE_HASH, GOOD_MORNING_AUTHOR, GOOD_MORNING_CAPABILITY_PROFILE,
-    GOOD_MORNING_D_TAG, MAXIMUM_PERMISSION_DECISIONS, RuntimeCatalogCapability,
-    RuntimeCatalogConfirmation, RuntimeCatalogProvenance, RuntimeExactBuildCoordinate,
-    RuntimePermissionRequirement, RuntimeProviderUpdate, RuntimeRefusal, VerifiedArtifact,
+    MAXIMUM_PERMISSION_DECISIONS, RuntimeCatalogCapability, RuntimeCatalogConfirmation,
+    RuntimeCatalogProvenance, RuntimeExactBuildCoordinate, RuntimePermissionRequirement,
+    RuntimeProviderUpdate, RuntimeRefusal, VerifiedArtifact,
     snapshot_integrity::MAXIMUM_REPORTED_PROJECTION_FAULTS,
     support::{bump_signal, now_millis},
 };
 
-/// Derives the finite permission inventory exclusively from verified bytes and
-/// Rust-owned compatibility policy.
-///
-/// Signed `requires` tags remain authoritative for general artifacts. The
-/// published Good Morning fixture predates those tags, so its immutable exact
-/// build receives the required/optional profile already pinned by the native
-/// runtime compatibility corpus. Native callers cannot select this profile or
+/// Derives the finite permission inventory exclusively from the artifact's own
+/// verified bytes. No build's identity is special-cased: what a napplet
+/// declares is what it gets, and native callers cannot select a profile or
 /// supply capability names.
 ///
-/// Builds published with neither signed tags nor a pinned profile fall back to
-/// the `napplet-requires` declaration inside the verified entry document. Those
-/// bytes are pinned by the signed path digest and aggregate, so the declaration
-/// is as authenticated as a tag; without it such a build would launch with an
-/// empty inventory and no domain to review.
+/// Signed `requires` tags are authoritative. A build that declares none falls
+/// back to the `napplet-requires` meta inside the verified entry document --
+/// still the artifact's own bytes, pinned by the signed path digest and
+/// aggregate, so the declaration is as authenticated as a tag. A build that
+/// declares neither gets an empty inventory and launches with only the
+/// foundational shell; if its content needs more, it says so itself rather
+/// than the runtime guessing on its behalf.
 ///
 /// `intent_dispatch::launch_handler` relies on this same derivation: an
 /// intent-launched handler must be admitted with exactly the domains an
@@ -50,18 +47,7 @@ pub(crate) fn installation_capability_requests(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let is_pinned_good_morning = artifact.handle.index().author().as_str() == GOOD_MORNING_AUTHOR
-        && artifact.handle.index().d_tag() == Some(GOOD_MORNING_D_TAG)
-        && artifact.handle.index().aggregate().as_str() == GOOD_MORNING_AGGREGATE_HASH;
-    if is_pinned_good_morning {
-        debug_assert!(requests.is_empty());
-        for (domain, requirement) in GOOD_MORNING_CAPABILITY_PROFILE {
-            requests.push(CapabilityRequest {
-                capability: Capability::new(*domain).map_err(|error| error.to_string())?,
-                requirement: *requirement,
-            });
-        }
-    } else if requests.is_empty() {
+    if requests.is_empty() {
         requests = declared_capability_requests(artifact)?;
     }
     if requests.len() > MAXIMUM_PERMISSION_DECISIONS {

@@ -12,15 +12,15 @@ use nmp_native_artifact::{
     SignedArtifactResolver, VerifiedArtifactHandle,
 };
 use nmp_native_provider_link::IntentHandlerDeclaration;
-use nmp_native_runtime_app::{ExecutableArtifact, PermissionDecision, PlatformCommand};
-use nmp_native_runtime_core::{BoundedJson, GrantDecision, Principal};
+use nmp_native_runtime_app::{ExecutableArtifact, PlatformCommand};
+use nmp_native_runtime_core::{BoundedJson, Principal};
 use nmp_native_runtime_store::{InstalledBuild, UninstallCleanupPolicy};
 
 use super::{RuntimeController, support::installation_capability_requests};
 use crate::{
     ArtifactCoordinate, ArtifactVerification, MAXIMUM_INSTALLED_MANIFEST_METADATA_BYTES,
-    RuntimeExactBuildCoordinate, RuntimePermissionMode, VerifiedArtifact,
-    projection::map_coordinate, support::bump_signal, workspace::validate_workspace_name,
+    RuntimeExactBuildCoordinate, VerifiedArtifact, projection::map_coordinate,
+    support::bump_signal, workspace::validate_workspace_name,
 };
 
 #[uniffi::export]
@@ -176,69 +176,7 @@ impl RuntimeController {
             artifact: executable,
         });
         self.register_intent_handler(&principal, &artifact.handle);
-        self.grant_demo_permissions(
-            principal.manifest_author(),
-            principal.d_tag(),
-            principal.aggregate_hash(),
-        );
         bump_signal(&self.signal);
-    }
-
-    /// The explicit demo mode is intentionally permissive so a locally
-    /// verified network napplet can be rendered and exercised end-to-end.
-    /// Interactive production profiles still require the normal exact-build
-    /// permission review.
-    pub(super) fn grant_demo_permissions(&self, author: &str, d_tag: &str, aggregate_hash: &str) {
-        if self.permission_mode != RuntimePermissionMode::DemoPinnedGoodMorning {
-            return;
-        }
-        let Ok(principal) = Principal::new(author, d_tag, aggregate_hash) else {
-            return;
-        };
-        let Ok(review) = self.app.permission_review(&principal) else {
-            return;
-        };
-        let decisions = review
-            .capabilities
-            .into_iter()
-            .map(|capability| PermissionDecision {
-                capability: capability.capability,
-                decision: capability
-                    .decision_options
-                    .into_iter()
-                    .find(|option| {
-                        option.valid && option.decision == GrantDecision::AllowExactBuild
-                    })
-                    .map_or(GrantDecision::Denied, |option| option.decision),
-            })
-            .collect::<Vec<_>>();
-        if !decisions.is_empty() {
-            self.app.dispatch(PlatformCommand::ApplyPermissionBatch {
-                principal: principal.clone(),
-                decisions,
-            });
-        }
-    }
-
-    pub(super) fn grant_demo_permissions_for_installed_builds(&self) {
-        if self.permission_mode != RuntimePermissionMode::DemoPinnedGoodMorning {
-            return;
-        }
-        let principals = self
-            .app
-            .snapshot()
-            .library
-            .builds
-            .iter()
-            .map(|view| view.build.principal.clone())
-            .collect::<Vec<_>>();
-        for principal in principals {
-            self.grant_demo_permissions(
-                principal.manifest_author(),
-                principal.d_tag(),
-                principal.aggregate_hash(),
-            );
-        }
     }
 
     /// Applies the Rust-owned, finite installed-library filter. The resulting

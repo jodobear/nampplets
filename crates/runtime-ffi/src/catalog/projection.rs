@@ -9,18 +9,13 @@ use nmp_native_nmp_adapter::catalog::{
     CatalogAccessContext, CatalogBrowseFrame, CatalogManifestCandidate, CatalogShortfall,
     CatalogSourceEvidence, CatalogSourceStatus, ManifestCatalogError,
 };
-use nmp_native_runtime_core::CapabilityRequirement;
-
 use super::types::{
     RuntimeCatalogCapability, RuntimeCatalogEntry, RuntimeCatalogError, RuntimeCatalogFailure,
     RuntimeCatalogLookupState, RuntimeCatalogPage, RuntimeCatalogProvenance,
     RuntimeCatalogShortfall, RuntimeCatalogSource, RuntimeCatalogSourceAccess,
     RuntimeCatalogSourceState, RuntimeCatalogWindowState,
 };
-use crate::{
-    GOOD_MORNING_AGGREGATE_HASH, GOOD_MORNING_AUTHOR, GOOD_MORNING_CAPABILITY_PROFILE,
-    GOOD_MORNING_D_TAG, RuntimePermissionRequirement,
-};
+use crate::RuntimePermissionRequirement;
 
 pub(super) fn candidate_coordinate(
     candidate: &CatalogManifestCandidate,
@@ -121,22 +116,6 @@ pub(super) fn project_source(source: &CatalogSourceEvidence) -> RuntimeCatalogSo
 pub(super) fn review_capabilities(
     summary: &nmp_native_catalog_resolver::ArtifactReviewSummary,
 ) -> Vec<RuntimeCatalogCapability> {
-    let (author, d_tag) = coordinate_identity(summary.coordinate());
-    if author == GOOD_MORNING_AUTHOR
-        && d_tag.as_deref() == Some(GOOD_MORNING_D_TAG)
-        && summary.aggregate().as_str() == GOOD_MORNING_AGGREGATE_HASH
-    {
-        return GOOD_MORNING_CAPABILITY_PROFILE
-            .iter()
-            .map(|(domain, requirement)| RuntimeCatalogCapability {
-                domain: (*domain).to_owned(),
-                requirement: match requirement {
-                    CapabilityRequirement::Required => RuntimePermissionRequirement::Required,
-                    CapabilityRequirement::Optional => RuntimePermissionRequirement::Optional,
-                },
-            })
-            .collect();
-    }
     summary
         .requirements()
         .map(|domain| RuntimeCatalogCapability {

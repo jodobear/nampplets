@@ -37,10 +37,9 @@ use parking_lot::Mutex;
 use tokio::sync::watch;
 
 use crate::{
-    RuntimePermissionMode, RuntimeProfilePreferences, RuntimeRefusal,
-    catalog::RuntimeCatalogService, diagnostics::RuntimeDiagnosticsService,
-    native_capabilities::CallbackArtifactSource, native_capabilities::RuntimeThemeSource,
-    support::now_millis,
+    RuntimeProfilePreferences, RuntimeRefusal, catalog::RuntimeCatalogService,
+    diagnostics::RuntimeDiagnosticsService, native_capabilities::CallbackArtifactSource,
+    native_capabilities::RuntimeThemeSource, support::now_millis,
 };
 
 #[derive(Debug, Default)]
@@ -76,7 +75,6 @@ pub struct RuntimeController {
     signal: watch::Sender<u64>,
     observers: Arc<AtomicUsize>,
     maximum_observers: usize,
-    permission_mode: RuntimePermissionMode,
     profile_preferences: Mutex<RuntimeProfilePreferences>,
     nmp_store_path: Option<PathBuf>,
     artifact_cache_path: PathBuf,

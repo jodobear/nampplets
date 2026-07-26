@@ -388,18 +388,10 @@ pub(super) fn open_runtime_controller(
         signal,
         observers: Arc::new(AtomicUsize::new(0)),
         maximum_observers: config.maximum_observers,
-        permission_mode: config.permission_mode,
         profile_preferences: Mutex::new(projected_profile_preferences),
         nmp_store_path,
         artifact_cache_path,
         closed: AtomicBool::new(false),
     });
-    // Demo profiles are deliberately permissive for local end-to-end demos.
-    // Re-apply that explicit policy to metadata restored from a prior process
-    // too; otherwise a first run under interactive review can leave a denied
-    // exact-build grant persisted forever, making NAP-OUTBOX appear absent on
-    // the next demo launch. The helper remains a no-op for interactive
-    // profiles and still binds every decision to the restored exact principal.
-    controller.grant_demo_permissions_for_installed_builds();
     Ok(controller)
 }
