@@ -29,8 +29,16 @@ and font loading while retaining `connect-src 'none'`.
 round trip. It is not a provider API and is not evidence of NAP provider
 compatibility.
 
+`trusted-shell-prelude-domains.js` holds the per-domain client sections of
+the injected compatibility prelude. It is a verbatim source fragment
+`trusted-shell.js` interpolates, split out only so every trusted-shell source
+stays under the repository's 600-line ceiling; the emitted prelude bytes are
+identical either way. Both files are fingerprinted in
+`scripts/ci/run_antislop.py` and bound by the legacy-host compatibility
+evidence, so changing either is a deliberate, regenerated change.
+
 The compatibility prelude has callable projections for `shell`, `storage`,
-`identity`, `inc`, `theme`, `config`, `resource`, and `link`. A projection is installed
+`identity`, `inc`, `intent`, `theme`, `config`, `resource`, and `link`. A projection is installed
 only when that exact domain is present in the Rust-negotiated launch plan;
 having JavaScript support here does not advertise a provider. NAP-RESOURCE
 remains unusable until the one accepted `shell.init` advertises `resource`.
