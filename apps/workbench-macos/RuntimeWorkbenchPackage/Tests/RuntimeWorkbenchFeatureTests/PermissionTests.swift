@@ -49,6 +49,93 @@ import Testing
 }
 
 @MainActor
+@Test func selectAllRecommendedChoosesTheBroadestValidDecisionAndConfirmLaunches() async {
+    let initial = permissionSnapshot()
+    let manager = RecordingPermissionManager(snapshot: initial)
+    manager.response = PermissionReviewSnapshot(
+        review: initial.review,
+        submissionState: .applied
+    )
+    let model = PermissionReviewSheetModel(manager: manager)
+
+    // The Rust-requested default on every capability here is `.askEveryTime`,
+    // which can never satisfy launch -- confirming it un-edited previously
+    // looked like it worked and then silently failed to launch the napplet.
+    #expect(model.review.capabilities.allSatisfy { $0.requestedDecision == .askEveryTime })
+
+    model.selectAllRecommended()
+
+    #expect(model.selection(for: model.review.capabilities[0]) == .allowExactBuild)
+    #expect(model.selection(for: model.review.capabilities[1]) == .allowExactBuild)
+
+    await model.confirm()
+
+    #expect(manager.submissions.count == 1)
+    #expect(
+        (manager.submissions.first?.decisions ?? [])
+            .sorted { $0.domain < $1.domain } == [
+                PermissionDecisionSelection(domain: "identity", decision: .allowExactBuild)!,
+                PermissionDecisionSelection(domain: "outbox", decision: .allowExactBuild)!,
+            ]
+    )
+    #expect(model.isApplied)
+}
+
+@MainActor
+@Test func managedCapabilityNoLongerBlocksConfirmation() async {
+    let managed = PermissionCapabilityReview(
+        domain: "config",
+        title: "Config",
+        requirement: .optional,
+        sensitivity: .ordinary,
+        rationale: "Reads napplet-scoped configuration.",
+        dependencies: [],
+        platformAvailability: .available,
+        existingDecision: .managed,
+        isGranted: false,
+        requestedDecision: nil,
+        recommendedDecision: nil,
+        decisionOptions: validOptions(unavailable: Set(PermissionRequestedDecision.allCases))
+    )!
+    let identity = PermissionCapabilityReview(
+        domain: "identity",
+        title: "Identity",
+        requirement: .required,
+        sensitivity: .sensitive,
+        rationale: "Reads the active public key and follow list.",
+        dependencies: [],
+        platformAvailability: .available,
+        existingDecision: .denied,
+        isGranted: false,
+        requestedDecision: .askEveryTime,
+        recommendedDecision: .allowExactBuild,
+        decisionOptions: validOptions()
+    )!
+    let review = PermissionReview(
+        principal: permissionPrincipal(hash: "e"),
+        publisherDisplayName: "Alice",
+        nappletTitle: "Good Morning",
+        capabilities: [managed, identity]
+    )!
+    let initial = PermissionReviewSnapshot(review: review)
+    let manager = RecordingPermissionManager(snapshot: initial)
+    manager.response = PermissionReviewSnapshot(review: review, submissionState: .applied)
+    let model = PermissionReviewSheetModel(manager: manager)
+
+    model.selectAllRecommended()
+    await model.confirm()
+
+    #expect(model.issue == nil)
+    #expect(manager.submissions.count == 1)
+    #expect(
+        manager.submissions.first?.decisions == [
+            PermissionDecisionSelection(domain: "identity", decision: .allowExactBuild)!
+        ]
+    )
+    #expect(model.isApplied)
+}
+
+@MainActor
 @Test func dependencyRefusalIsRenderedFromManagerOwnedErrorState() async {
     let initial = permissionSnapshot()
     let manager = RecordingPermissionManager(snapshot: initial)

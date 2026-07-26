@@ -83,6 +83,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     let appearanceSource: PlatformAppearanceSource
     let settingsExecutor: PlatformSettingsExecutor
     let incActionExecutor: MacOSIncActionExecutor
+    private let intentActivationExecutor: MacOSIntentActivationExecutor
     let accountVault: (any NativeAccountVault)?
     let lock = NSLock()
     let accountLock = NSLock()
@@ -126,6 +127,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         let appearanceSource = PlatformAppearanceSource()
         let settingsExecutor = PlatformSettingsExecutor()
         let incActionExecutor = MacOSIncActionExecutor()
+        let intentActivationExecutor = MacOSIntentActivationExecutor()
         let accountVault: (any NativeAccountVault)?
         if let injectedAccountVault {
             accountVault = injectedAccountVault
@@ -143,7 +145,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
                 }
             }
         }
-        let controller = try RuntimeController.openWithAllNativeCapabilities(
+        let controller = try RuntimeController.openWithIntentActivation(
             config: RuntimeConfig(
                 runtimeStorePath: configuration.storageRoot
                     .appendingPathComponent("runtime.sqlite3")
@@ -176,7 +178,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
             artifactSource: source,
             appearanceSource: appearanceSource,
             settingsExecutor: settingsExecutor,
-            incActionExecutor: incActionExecutor
+            incActionExecutor: incActionExecutor,
+            intentActivationExecutor: intentActivationExecutor
         )
         appearanceSource.bind(controller: controller)
         settingsExecutor.bind(controller: controller)
@@ -186,6 +189,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
             appearanceSource: appearanceSource,
             settingsExecutor: settingsExecutor,
             incActionExecutor: incActionExecutor,
+            intentActivationExecutor: intentActivationExecutor,
             accountVault: accountVault
         )
         profile.restorePersistedAccounts()
@@ -204,6 +208,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         appearanceSource: PlatformAppearanceSource,
         settingsExecutor: PlatformSettingsExecutor,
         incActionExecutor: MacOSIncActionExecutor,
+        intentActivationExecutor: MacOSIntentActivationExecutor,
         accountVault: (any NativeAccountVault)?
     ) throws {
         self.controller = controller
@@ -211,6 +216,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         self.appearanceSource = appearanceSource
         self.settingsExecutor = settingsExecutor
         self.incActionExecutor = incActionExecutor
+        self.intentActivationExecutor = intentActivationExecutor
         self.accountVault = accountVault
         let initialSnapshot = try Self.initialSnapshot(
             from: controller.snapshot()
@@ -271,6 +277,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         appearanceSource.close()
         settingsExecutor.close()
         incActionExecutor.close()
+        intentActivationExecutor.close()
         controller.close()
         accountLock.unlock()
     }
@@ -282,6 +289,16 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         _ handler: NativeWorkbenchActionHandler?
     ) {
         incActionExecutor.setHandler(handler)
+    }
+
+    /// Installs or removes the application-owned NAP-INTENT activation
+    /// handler: "create (if needed) and bring to front the window for this
+    /// handler." Delivery occurs on the main dispatch queue and may fire
+    /// before any session/window for the handler exists yet.
+    public func setIntentActivationHandler(
+        _ handler: NativeIntentActivationHandler?
+    ) {
+        intentActivationExecutor.setHandler(handler)
     }
 
     var snapshotForTesting: RuntimeSnapshot {

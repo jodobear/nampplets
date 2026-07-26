@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::ArtifactMode;
-use crate::{ArtifactManifest, Sha256Digest};
+use crate::{ArchetypeDeclaration, ArtifactManifest, Sha256Digest};
 
 #[derive(Clone, Debug)]
 pub struct VerifiedManifest {
@@ -10,10 +10,12 @@ pub struct VerifiedManifest {
     pub(super) kind: u16,
     pub(super) d_tag: Option<Arc<str>>,
     pub(super) aggregate: Sha256Digest,
+    pub(super) signed_event_json: Arc<[u8]>,
     pub(super) artifact: ArtifactManifest,
     pub(super) mode: ArtifactMode,
     pub(super) requirements: Arc<[Arc<str>]>,
     pub(super) servers: Arc<[Arc<str>]>,
+    pub(super) archetypes: Arc<[ArchetypeDeclaration]>,
     pub(super) title: Option<Arc<str>>,
     pub(super) description: Option<Arc<str>>,
     pub(super) source: Option<Arc<str>>,
@@ -40,6 +42,15 @@ impl VerifiedManifest {
         &self.aggregate
     }
 
+    /// The exact signed event bytes this manifest was verified from, in
+    /// canonical NIP-01 JSON. Retained so a caller can persist enough to
+    /// re-verify and reopen this exact build later without a second network
+    /// fetch of an event that may since have been superseded by a
+    /// republished `d` tag.
+    pub fn signed_event_json(&self) -> &[u8] {
+        &self.signed_event_json
+    }
+
     pub fn mode(&self) -> ArtifactMode {
         self.mode
     }
@@ -50,6 +61,10 @@ impl VerifiedManifest {
 
     pub fn servers(&self) -> impl ExactSizeIterator<Item = &str> {
         self.servers.iter().map(AsRef::as_ref)
+    }
+
+    pub fn archetypes(&self) -> impl ExactSizeIterator<Item = &ArchetypeDeclaration> {
+        self.archetypes.iter()
     }
 
     pub fn title(&self) -> Option<&str> {

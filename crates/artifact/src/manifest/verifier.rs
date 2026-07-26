@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{
     ArtifactError, ArtifactLimits, ArtifactManifest, ArtifactPath, INDEX_PATH, Sha256Digest,
-    nip5a_path_tags_aggregate, validate_artifact_path,
+    archetype::parse_archetype_tag, nip5a_path_tags_aggregate, validate_artifact_path,
 };
 
 #[derive(Clone, Debug)]
@@ -26,6 +26,7 @@ impl ManifestEventVerifier {
             || limits.maximum_tag_string_bytes == 0
             || limits.maximum_requirements == 0
             || limits.maximum_sources == 0
+            || limits.maximum_archetypes == 0
         {
             return Err(ManifestError::InvalidLimits);
         }
@@ -64,6 +65,9 @@ impl ManifestEventVerifier {
         if !event.verify_signature() {
             return Err(ManifestError::InvalidEventSignature);
         }
+        let signed_event_json: Arc<[u8]> = serde_json::to_vec(event)
+            .map_err(ManifestError::EventJson)?
+            .into();
 
         let kind = event.kind.as_u16();
         if ![NAPPLET_KIND_SNAPSHOT, NAPPLET_KIND_ROOT, NAPPLET_KIND_NAMED].contains(&kind) {
@@ -101,6 +105,8 @@ impl ManifestEventVerifier {
         let mut requirement_names = BTreeSet::new();
         let mut servers = Vec::new();
         let mut server_names = BTreeSet::new();
+        let mut archetypes = Vec::new();
+        let mut archetype_names = BTreeSet::new();
         let mut title = None;
         let mut description = None;
         let mut source = None;
@@ -188,6 +194,24 @@ impl ManifestEventVerifier {
                         });
                     }
                 }
+                "archetype" => {
+                    let declaration = parse_archetype_tag(fields)?;
+                    if !archetype_names
+                        .insert((declaration.slug.clone(), declaration.protocol.clone()))
+                    {
+                        return Err(ManifestError::DuplicateCriticalTag(format!(
+                            "archetype:{}:{}",
+                            declaration.slug, declaration.protocol
+                        )));
+                    }
+                    archetypes.push(declaration);
+                    if archetypes.len() > self.limits.maximum_archetypes {
+                        return Err(ManifestError::ArchetypeCount {
+                            actual: archetypes.len(),
+                            maximum: self.limits.maximum_archetypes,
+                        });
+                    }
+                }
                 "title" => {
                     title = Some(single_metadata("title", fields, title.is_some())?);
                 }
@@ -257,10 +281,12 @@ impl ManifestEventVerifier {
             kind,
             d_tag,
             aggregate: manifest.aggregate.clone(),
+            signed_event_json,
             artifact: manifest,
             mode,
             requirements: requirements.into(),
             servers: servers.into(),
+            archetypes: archetypes.into(),
             title,
             description,
             source,

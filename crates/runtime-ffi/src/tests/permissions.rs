@@ -137,25 +137,44 @@ fn permission_review_and_atomic_batch_are_exact_typed_and_restart_safe() {
 }
 
 #[test]
-fn good_morning_outbox_grant_survives_default_profile_restart() {
+fn outbox_grant_survives_default_profile_restart() {
     let temp = TempDir::new().unwrap();
-    let runtime = controller(&temp);
+    let (event, author, digest) = signed_manifest_event(
+        "restart-grant-test",
+        b"<html>restart-grant</html>",
+        vec![
+            vec!["requires".to_owned(), "identity".to_owned()],
+            vec!["requires".to_owned(), "inc".to_owned()],
+            vec!["requires".to_owned(), "outbox".to_owned()],
+        ],
+    );
+    let coordinate = ArtifactCoordinate::Named {
+        author: author.clone(),
+        d_tag: "restart-grant-test".to_owned(),
+    };
+    let runtime = RuntimeController::open(
+        RuntimeConfig {
+            runtime_store_path: temp.path().join("runtime.sqlite3").display().to_string(),
+            nmp_store_path: None,
+            artifact_cache_path: temp.path().join("artifacts").display().to_string(),
+            ..RuntimeConfig::default()
+        },
+        Box::new(FixtureSource(BTreeMap::from([(
+            digest.clone(),
+            b"<html>restart-grant</html>".to_vec(),
+        )]))),
+    )
+    .unwrap();
     let artifact = runtime
-        .verify_artifact(
-            EVENT.to_vec(),
-            ArtifactCoordinate::Named {
-                author: AUTHOR.to_owned(),
-                d_tag: "good-morning".to_owned(),
-            },
-        )
+        .verify_artifact(event.clone(), coordinate.clone())
         .artifact
-        .expect("published fixture verifies");
+        .expect("locally signed fixture verifies");
     runtime.install(Arc::clone(&artifact));
     let coordinate = exact_coordinate(&artifact);
     let review = runtime
         .permission_review(coordinate.clone())
         .review
-        .expect("installed Good Morning has a permission review");
+        .expect("installed napplet has a permission review");
     let update = runtime.apply_permission_decisions(RuntimePermissionDecisionBatch {
         coordinate: coordinate.clone(),
         decisions: review
@@ -163,10 +182,7 @@ fn good_morning_outbox_grant_survives_default_profile_restart() {
             .iter()
             .map(|capability| RuntimePermissionDecisionSelection {
                 domain: capability.domain.clone(),
-                decision: match capability.requirement {
-                    RuntimePermissionRequirement::Required => RuntimeGrantDecision::AllowExactBuild,
-                    RuntimePermissionRequirement::Optional => RuntimeGrantDecision::Denied,
-                },
+                decision: RuntimeGrantDecision::AllowExactBuild,
             })
             .collect(),
     });
@@ -175,22 +191,34 @@ fn good_morning_outbox_grant_survives_default_profile_restart() {
     runtime.close();
     drop(runtime);
 
-    let reopened = controller(&temp);
+    let reopened = RuntimeController::open(
+        RuntimeConfig {
+            runtime_store_path: temp.path().join("runtime.sqlite3").display().to_string(),
+            nmp_store_path: None,
+            artifact_cache_path: temp.path().join("artifacts").display().to_string(),
+            ..RuntimeConfig::default()
+        },
+        Box::new(FixtureSource(BTreeMap::from([(
+            digest,
+            b"<html>restart-grant</html>".to_vec(),
+        )]))),
+    )
+    .unwrap();
     let artifact = reopened
         .verify_artifact(
-            EVENT.to_vec(),
+            event,
             ArtifactCoordinate::Named {
-                author: AUTHOR.to_owned(),
-                d_tag: "good-morning".to_owned(),
+                author,
+                d_tag: "restart-grant-test".to_owned(),
             },
         )
         .artifact
-        .expect("published fixture verifies after restart");
+        .expect("locally signed fixture verifies after restart");
     reopened.install(Arc::clone(&artifact));
     let review = reopened
         .permission_review(coordinate)
         .review
-        .expect("Good Morning review restores after restart");
+        .expect("review restores after restart");
     for domain in ["identity", "inc", "outbox"] {
         let capability = review
             .capabilities

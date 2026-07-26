@@ -10,18 +10,21 @@ use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 
 mod aggregate;
+mod archetype;
 mod file_cache;
 mod manifest;
 mod resolver;
 
 pub(crate) use aggregate::nip5a_path_tags_aggregate;
 pub use aggregate::{FramedSha256Aggregate, MemoryBlobSource, Nip5aPathTagsAggregate};
+pub use archetype::ArchetypeDeclaration;
 pub use file_cache::FileArtifactCache;
 pub use manifest::{
     ArtifactMode, ArtifactSourcePolicy, BlobFetchRequest, BlobFetchResponse, ManifestBlobSource,
     ManifestCoordinate, ManifestError, ManifestEventLimits, ManifestEventVerifier,
     SignedArtifactResolver, VerifiedArtifactHandle, VerifiedArtifactIndex,
     VerifiedArtifactIndexEntry, VerifiedManifest, embedded_config_schema, embedded_requirements,
+    reopen_verified_artifact,
 };
 pub use resolver::{ArtifactResolver, CachedArtifact};
 

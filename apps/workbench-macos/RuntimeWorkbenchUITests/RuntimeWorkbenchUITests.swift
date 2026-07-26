@@ -90,16 +90,10 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         )
         reopenReview.click()
 
+        // The sheet offers one switch per capability. Which scope each grant
+        // uses is Rust's `recommendedDecision`, not a choice this suite makes.
         for domain in ["identity", "inc", "outbox"] {
-            let decision = scrollPermissionDecisionIntoView(
-                domain: domain,
-                in: app
-            )
-            let allow = app.descendants(matching: .any)[
-                "permission-\(domain)-allowExactBuild"
-            ]
-            XCTAssertTrue(openDecisionMenu(decision, revealing: allow, in: app))
-            allow.click()
+            grantPermission(domain: domain, in: app)
         }
 
         let confirm = app.descendants(matching: .any)["permission-confirm"]
@@ -256,19 +250,11 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         )
 
         for domain in ["inc", "link", "resource", "theme"] {
-            let decision = scrollPermissionDecisionIntoView(
+            grantPermission(
                 domain: domain,
                 in: app,
-                message: "The \(domain) decision must be reachable in the native review"
+                message: "The \(domain) switch must be reachable in the native review"
             )
-            let allow = app.descendants(matching: .any)[
-                "permission-\(domain)-allowExactBuild"
-            ]
-            XCTAssertTrue(
-                openDecisionMenu(decision, revealing: allow, in: app),
-                "The runtime must offer an exact-build grant for \(domain)"
-            )
-            allow.click()
         }
 
         XCTAssertTrue(permissionConfirm.isEnabled)

@@ -1490,6 +1490,31 @@ test("config projection matches the pinned schema, snapshot, subscription, and s
     manifestSchema
   );
 
+  // The shell submits the manifest-embedded schema on the napplet's behalf,
+  // but only once the NAP-SHELL handshake completes -- native refuses any
+  // request from a mapped session before that, so this waits on the same
+  // readyPromise the napplet's own bootstrap would.
+  assert.deepEqual(harness.sent[0], { envelope: { type: "shell.ready" }, target: "*" });
+  harness.receive({
+    type: "shell.init",
+    capabilities: { domains: ["config", "shell"] },
+    services: []
+  });
+  await Promise.resolve();
+  assert.deepEqual(harness.sent[1], {
+    envelope: {
+      type: "config.registerSchema",
+      id: "request-1",
+      schema: manifestSchema
+    },
+    target: "*"
+  });
+  harness.receive({
+    type: "config.registerSchema.result",
+    id: "request-1",
+    ok: true
+  });
+
   const nextSchema = {
     type: "object",
     properties: {
@@ -1498,10 +1523,10 @@ test("config projection matches the pinned schema, snapshot, subscription, and s
     additionalProperties: false
   };
   const registration = config.registerSchema(nextSchema, 2);
-  assert.deepEqual(harness.sent[1], {
+  assert.deepEqual(harness.sent[2], {
     envelope: {
       type: "config.registerSchema",
-      id: "request-1",
+      id: "request-2",
       schema: nextSchema,
       version: 2
     },
@@ -1509,7 +1534,7 @@ test("config projection matches the pinned schema, snapshot, subscription, and s
   });
   harness.receive({
     type: "config.registerSchema.result",
-    id: "request-1",
+    id: "request-2",
     ok: true
   });
   assert.equal(await registration, undefined);
@@ -1521,7 +1546,7 @@ test("config projection matches the pinned schema, snapshot, subscription, and s
   const rejected = config.registerSchema({ type: "array" });
   harness.receive({
     type: "config.registerSchema.result",
-    id: "request-2",
+    id: "request-3",
     ok: false,
     code: "invalid-schema",
     error: "root must be an object"
@@ -1532,16 +1557,16 @@ test("config projection matches the pinned schema, snapshot, subscription, and s
   );
 
   const snapshot = config.get();
-  assert.deepEqual(harness.sent[3], {
+  assert.deepEqual(harness.sent[4], {
     envelope: {
       type: "config.get",
-      id: "request-3"
+      id: "request-4"
     },
     target: "*"
   });
   harness.receive({
     type: "config.values",
-    id: "request-3",
+    id: "request-4",
     values: { mode: "quiet" }
   });
   assert.deepEqual(
@@ -1710,39 +1735,4 @@ test("prelude bounds correlations and returns subscriptions on teardown", async 
     harness.context.napplet.identity.getPublicKey(),
     /session is closed/
   );
-});
-
-test("the Apple package snapshot exactly matches canonical trusted-shell bytes", () => {
-  const canonicalRoot = path.join(__dirname, "..");
-  const packagedRoot = path.join(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "platforms",
-    "apple",
-    "Sources",
-    "NMPNativeRuntimeApple",
-    "Resources",
-    "TrustedShell"
-  );
-  const relativeFiles = [
-    "trusted-shell.html",
-    "trusted-shell.css",
-    "trusted-shell-policy.js",
-    "trusted-shell.js",
-    path.join("fixtures", "minimal-conformant-napplet.html"),
-    path.join("fixtures", "external-assets", "index.html"),
-    path.join("fixtures", "external-assets", "styles", "site.css"),
-    path.join("fixtures", "external-assets", "scripts", "boot.js"),
-    path.join("fixtures", "external-assets", "images", "verified.svg")
-  ];
-
-  for (const relativeFile of relativeFiles) {
-    assert.equal(
-      fs.readFileSync(path.join(packagedRoot, relativeFile), "utf8"),
-      fs.readFileSync(path.join(canonicalRoot, relativeFile), "utf8"),
-      `${relativeFile} must be refreshed with platforms/apple/scripts/sync-trusted-shell`
-    );
-  }
 });

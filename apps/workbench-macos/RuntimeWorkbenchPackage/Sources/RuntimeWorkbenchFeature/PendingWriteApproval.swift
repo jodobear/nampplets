@@ -166,10 +166,10 @@ struct ReceiptStatusBar: View {
     }
 
     private var symbol: String {
-        receipt.delivery.contains("pending") ? "clock" : "checkmark.seal.fill"
+        receipt.status == .pending ? "clock" : "checkmark.seal.fill"
     }
 
     private var color: Color {
-        receipt.delivery.contains("pending") ? .orange : .green
+        receipt.status == .pending ? .orange : .green
     }
 }

@@ -32,11 +32,7 @@ final class RuntimeWorkbenchiOSUITests: XCTestCase {
             "full-window-layout-transition"
         app.launch()
 
-        let mountedContent = app.descendants(matching: .any)
-            .matching(
-                NSPredicate(format: "label == %@", "View mode")
-            )
-            .firstMatch
+        let mountedContent = app.descendants(matching: .any)["bundled-napplet"]
         XCTAssertTrue(
             mountedContent.waitForExistence(timeout: 15),
             "The verified Good Morning napplet must mount before changing layout"

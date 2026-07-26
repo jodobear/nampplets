@@ -73,9 +73,16 @@ pub struct RuntimeBindingSnapshot {
     pub revision: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RuntimeReceiptStatus {
+    Pending,
+    Delivered,
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct RuntimeReceiptSnapshot {
     pub receipt_id: String,
+    pub status: RuntimeReceiptStatus,
     pub delivery: String,
     pub latest_state_json: Option<String>,
 }

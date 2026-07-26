@@ -10,7 +10,7 @@ mod preferences;
 mod providers;
 mod session;
 mod snapshot;
-mod support;
+pub(crate) mod support;
 mod workspace;
 
 use std::{
@@ -25,6 +25,7 @@ use std::{
 
 use nmp_native_artifact::{ArtifactLimits, FileArtifactCache, VerifiedArtifactHandle};
 use nmp_native_nmp_adapter::NmpDataPlane;
+use nmp_native_provider_link::IntentProvider;
 use nmp_native_providers::{
     ConfigProvider, ShellEnvironment, ShellEnvironmentError, ShellEnvironmentLimits,
     ShellEnvironmentSource, ThemeProvider,
@@ -67,7 +68,8 @@ pub struct RuntimeController {
     theme_source: Option<Arc<RuntimeThemeSource>>,
     theme_provider: Option<Arc<ThemeProvider>>,
     config_provider: Option<Arc<ConfigProvider>>,
-    pub(crate) artifacts: Mutex<BTreeMap<Principal, Arc<VerifiedArtifactHandle>>>,
+    pub(crate) intent_provider: Arc<IntentProvider>,
+    pub(crate) artifacts: Arc<Mutex<BTreeMap<Principal, Arc<VerifiedArtifactHandle>>>>,
     boundary_refusals: Mutex<BoundedFacts<RuntimeRefusal>>,
     projection_fault_latch: Mutex<ProjectionFaultLatch>,
     maximum_boundary_events: usize,

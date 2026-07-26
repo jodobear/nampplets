@@ -224,15 +224,22 @@ func persistedInstalledCanvasBuildIsPlannedReacquiredAndLaunched() throws {
         )
         #expect(plan.identities == [identity])
 
-        guard case let .refused(directFailure) =
+        // A restarted profile no longer needs a network-backed resolver to
+        // reopen an installed exact build: Rust re-verifies the signed
+        // manifest event it retained at install time against the sealed
+        // artifact cache, entirely offline.
+        guard case let .installed(directly) =
             profile.reacquireInstalledArtifact(for: identity)
         else {
             Issue.record(
-                "A restarted profile unexpectedly retained an executable handle"
+                "A restarted profile must reopen the sealed exact build offline"
             )
             return
         }
-        #expect(directFailure.code == "artifact-handle-unavailable")
+        #expect(
+            directly.installedArtifact.permissionCoordinate.aggregateHash
+                == GoodMorningFixture.aggregateHash
+        )
 
         let installation = try #require(
             reacquiredInstallation(

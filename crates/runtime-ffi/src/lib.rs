@@ -12,6 +12,7 @@ mod catalog;
 mod config;
 mod controller;
 mod diagnostics;
+mod intent_dispatch;
 mod native_capabilities;
 mod permission_types;
 mod profile_preferences;
@@ -44,6 +45,7 @@ pub use diagnostics::{
     RuntimeRelayDiagnosticsObserver, RuntimeRelayDiagnosticsSnapshot, RuntimeRelayKindCount,
     RuntimeRelayLane, RuntimeRelayLaneCount, RuntimeRelaySubscription,
 };
+pub use intent_dispatch::{NativeIntentActivationExecutor, NativeIntentActivationRequest};
 pub use native_capabilities::{
     ArtifactFetchRequest, ArtifactFetchResponse, ArtifactSource, NativeAppearanceSnapshot,
     NativeAppearanceSource, NativeIncActionEnd, NativeIncActionEnqueueResult,
@@ -66,10 +68,10 @@ pub use snapshot_types::{
     ObservationStart, RuntimeBindingSnapshot, RuntimeErrorSnapshot, RuntimeEvent,
     RuntimeExactBuildCoordinate, RuntimeInstalledBuildAvailability, RuntimeInstalledBuildSnapshot,
     RuntimeInstalledLibrarySnapshot, RuntimeObservation, RuntimeObservationFrame, RuntimeObserver,
-    RuntimePendingWriteSnapshot, RuntimeReceiptSnapshot, RuntimeSessionSnapshot, RuntimeSnapshot,
-    RuntimeSnapshotProjection, RuntimeWorkspaceAxis, RuntimeWorkspaceDefinition,
-    RuntimeWorkspaceRenderer, RuntimeWorkspaceRestore, RuntimeWorkspaceRole, RuntimeWorkspaceSlot,
-    RuntimeWorkspaceUpdate,
+    RuntimePendingWriteSnapshot, RuntimeReceiptSnapshot, RuntimeReceiptStatus,
+    RuntimeSessionSnapshot, RuntimeSnapshot, RuntimeSnapshotProjection, RuntimeWorkspaceAxis,
+    RuntimeWorkspaceDefinition, RuntimeWorkspaceRenderer, RuntimeWorkspaceRestore,
+    RuntimeWorkspaceRole, RuntimeWorkspaceSlot, RuntimeWorkspaceUpdate,
 };
 pub use types::{
     ArtifactCoordinate, ArtifactExecutionMode, ArtifactVerification, NativeConfigCommit,
@@ -80,6 +82,7 @@ pub use types::{
 pub(crate) const DEFAULT_MAXIMUM_CONFIG_STRING_BYTES: u64 = 16 * 1_024;
 pub(crate) const DEFAULT_MAXIMUM_CONFIG_ITEMS: u64 = 64;
 pub(crate) const DEFAULT_MAXIMUM_MANIFEST_BYTES: u64 = 256 * 1_024;
+pub(crate) const MAXIMUM_INSTALLED_MANIFEST_METADATA_BYTES: usize = 512 * 1_024;
 pub(crate) const DEFAULT_MAXIMUM_ARTIFACT_READ_BYTES: u64 = 8 * 1_024 * 1_024;
 pub(crate) const DEFAULT_MAXIMUM_OBSERVERS: u64 = 8;
 pub(crate) const DEFAULT_MAXIMUM_BOUNDARY_EVENTS: u64 = 256;

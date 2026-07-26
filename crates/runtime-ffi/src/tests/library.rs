@@ -148,7 +148,7 @@ fn installed_artifact_reacquisition_reuses_the_live_exact_handle() {
 }
 
 #[test]
-fn persisted_install_without_a_live_handle_fails_closed_after_restart() {
+fn persisted_install_reopens_offline_from_the_sealed_cache_after_restart() {
     let temp = TempDir::new().unwrap();
     let runtime = controller(&temp);
     let artifact = runtime
@@ -156,7 +156,7 @@ fn persisted_install_without_a_live_handle_fails_closed_after_restart() {
             EVENT.to_vec(),
             ArtifactCoordinate::Named {
                 author: AUTHOR.to_owned(),
-                d_tag: "good-morning".to_owned(),
+                d_tag: GOOD_MORNING_D_TAG.to_owned(),
             },
         )
         .artifact
@@ -167,15 +167,71 @@ fn persisted_install_without_a_live_handle_fails_closed_after_restart() {
     drop(runtime);
 
     let reopened = controller(&temp);
-    let result = reopened.reacquire_installed_artifact(coordinate);
     assert_eq!(
         reopened.snapshot_value().installed_library.builds[0].availability,
         RuntimeInstalledBuildAvailability::MetadataOnly
     );
+    let result = reopened.reacquire_installed_artifact(coordinate);
+    assert!(result.failure.is_none());
+    let confirmation = result.confirmation.expect("exact confirmation");
+    assert_eq!(confirmation.manifest_author, AUTHOR);
+    assert_eq!(confirmation.d_tag.as_deref(), Some(GOOD_MORNING_D_TAG));
+    assert_eq!(confirmation.aggregate_hash, GOOD_MORNING_AGGREGATE_HASH);
+    assert_eq!(
+        result
+            .artifact
+            .expect("opaque artifact")
+            .handle
+            .read_verified(nmp_native_artifact::INDEX_PATH, INDEX.len())
+            .unwrap(),
+        INDEX
+    );
+    // No network fetch happened -- this is offline reopen from the
+    // sealed cache -- and the runtime's own live handle map now has the
+    // reconstructed artifact attached, same as after a fresh install.
+    assert_eq!(
+        reopened.snapshot_value().installed_library.builds[0].availability,
+        RuntimeInstalledBuildAvailability::SealedExactBytesReady
+    );
+}
+
+#[test]
+fn reacquire_refuses_a_legacy_install_with_no_retained_signed_event() {
+    let temp = TempDir::new().unwrap();
+    let runtime = controller(&temp);
+    let artifact = runtime
+        .verify_artifact(
+            EVENT.to_vec(),
+            ArtifactCoordinate::Named {
+                author: AUTHOR.to_owned(),
+                d_tag: GOOD_MORNING_D_TAG.to_owned(),
+            },
+        )
+        .artifact
+        .expect("fixture verifies");
+    runtime.install(Arc::clone(&artifact));
+    let coordinate = exact_coordinate(&artifact);
+    // Simulate a build installed before offline reopen was supported:
+    // its persisted manifest metadata has no retained signed event.
+    let mut legacy_build = runtime
+        .runtime_store
+        .installed_builds()
+        .unwrap()
+        .into_iter()
+        .find(|build| build.principal.manifest_author() == AUTHOR)
+        .expect("installed build");
+    legacy_build.manifest_metadata =
+        BoundedJson::from_value(&serde_json::json!({"event_id": "legacy"}), 4_096).unwrap();
+    runtime.runtime_store.install(&legacy_build).unwrap();
+    runtime.close();
+    drop(runtime);
+
+    let reopened = controller(&temp);
+    let result = reopened.reacquire_installed_artifact(coordinate);
     assert!(result.artifact.is_none());
     assert_eq!(
         result.failure.expect("typed refusal").code,
-        "artifact-handle-unavailable"
+        "installed-manifest-event-unavailable"
     );
 }
 

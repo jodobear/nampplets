@@ -17,6 +17,11 @@ extension ContentView {
                 handleNativeAction(action)
             }
         }
+        profile.native.setIntentActivationHandler { request in
+            Task { @MainActor in
+                handleIntentActivation(request)
+            }
+        }
         if await restorePersistedCanvasWindows() {
             return
         }
@@ -218,5 +223,38 @@ extension ContentView {
         )
         isInspectorPresented = true
         activity = "\(notice.title) from \(window.title)"
+    }
+
+    /// Handles a NAP-INTENT "create (if needed) and bring to front" signal.
+    /// Unlike `handleNativeAction`, this may fire before any window for the
+    /// handler exists yet -- `prepareInstalledArtifact` already contains the
+    /// exact "focus if open, otherwise install and launch" branch this
+    /// needs, so it is reused as-is rather than duplicated here.
+    @MainActor
+    func handleIntentActivation(
+        _ request: NativeIntentActivationHandlerRequest
+    ) {
+        guard let profile else {
+            activity = "Refused: the application runtime profile is unavailable"
+            return
+        }
+        let identity = WorkbenchExactBuildIdentity(
+            manifestAuthor: request.manifestAuthor,
+            dTag: request.dTag,
+            aggregateHash: request.aggregateHash
+        )
+        guard let installed = profile.installedCatalogArtifact(for: identity) else {
+            activity = "Refused: intent handler napplet is not installed"
+            return
+        }
+        do {
+            try prepareInstalledArtifact(
+                installed,
+                identity: identity,
+                presentation: .afterCatalogDismiss
+            )
+        } catch {
+            activity = "Refused: \(error.localizedDescription)"
+        }
     }
 }

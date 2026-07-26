@@ -34,6 +34,8 @@ extension ContentView {
                 inspectorOverviewTab
             case .relays:
                 inspectorRelaysTab
+            case .console:
+                inspectorConsoleTab
             }
 
             Spacer()
@@ -108,6 +110,18 @@ extension ContentView {
                 systemImage: "cursorarrow.click",
                 description: Text("Select a napplet window to inspect it.")
             )
+        }
+    }
+
+    @ViewBuilder
+    private var inspectorConsoleTab: some View {
+        let identity = layout.selectedWindow?.exactBuild
+        NappletConsoleTabView(
+            entries: consoleLog.entries(for: identity)
+        ) {
+            if let identity {
+                consoleLog.clear(for: identity)
+            }
         }
     }
 

@@ -526,4 +526,39 @@ extension RuntimeWorkbenchUITests {
             "The account sheet must close before permission review resumes"
         )
     }
+
+    /// Grants one capability through the review sheet's per-capability
+    /// switch. The sheet exposes a single switch per domain rather than a
+    /// scope menu: which scope a grant actually uses is Rust's
+    /// `recommendedDecision`, not something this suite picks.
+    @MainActor
+    @discardableResult
+    func grantPermission(
+        domain: String,
+        in app: XCUIApplication,
+        message: String? = nil
+    ) -> Bool {
+        let toggle = app.descendants(matching: .any)[
+            "permission-toggle-\(domain)"
+        ]
+        guard toggle.waitForExistence(timeout: 10) else {
+            XCTFail(
+                message
+                    ?? "The \(domain) permission switch must exist in the native review"
+            )
+            return false
+        }
+        let anchor = app.buttons["permission-scroll-to-\(domain)"]
+        if anchor.waitForExistence(timeout: 2) {
+            anchor.click()
+            _ = waitForStableFrame(toggle, timeout: 5)
+        } else {
+            _ = scrollToHittable(toggle, in: app)
+        }
+        if (toggle.value as? String) == "1" {
+            return true
+        }
+        toggle.click()
+        return true
+    }
 }

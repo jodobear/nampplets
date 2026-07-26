@@ -53,6 +53,10 @@ function createServer(shellRoot, fixtureRoot) {
     ["/trusted-shell.html", path.join(shellRoot, "trusted-shell.html")],
     ["/trusted-shell.js", path.join(shellRoot, "trusted-shell.js")],
     ["/trusted-shell-policy.js", path.join(shellRoot, "trusted-shell-policy.js")],
+    [
+      "/trusted-shell-prelude-domains.js",
+      path.join(shellRoot, "trusted-shell-prelude-domains.js")
+    ],
     ["/trusted-shell.css", path.join(shellRoot, "trusted-shell.css")],
   ]);
 

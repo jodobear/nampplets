@@ -5,6 +5,7 @@ import SwiftUI
 enum InspectorTab: String, CaseIterable, Identifiable {
     case overview
     case relays
+    case console
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
         switch self {
         case .overview: "Overview"
         case .relays: "Relays"
+        case .console: "Console"
         }
     }
 }
@@ -53,6 +55,7 @@ public struct ContentView: View {
         Set<WorkbenchExactBuildIdentity> = []
     @State var launchingIdentities:
         Set<WorkbenchExactBuildIdentity> = []
+    @State var consoleLog = NappletConsoleLog()
     @State var layout: WorkbenchLayoutModel
     @State var fullWindowRootID: WorkbenchWindowID?
     @State var fullWindowPath: [WorkbenchWindowID] = []
@@ -250,6 +253,7 @@ public struct ContentView: View {
             pendingLayoutSave?.cancel()
             persistLayoutImmediately()
             profile?.native.setIncActionHandler(nil)
+            profile?.native.setIntentActivationHandler(nil)
         }
         #if os(macOS)
         .frame(minWidth: 1_050, minHeight: 660)

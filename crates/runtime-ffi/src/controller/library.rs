@@ -1,20 +1,26 @@
 //! Artifact verification, installation, and installed-library commands.
 
-use std::sync::{Arc, atomic::Ordering};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, atomic::Ordering},
+};
+
+use base64::Engine as _;
 
 use nmp_native_artifact::{
     ArtifactMode, ArtifactSourcePolicy, ManifestEventLimits, ManifestEventVerifier,
-    SignedArtifactResolver,
+    SignedArtifactResolver, VerifiedArtifactHandle,
 };
+use nmp_native_provider_link::IntentHandlerDeclaration;
 use nmp_native_runtime_app::{ExecutableArtifact, PermissionDecision, PlatformCommand};
 use nmp_native_runtime_core::{BoundedJson, GrantDecision, Principal};
 use nmp_native_runtime_store::{InstalledBuild, UninstallCleanupPolicy};
 
 use super::{RuntimeController, support::installation_capability_requests};
 use crate::{
-    ArtifactCoordinate, ArtifactVerification, RuntimeExactBuildCoordinate, RuntimePermissionMode,
-    VerifiedArtifact, projection::map_coordinate, support::bump_signal,
-    workspace::validate_workspace_name,
+    ArtifactCoordinate, ArtifactVerification, MAXIMUM_INSTALLED_MANIFEST_METADATA_BYTES,
+    RuntimeExactBuildCoordinate, RuntimePermissionMode, VerifiedArtifact,
+    projection::map_coordinate, support::bump_signal, workspace::validate_workspace_name,
 };
 
 #[uniffi::export]
@@ -127,14 +133,21 @@ impl RuntimeController {
                 ArtifactMode::ExternalAssets => "external-assets",
             },
             "paths": artifact.handle.index().entries().len(),
+            // Retained so `reacquire_installed_artifact` can reopen this
+            // exact build after a process restart by re-verifying the same
+            // signed event against the sealed cache, with no network fetch
+            // and no risk of silently accepting a since-republished event.
+            "signed_event_b64": base64::engine::general_purpose::STANDARD
+                .encode(artifact.handle.manifest().signed_event_json()),
         });
-        let metadata = match BoundedJson::from_value(&metadata, 256 * 1_024) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                self.record_refusal("manifest-metadata", error.to_string());
-                return;
-            }
-        };
+        let metadata =
+            match BoundedJson::from_value(&metadata, MAXIMUM_INSTALLED_MANIFEST_METADATA_BYTES) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    self.record_refusal("manifest-metadata", error.to_string());
+                    return;
+                }
+            };
         let title: Arc<str> = Arc::from(
             artifact
                 .handle
@@ -162,6 +175,7 @@ impl RuntimeController {
             },
             artifact: executable,
         });
+        self.register_intent_handler(&principal, &artifact.handle);
         self.grant_demo_permissions(
             principal.manifest_author(),
             principal.d_tag(),
@@ -257,6 +271,7 @@ impl RuntimeController {
             .any(|candidate| candidate.build.principal == principal);
         if !remains_installed {
             self.artifacts.lock().remove(&principal);
+            self.intent_provider.unregister_handler(&principal);
         }
         bump_signal(&self.signal);
     }
@@ -301,5 +316,43 @@ impl RuntimeController {
             principal,
         });
         bump_signal(&self.signal);
+    }
+}
+
+impl RuntimeController {
+    /// Registers this napplet as a NAP-INTENT handler for every archetype it
+    /// declared. Refusals are recorded, not propagated -- an invalid or
+    /// oversized archetype declaration should never block the rest of an
+    /// otherwise-valid install.
+    pub(super) fn register_intent_handler(
+        &self,
+        principal: &Principal,
+        handle: &VerifiedArtifactHandle,
+    ) {
+        let mut by_slug: BTreeMap<Arc<str>, BTreeSet<Arc<str>>> = BTreeMap::new();
+        for declaration in handle.manifest().archetypes() {
+            by_slug
+                .entry(Arc::clone(&declaration.slug))
+                .or_default()
+                .insert(Arc::clone(&declaration.protocol));
+        }
+        if by_slug.is_empty() {
+            return;
+        }
+        let declarations = by_slug
+            .into_iter()
+            .map(|(archetype, conventions)| IntentHandlerDeclaration {
+                archetype,
+                title: None,
+                actions: BTreeSet::from([Arc::from("open")]),
+                conventions,
+            })
+            .collect();
+        if let Err(error) = self
+            .intent_provider
+            .register_handler(principal.clone(), declarations)
+        {
+            self.record_refusal("intent-handler-registration", error.to_string());
+        }
     }
 }
