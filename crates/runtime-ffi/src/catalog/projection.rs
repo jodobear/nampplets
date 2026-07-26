@@ -10,7 +10,7 @@ use super::types::{
 };
 use crate::RuntimePermissionRequirement;
 use nmp::WindowLoad;
-use nmp_native_artifact::ManifestCoordinate;
+use nmp_native_artifact::{ManifestCoordinate, VerifiedArtifactHandle};
 use nmp_native_catalog_resolver::{CoordinateLookupFact, CoordinateLookupState, ResolveError};
 use nmp_native_nmp_adapter::catalog::{
     CatalogAccessContext, CatalogBrowseFrame, CatalogManifestCandidate, CatalogShortfall,
@@ -113,16 +113,20 @@ pub(super) fn project_source(source: &CatalogSourceEvidence) -> RuntimeCatalogSo
     }
 }
 
-pub(super) fn review_capabilities(
-    summary: &nmp_native_catalog_resolver::ArtifactReviewSummary,
-) -> Vec<RuntimeCatalogCapability> {
-    summary
-        .requirements()
+pub(super) fn authenticated_review_capabilities(
+    handle: &VerifiedArtifactHandle,
+) -> Result<Vec<RuntimeCatalogCapability>, RuntimeCatalogError> {
+    Ok(handle
+        .authenticated_requirements()
+        .map_err(|error| RuntimeCatalogError::Resolve {
+            reason: format!("authenticated requirements are unavailable: {error}"),
+        })?
+        .into_iter()
         .map(|domain| RuntimeCatalogCapability {
-            domain: domain.to_owned(),
+            domain,
             requirement: RuntimePermissionRequirement::Required,
         })
-        .collect()
+        .collect())
 }
 
 pub(super) fn coordinate_identity(coordinate: &ManifestCoordinate) -> (String, Option<String>) {
