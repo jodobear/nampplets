@@ -7,12 +7,14 @@
 
 use nmp_native_runtime_core::CapabilityRequirement;
 
+mod activity;
 mod catalog;
 mod config;
 mod controller;
 mod diagnostics;
 mod native_capabilities;
 mod permission_types;
+mod profile_preferences;
 mod projection;
 mod snapshot_types;
 mod support;
@@ -22,6 +24,7 @@ mod workspace;
 #[cfg(test)]
 mod tests;
 
+pub use activity::{RuntimeActivityDetail, RuntimeActivityDetailValue, RuntimeActivitySnapshot};
 pub use catalog::{
     RuntimeCatalogCancellationResult, RuntimeCatalogCapability, RuntimeCatalogConfirmation,
     RuntimeCatalogConfirmationResult, RuntimeCatalogEntry, RuntimeCatalogFailure,
@@ -30,7 +33,9 @@ pub use catalog::{
     RuntimeCatalogReviewResult, RuntimeCatalogShortfall, RuntimeCatalogSource,
     RuntimeCatalogSourceAccess, RuntimeCatalogSourceState, RuntimeCatalogWindowState,
 };
-pub use config::{RuntimeConfig, RuntimeOpenError, RuntimePermissionMode};
+pub use config::{
+    RuntimeConfig, RuntimeOpenError, RuntimePermissionDefault, RuntimePermissionMode,
+};
 pub use controller::RuntimeController;
 pub use diagnostics::{
     RuntimeRelayAccess, RuntimeRelayCoverage, RuntimeRelayDiagnostics,
@@ -52,14 +57,17 @@ pub use permission_types::{
     RuntimePermissionRequirement, RuntimePermissionReviewResult, RuntimePermissionReviewSnapshot,
     RuntimePermissionSensitivity, RuntimeSensitivity,
 };
+pub use profile_preferences::{
+    RuntimeProfilePreferences, RuntimeProfilePreferencesUpdate, RuntimeStorageResetResult,
+    RuntimeStorageSnapshot,
+};
 pub use snapshot_types::{
-    ObservationStart, RuntimeActivitySnapshot, RuntimeBindingSnapshot, RuntimeErrorSnapshot,
-    RuntimeEvent, RuntimeExactBuildCoordinate, RuntimeInstalledBuildAvailability,
-    RuntimeInstalledBuildSnapshot, RuntimeInstalledLibrarySnapshot, RuntimeObservation,
-    RuntimeObservationFrame, RuntimeObserver, RuntimePendingWriteSnapshot, RuntimeReceiptSnapshot,
-    RuntimeSessionSnapshot, RuntimeSnapshot, RuntimeWorkspaceAxis, RuntimeWorkspaceDefinition,
-    RuntimeWorkspaceRenderer, RuntimeWorkspaceRestore, RuntimeWorkspaceRole, RuntimeWorkspaceSlot,
-    RuntimeWorkspaceUpdate,
+    ObservationStart, RuntimeBindingSnapshot, RuntimeErrorSnapshot, RuntimeEvent,
+    RuntimeExactBuildCoordinate, RuntimeInstalledBuildAvailability, RuntimeInstalledBuildSnapshot,
+    RuntimeInstalledLibrarySnapshot, RuntimeObservation, RuntimeObservationFrame, RuntimeObserver,
+    RuntimePendingWriteSnapshot, RuntimeReceiptSnapshot, RuntimeSessionSnapshot, RuntimeSnapshot,
+    RuntimeWorkspaceAxis, RuntimeWorkspaceDefinition, RuntimeWorkspaceRenderer,
+    RuntimeWorkspaceRestore, RuntimeWorkspaceRole, RuntimeWorkspaceSlot, RuntimeWorkspaceUpdate,
 };
 pub use types::{
     ArtifactCoordinate, ArtifactExecutionMode, ArtifactVerification, NativeConfigCommit,

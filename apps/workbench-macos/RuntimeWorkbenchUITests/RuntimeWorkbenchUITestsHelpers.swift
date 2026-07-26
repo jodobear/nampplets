@@ -1,7 +1,120 @@
 import Foundation
 import XCTest
 
+#if canImport(AppKit)
+    import AppKit
+#endif
+
 extension RuntimeWorkbenchUITests {
+    /// The identifier the Workbench app builds under — and, because it is
+    /// hard-coded rather than derived from the checkout, the *same*
+    /// identifier in every worktree on the machine
+    /// (`apps/workbench-macos/Config/Shared.xcconfig`,
+    /// `PRODUCT_BUNDLE_IDENTIFIER`). See issue #147.
+    static let workbenchBundleIdentifier = "io.f7z.nmp.runtime-workbench"
+
+    /// Logs whether the app under test was still alive at the moment a
+    /// failure was recorded.
+    ///
+    /// `Failed to get matching snapshots: Lost connection to the
+    /// application (pid …)` has two candidate explanations that produce an
+    /// identical message and, in both cases, no crash report — so nobody
+    /// has been able to tell them apart from the logs alone:
+    ///
+    /// * **Termination.** Every worktree builds the same
+    ///   `PRODUCT_BUNDLE_IDENTIFIER`, and `XCUIApplication.launch()`
+    ///   terminates any already-running instance of that bundle id, so
+    ///   concurrent UI runs from different worktrees kill each other's app
+    ///   (issue #147). Clean termination, no crash report, death at an
+    ///   arbitrary point in the victim's timeline.
+    /// * **Connection loss.** The AX / `testmanagerd` channel drops under
+    ///   load while the app process itself keeps running.
+    ///
+    /// The discriminator is simply whether the process is still there:
+    /// **app gone ⇒ termination; app alive ⇒ connection loss.**
+    ///
+    /// Two things make the answer trustworthy. First, this runs from
+    /// `record(_:)`, at failure time, not from `tearDown` — see the
+    /// override for why that matters. Second, it checks the *specific* pid
+    /// named in the failure message wherever one is present, not just "is
+    /// something with this bundle id running": under the termination
+    /// hypothesis the killer's own app is running under that same bundle
+    /// id, so a bundle-id-only lookup would report "alive" for the very
+    /// case it is supposed to detect. The bundle-id census is logged
+    /// alongside as corroboration — a surviving peer instance with a
+    /// different pid is the termination signature.
+    ///
+    /// Costs nothing on a green run: `record(_:)` only fires on failure.
+    func logAppLivenessDiagnostic(for issue: XCTIssue) {
+        let description = issue.compactDescription
+        var fields = [
+            String(
+                format: "elapsed=%.2fs",
+                Date().timeIntervalSince(testStartedAt)
+            ),
+            "bundleID=\(Self.workbenchBundleIdentifier)",
+        ]
+
+        if let pid = Self.applicationPID(inFailureDescription: description) {
+            let alive = Self.processExists(pid)
+            fields.append("reportedPID=\(pid)")
+            fields.append("reportedPIDAlive=\(alive)")
+            fields.append(
+                "verdict="
+                    + (alive
+                        ? "app-alive-so-connection-loss"
+                        : "app-gone-so-termination")
+            )
+        } else {
+            fields.append("reportedPID=none")
+            fields.append("verdict=no-pid-in-failure-message")
+        }
+
+        fields.append(
+            "runningInstancePIDs=\(Self.runningWorkbenchProcessIdentifiers())"
+        )
+
+        NSLog(
+            "app-liveness-at-failure: %@ | issue=%@",
+            fields.joined(separator: " "),
+            description
+        )
+    }
+
+    /// The pid XCTest names in `Lost connection to the application (pid N)`,
+    /// when the failure carries one.
+    static func applicationPID(
+        inFailureDescription description: String
+    ) -> pid_t? {
+        guard
+            let range = description.range(
+                of: #"pid\s+\d+"#,
+                options: [.regularExpression, .caseInsensitive]
+            )
+        else {
+            return nil
+        }
+        return pid_t(description[range].drop { !$0.isNumber })
+    }
+
+    /// Whether `pid` still names a live process. `EPERM` counts as alive:
+    /// the process exists, this one simply may not signal it.
+    static func processExists(_ pid: pid_t) -> Bool {
+        kill(pid, 0) == 0 || errno == EPERM
+    }
+
+    /// Every process currently registered under the Workbench bundle id,
+    /// including instances launched from other worktrees.
+    static func runningWorkbenchProcessIdentifiers() -> [pid_t] {
+        #if canImport(AppKit)
+            return NSRunningApplication.runningApplications(
+                withBundleIdentifier: workbenchBundleIdentifier
+            ).map(\.processIdentifier)
+        #else
+            return []
+        #endif
+    }
+
     @MainActor
     func dismissCatalogReview(in app: XCUIApplication) {
         let cancel = app.buttons.matching(identifier: "Cancel").firstMatch
@@ -240,14 +353,41 @@ extension RuntimeWorkbenchUITests {
     /// Retrying the click (instead of only waiting longer for a menu that
     /// was never opened) recovers deterministically without weakening what
     /// this is actually asserting: that the runtime offers this decision.
+    ///
+    /// The retry alone only covers the swallowed-click mode. A menu that
+    /// merely opened *slowly* — under a machine sharing its single desktop
+    /// session with concurrent builds, an NSMenu tracking session can take
+    /// longer than the old 2s budget to publish its items into the
+    /// accessibility tree — is still an **open** menu, and a second click on
+    /// the same popup control toggles it shut. That turned one slow menu
+    /// into three failed attempts, which is a decision-menu failure of
+    /// exactly the shape issue #137 reports.
+    ///
+    /// Both halves of the fix are here because neither is sufficient alone:
+    ///
+    /// * The re-click is now guarded on no menu being open. That is the
+    ///   direct fix, but it can only see a half-open menu that has already
+    ///   reached the accessibility tree as a `menus` element.
+    /// * The final attempt therefore also waits the suite's standard 10s, so
+    ///   a menu still entirely invisible to that guard gets a budget long
+    ///   enough to finish opening, with no further click behind it to close
+    ///   it again.
+    ///
+    /// The first attempt keeps the short 2s budget: a swallowed click must
+    /// still be retried promptly, and that is the common case.
     @MainActor
     func openDecisionMenu(
         _ decision: XCUIElement,
-        revealing allow: XCUIElement
+        revealing allow: XCUIElement,
+        in app: XCUIApplication
     ) -> Bool {
-        for _ in 0 ..< 3 {
-            decision.click()
-            if allow.waitForExistence(timeout: 2) {
+        let attempts = 3
+        for attempt in 0 ..< attempts {
+            if attempt == 0 || !app.menus.firstMatch.exists {
+                decision.click()
+            }
+            let isFinalAttempt = attempt == attempts - 1
+            if allow.waitForExistence(timeout: isFinalAttempt ? 10 : 2) {
                 return true
             }
         }
@@ -301,6 +441,22 @@ extension RuntimeWorkbenchUITests {
         }
     }
 
+    /// Every presence wait in this flow uses the suite's standard 10s
+    /// allowance, deliberately and uniformly.
+    ///
+    /// Each step here waits on something that only materializes after a
+    /// window-server transition — an NSMenu popup, a sheet presentation, a
+    /// sheet dismissal — none of which are driven by the app's own run loop,
+    /// so XCTest's automatic "wait for app to idle" step cannot cover them.
+    /// When a second process steals frontmost (concurrent `xcodebuild` runs
+    /// on the same machine are the common case), those transitions are
+    /// exactly what stalls, and the popup-menu step stalls first. Three of
+    /// these waits were previously written as bare `timeout: 2` asserts,
+    /// which read as "this should be instant" rather than as a tuned budget;
+    /// the menu wait below then failed repeatedly under concurrent runs while
+    /// passing in isolation. A longer allowance costs nothing when the
+    /// element appears on time, so there is no reason for any step in this
+    /// sequence to be the short one.
     @MainActor
     func registerAndActivateDeterministicAccount(
         in app: XCUIApplication
@@ -315,7 +471,10 @@ extension RuntimeWorkbenchUITests {
         accountSwitcher.click()
 
         let addSigner = app.menuItems["Signer-backed Account…"]
-        XCTAssertTrue(addSigner.waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            addSigner.waitForExistence(timeout: 10),
+            "The account switcher menu must offer signer-backed registration"
+        )
         addSigner.click()
 
         let secretField = app.secureTextFields["Secret key"]
@@ -324,7 +483,10 @@ extension RuntimeWorkbenchUITests {
         secretField.typeText(Self.uiTestSigningSecret)
 
         let register = app.buttons["Register Local Account"]
-        XCTAssertTrue(register.waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            register.waitForExistence(timeout: 10),
+            "The registration sheet must offer a register control"
+        )
         XCTAssertTrue(register.isEnabled)
         register.click()
 
@@ -354,7 +516,10 @@ extension RuntimeWorkbenchUITests {
         )
 
         let done = app.buttons["Done"]
-        XCTAssertTrue(done.waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            done.waitForExistence(timeout: 10),
+            "The account sheet must offer a dismissal control"
+        )
         done.click()
         XCTAssertTrue(
             waitForNonexistence(of: activePublicKey, timeout: 10),
