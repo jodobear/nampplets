@@ -23,6 +23,8 @@ struct RuntimeWorkbenchApp: App {
     @State private var runtimeProfile: WorkbenchRuntimeProfile?
     @State private var runtimeError: String?
     @State private var isOpeningRuntime = false
+    @AppStorage(WorkbenchAppearance.storageKey)
+    private var appearance = WorkbenchAppearance.system
 
     var body: some Scene {
         WindowGroup {
@@ -42,6 +44,7 @@ struct RuntimeWorkbenchApp: App {
                         .frame(minWidth: 1_050, minHeight: 660)
                 }
             }
+            .preferredColorScheme(appearance.colorScheme)
             .onAppear {
                 NSApplication.shared.activate(ignoringOtherApps: true)
             }
@@ -50,6 +53,29 @@ struct RuntimeWorkbenchApp: App {
             }
         }
         .defaultSize(width: 1180, height: 780)
+        .windowToolbarStyle(.unified(showsTitle: false))
+
+        Settings {
+            WorkbenchSettingsView(
+                snapshot: currentSettingsSnapshot,
+                performAction: { action in
+                    try await performProfileAction(action)
+                }
+            )
+            .id(runtimeProfile.map(ObjectIdentifier.init))
+            .preferredColorScheme(appearance.colorScheme)
+        }
+        .windowToolbarStyle(.unified(showsTitle: false))
+    }
+
+    private var currentSettingsSnapshot: WorkbenchSettingsSnapshot? {
+        if let runtimeProfile {
+            return runtimeProfile.settingsSnapshot()
+        }
+        return WorkbenchSettingsSnapshot(
+            unavailableReason: runtimeError
+                ?? "Settings are unavailable while the runtime is opening."
+        )
     }
 
     @MainActor
