@@ -6,9 +6,6 @@ import NMPNativeRuntimeApple
 /// Every window and workspace slot borrows this same native profile. The app,
 /// rather than any napplet view, owns final shutdown.
 public final class WorkbenchRuntimeProfile: @unchecked Sendable {
-    static let productionPermissionMode =
-        NativeRuntimePermissionMode.interactive
-
     typealias PersistedArtifactResolver = @Sendable (
         NativeRuntimeProfile,
         WorkbenchExactBuildIdentity
@@ -24,7 +21,6 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
         let indexerRelays: [String]
         let appRelays: [String]
         let accountPersistence: NativeRuntimeAccountPersistence
-        let permissionMode: NativeRuntimePermissionMode
         let permissionDefault: NativeRuntimePermissionDefault
     }
 
@@ -60,8 +56,7 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
             appRelays: network.appRelays,
             accountPersistence: keychainPersistence(
                 storageRoot: storageRoot
-            ),
-            permissionMode: productionPermissionMode
+            )
         )
     }
 
@@ -119,7 +114,6 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
         indexerRelays: [String] = [],
         appRelays: [String] = [],
         accountPersistence: NativeRuntimeAccountPersistence = .transient,
-        permissionMode: NativeRuntimePermissionMode = .interactive,
         permissionDefault: NativeRuntimePermissionDefault = .askEveryTime,
         persistedArtifactResolver: PersistedArtifactResolver? = nil
     ) throws -> WorkbenchRuntimeProfile {
@@ -129,7 +123,6 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
                 indexerRelays: indexerRelays,
                 appRelays: appRelays,
                 accountPersistence: accountPersistence,
-                permissionMode: permissionMode,
                 permissionDefault: permissionDefault
             )
         )
@@ -140,7 +133,6 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
                 indexerRelays: indexerRelays,
                 appRelays: appRelays,
                 accountPersistence: accountPersistence,
-                permissionMode: permissionMode,
                 permissionDefault: permissionDefault
             ),
             persistedArtifactResolver: persistedArtifactResolver
@@ -174,7 +166,6 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
             indexerRelays: openingConfiguration.indexerRelays,
             appRelays: openingConfiguration.appRelays,
             accountPersistence: openingConfiguration.accountPersistence,
-            permissionMode: openingConfiguration.permissionMode,
             permissionDefault: openingConfiguration.permissionDefault,
             persistedArtifactResolver: persistedArtifactResolver
         )
