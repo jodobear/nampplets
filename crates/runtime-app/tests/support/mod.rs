@@ -25,7 +25,8 @@ use nmp_native_providers::{
     ShellProvider, ShellProviderLimits,
 };
 use nmp_native_runtime_app::{
-    AppLimits, ExecutableArtifact, KernelClock, PlatformCommand, RuntimeApp, RuntimeAppConfig,
+    AppLimits, ExecutableArtifact, KernelClock, PermissionChangeRequest, PermissionDecision,
+    PlatformCommand, RuntimeApp, RuntimeAppConfig,
 };
 use nmp_native_runtime_core::{
     BoundedJson, Capability, CapabilityRequest, CapabilityRequirement, GrantDecision, GrantLimits,
@@ -388,6 +389,19 @@ pub fn permission(
     nmp_native_runtime_app::PermissionDecision {
         capability,
         decision,
+    }
+}
+
+pub fn permission_changes(
+    app: &RuntimeApp,
+    principal: Principal,
+    decisions: Vec<PermissionDecision>,
+) -> PermissionChangeRequest {
+    let review = app.permission_review(&principal).unwrap();
+    PermissionChangeRequest {
+        principal,
+        review_revision: review.revision,
+        decisions,
     }
 }
 

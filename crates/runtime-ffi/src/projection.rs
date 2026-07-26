@@ -7,7 +7,10 @@ use nmp_native_nmp_adapter::{
     AccountLifecycleError, LocalAccountHandle, LocalAccountKind, LocalAccountSnapshot,
 };
 use nmp_native_providers::{ThemeProviderLimits, ThemeSnapshot};
-use nmp_native_runtime_app::{PermissionPlatformAvailability, PermissionReviewView, PlatformEvent};
+use nmp_native_runtime_app::{
+    PermissionDecisionController, PermissionPlatformAvailability, PermissionReviewView,
+    PlatformEvent,
+};
 use nmp_native_runtime_core::{
     CapabilityRequirement, ExecutionProfile, GrantDecision, Sensitivity,
 };
@@ -16,9 +19,10 @@ use crate::{
     ArtifactCoordinate, NativeAppearanceSnapshot, RuntimeAccountFailure, RuntimeAccountHandle,
     RuntimeAccountKind, RuntimeAccountSnapshot, RuntimeCatalogFailure, RuntimeEvent,
     RuntimeExactBuildCoordinate, RuntimeExecutionProfile, RuntimeGrantDecision,
-    RuntimePermissionCapabilitySnapshot, RuntimePermissionDecisionOption,
-    RuntimePermissionExistingDecision, RuntimePermissionPlatformAvailability,
-    RuntimePermissionRequirement, RuntimePermissionReviewSnapshot, RuntimePermissionSensitivity,
+    RuntimePermissionCapabilitySnapshot, RuntimePermissionDecisionController,
+    RuntimePermissionDecisionOption, RuntimePermissionExistingDecision,
+    RuntimePermissionPlatformAvailability, RuntimePermissionRequirement,
+    RuntimePermissionReviewSnapshot, RuntimePermissionSensitivity,
 };
 
 pub(crate) fn theme_from_appearance(
@@ -187,6 +191,7 @@ pub(crate) fn project_permission_review(
             d_tag: review.principal.d_tag().to_owned(),
             aggregate_hash: review.principal.aggregate_hash().to_owned(),
         },
+        revision: review.revision.to_string(),
         title: review.title.to_string(),
         capabilities: review
             .capabilities
@@ -222,6 +227,14 @@ pub(crate) fn project_permission_review(
                         }
                     }
                 },
+                controller: match capability.controller {
+                    PermissionDecisionController::User => RuntimePermissionDecisionController::User,
+                    PermissionDecisionController::HostPolicy { reason } => {
+                        RuntimePermissionDecisionController::HostPolicy {
+                            reason: reason.to_string(),
+                        }
+                    }
+                },
                 existing_decision: project_grant_decision(capability.current_decision),
                 is_granted: capability.is_granted,
                 requested_decision: capability
@@ -247,6 +260,7 @@ pub(crate) fn project_permission_review(
                     .collect(),
             })
             .collect(),
+        read_only: review.read_only,
         launch_permitted,
     }
 }
@@ -265,7 +279,7 @@ pub(crate) fn project_event(sequence: u64, event: &PlatformEvent) -> RuntimeEven
         PlatformEvent::LibraryFilterChanged { .. } => "library-filter-changed",
         PlatformEvent::Uninstalled { .. } => "uninstalled",
         PlatformEvent::GrantChanged { .. } => "grant-changed",
-        PlatformEvent::PermissionBatchApplied { .. } => "permission-batch-applied",
+        PlatformEvent::PermissionChangesApplied { .. } => "permission-changes-applied",
         PlatformEvent::SessionChanged(_) => "session-changed",
         PlatformEvent::EnvelopeHandled {
             session, response, ..

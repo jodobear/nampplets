@@ -5,6 +5,7 @@ mod catalog;
 mod library;
 mod observation;
 mod open;
+mod permission_changes;
 mod permissions;
 mod preferences;
 mod providers;

@@ -6,7 +6,8 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use nmp_native_nap_bridge::ProviderPushError;
 use nmp_native_runtime_app::{
-    AppErrorCode, PermissionPlatformAvailability, PlatformCommand, PlatformEvent,
+    AppErrorCode, PermissionChangeRefusalCode, PermissionChangeRequest,
+    PermissionDecisionController, PermissionPlatformAvailability, PlatformCommand, PlatformEvent,
 };
 use nmp_native_runtime_core::{
     Capability, CapabilityRequirement, ExecutionProfile, GrantDecision, Sensitivity,
@@ -60,17 +61,15 @@ fn permission_review_is_exact_bounded_and_required_denial_blocks_launch() {
             .all(|option| option.decision == GrantDecision::Denied || !option.valid)
     );
 
-    rig.app.dispatch(PlatformCommand::ApplyPermissionBatch {
-        principal: exact.clone(),
-        decisions: vec![
-            permission(canary(), GrantDecision::Denied),
-            permission(missing, GrantDecision::Denied),
-        ],
-    });
-    assert!(matches!(
-        rig.app.events_after(0).events.last().unwrap().event,
-        PlatformEvent::PermissionBatchApplied { .. }
-    ));
+    rig.app
+        .dispatch(PlatformCommand::ApplyPermissionChanges(permission_changes(
+            &rig.app,
+            exact.clone(),
+            vec![
+                permission(canary(), GrantDecision::Denied),
+                permission(missing, GrantDecision::Denied),
+            ],
+        )));
     rig.app.dispatch(PlatformCommand::Launch {
         principal: exact,
         profile: ExecutionProfile::Legacy,
@@ -136,10 +135,12 @@ fn permission_batch_revokes_live_work_without_overwriting_ask_every_time() {
         exact.clone(),
         vec![request(canary(), CapabilityRequirement::Required)],
     );
-    rig.app.dispatch(PlatformCommand::ApplyPermissionBatch {
-        principal: exact.clone(),
-        decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
-    });
+    rig.app
+        .dispatch(PlatformCommand::ApplyPermissionChanges(permission_changes(
+            &rig.app,
+            exact.clone(),
+            vec![permission(canary(), GrantDecision::AllowExactBuild)],
+        )));
     let session = rig.launch(exact.clone());
     let sender = rig.provider.sender(session);
     rig.ready(session);
@@ -149,10 +150,12 @@ fn permission_batch_revokes_live_work_without_overwriting_ask_every_time() {
     });
     assert_eq!(rig.app.snapshot().resources.admitted, 3);
 
-    rig.app.dispatch(PlatformCommand::ApplyPermissionBatch {
-        principal: exact.clone(),
-        decisions: vec![permission(canary(), GrantDecision::AskEveryTime)],
-    });
+    rig.app
+        .dispatch(PlatformCommand::ApplyPermissionChanges(permission_changes(
+            &rig.app,
+            exact.clone(),
+            vec![permission(canary(), GrantDecision::AskEveryTime)],
+        )));
 
     assert_eq!(rig.app.snapshot().resources.admitted, 2);
     assert_eq!(
@@ -182,10 +185,12 @@ fn permission_batch_store_failure_changes_neither_ledger_nor_outcome() {
         .uninstall_exact_build(&exact, UninstallCleanupPolicy::RuntimeOwnedExactBuildState)
         .unwrap();
 
-    rig.app.dispatch(PlatformCommand::ApplyPermissionBatch {
-        principal: exact.clone(),
-        decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
-    });
+    rig.app
+        .dispatch(PlatformCommand::ApplyPermissionChanges(permission_changes(
+            &rig.app,
+            exact.clone(),
+            vec![permission(canary(), GrantDecision::AllowExactBuild)],
+        )));
 
     assert_eq!(
         rig.app.permission_review(&exact).unwrap().capabilities[0].current_decision,
@@ -200,7 +205,7 @@ fn permission_batch_store_failure_changes_neither_ledger_nor_outcome() {
             .events_after(0)
             .events
             .iter()
-            .any(|event| matches!(event.event, PlatformEvent::PermissionBatchApplied { .. }))
+            .any(|event| matches!(event.event, PlatformEvent::PermissionChangesApplied { .. }))
     );
 }
 
@@ -222,10 +227,12 @@ fn permission_batch_cannot_override_managed_host_policy() {
     );
     assert_eq!(review.capabilities[0].requested_decision, None);
 
-    rig.app.dispatch(PlatformCommand::ApplyPermissionBatch {
-        principal: exact.clone(),
-        decisions: vec![permission(canary(), GrantDecision::Denied)],
-    });
+    rig.app
+        .dispatch(PlatformCommand::ApplyPermissionChanges(permission_changes(
+            &rig.app,
+            exact.clone(),
+            vec![permission(canary(), GrantDecision::Denied)],
+        )));
 
     assert_eq!(
         rig.store.grant(&exact, &canary()).unwrap(),
@@ -235,6 +242,206 @@ fn permission_batch_cannot_override_managed_host_policy() {
         rig.app.snapshot().recent_errors.last().unwrap().code,
         AppErrorCode::Grant
     );
+}
+
+#[test]
+fn mixed_managed_and_user_permission_changes_apply_only_user_owned_domains() {
+    let rig = Rig::new(false);
+    let exact = principal('1');
+    let managed = Capability::new("managed-config").unwrap();
+    rig.install_with_requests(
+        exact.clone(),
+        vec![
+            request(canary(), CapabilityRequirement::Required),
+            request(managed.clone(), CapabilityRequirement::Optional),
+        ],
+    );
+    rig.store
+        .set_grant(&exact, &managed, GrantDecision::Managed)
+        .unwrap();
+    let review = rig.app.permission_review(&exact).unwrap();
+    assert!(!review.read_only);
+    assert!(matches!(
+        review.capabilities[1].controller,
+        PermissionDecisionController::HostPolicy { .. }
+    ));
+
+    let applied = rig
+        .app
+        .apply_permission_changes(PermissionChangeRequest {
+            principal: exact.clone(),
+            review_revision: review.revision,
+            decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
+        })
+        .unwrap();
+
+    assert!(applied.changed);
+    assert_eq!(
+        rig.store.grant(&exact, &canary()).unwrap(),
+        GrantDecision::AllowExactBuild
+    );
+    assert_eq!(
+        rig.store.grant(&exact, &managed).unwrap(),
+        GrantDecision::Managed
+    );
+    assert_eq!(
+        applied.review.capabilities[1].current_decision,
+        GrantDecision::Managed
+    );
+}
+
+#[test]
+fn all_managed_review_is_read_only_and_empty_intent_is_typed_refusal() {
+    let rig = Rig::new(false);
+    let exact = principal('2');
+    rig.install_with_requests(
+        exact.clone(),
+        vec![request(canary(), CapabilityRequirement::Required)],
+    );
+    rig.store
+        .set_grant(&exact, &canary(), GrantDecision::Managed)
+        .unwrap();
+    let review = rig.app.permission_review(&exact).unwrap();
+    assert!(review.read_only);
+
+    let refusal = rig
+        .app
+        .apply_permission_changes(PermissionChangeRequest {
+            principal: exact,
+            review_revision: review.revision,
+            decisions: Vec::new(),
+        })
+        .unwrap_err();
+
+    assert_eq!(refusal.code, PermissionChangeRefusalCode::EmptyChanges);
+    assert!(refusal.current_review.unwrap().read_only);
+}
+
+#[test]
+fn managed_policy_change_makes_review_stale_without_partial_mutation() {
+    let rig = Rig::new(false);
+    let exact = principal('3');
+    let second = Capability::new("second").unwrap();
+    rig.install_with_requests(
+        exact.clone(),
+        vec![
+            request(canary(), CapabilityRequirement::Required),
+            request(second.clone(), CapabilityRequirement::Optional),
+        ],
+    );
+    let stale = rig.app.permission_review(&exact).unwrap();
+    rig.app.dispatch(PlatformCommand::SetGrant {
+        principal: exact.clone(),
+        capability: second.clone(),
+        sensitivity: Sensitivity::Sensitive,
+        decision: GrantDecision::Managed,
+    });
+
+    let refusal = rig
+        .app
+        .apply_permission_changes(PermissionChangeRequest {
+            principal: exact.clone(),
+            review_revision: stale.revision,
+            decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
+        })
+        .unwrap_err();
+
+    assert_eq!(refusal.code, PermissionChangeRefusalCode::StaleReview);
+    assert_eq!(
+        rig.store.grant(&exact, &canary()).unwrap(),
+        GrantDecision::Denied
+    );
+    assert_eq!(
+        rig.store.grant(&exact, &second).unwrap(),
+        GrantDecision::Managed
+    );
+    assert!(refusal.current_review.is_some());
+}
+
+#[test]
+fn persistent_review_can_apply_repeated_changed_domain_intents() {
+    let rig = Rig::new(false);
+    let exact = principal('4');
+    rig.install_with_requests(
+        exact.clone(),
+        vec![request(canary(), CapabilityRequirement::Required)],
+    );
+    let first = rig.app.permission_review(&exact).unwrap();
+    let first = rig
+        .app
+        .apply_permission_changes(PermissionChangeRequest {
+            principal: exact.clone(),
+            review_revision: first.revision,
+            decisions: vec![permission(canary(), GrantDecision::AllowSession)],
+        })
+        .unwrap();
+    let second = rig
+        .app
+        .apply_permission_changes(PermissionChangeRequest {
+            principal: exact.clone(),
+            review_revision: first.review.revision,
+            decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
+        })
+        .unwrap();
+
+    assert!(first.changed);
+    assert!(second.changed);
+    assert_eq!(
+        rig.store.grant(&exact, &canary()).unwrap(),
+        GrantDecision::AllowExactBuild
+    );
+}
+
+#[test]
+fn duplicate_unknown_and_unavailable_changes_are_typed_and_atomic() {
+    let rig = Rig::new(false);
+    let exact = principal('5');
+    let unavailable = Capability::new("unavailable").unwrap();
+    rig.install_with_requests(
+        exact.clone(),
+        vec![
+            request(canary(), CapabilityRequirement::Required),
+            request(unavailable.clone(), CapabilityRequirement::Optional),
+        ],
+    );
+    let review = rig.app.permission_review(&exact).unwrap();
+    for (decisions, code) in [
+        (
+            vec![
+                permission(canary(), GrantDecision::AllowExactBuild),
+                permission(canary(), GrantDecision::Denied),
+            ],
+            PermissionChangeRefusalCode::DuplicateCapability,
+        ),
+        (
+            vec![permission(
+                Capability::new("unknown").unwrap(),
+                GrantDecision::Denied,
+            )],
+            PermissionChangeRefusalCode::UnknownCapability,
+        ),
+        (
+            vec![permission(
+                unavailable.clone(),
+                GrantDecision::AllowExactBuild,
+            )],
+            PermissionChangeRefusalCode::DecisionUnavailable,
+        ),
+    ] {
+        let refusal = rig
+            .app
+            .apply_permission_changes(PermissionChangeRequest {
+                principal: exact.clone(),
+                review_revision: review.revision.clone(),
+                decisions,
+            })
+            .unwrap_err();
+        assert_eq!(refusal.code, code);
+        assert_eq!(
+            rig.store.grant(&exact, &canary()).unwrap(),
+            GrantDecision::Denied
+        );
+    }
 }
 
 #[test]
@@ -261,10 +468,11 @@ fn permission_batch_persists_and_dependency_policy_is_owner_validated() {
             aggregate: exact.aggregate_hash().to_owned(),
         }),
     });
-    app.dispatch(PlatformCommand::ApplyPermissionBatch {
-        principal: exact.clone(),
-        decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
-    });
+    app.dispatch(PlatformCommand::ApplyPermissionChanges(permission_changes(
+        &app,
+        exact.clone(),
+        vec![permission(canary(), GrantDecision::AllowExactBuild)],
+    )));
     assert_eq!(
         app.snapshot().recent_errors.last().unwrap().code,
         AppErrorCode::Grant
@@ -276,10 +484,11 @@ fn permission_batch_persists_and_dependency_policy_is_owner_validated() {
         sensitivity: Sensitivity::Sensitive,
         decision: GrantDecision::AllowExactBuild,
     });
-    app.dispatch(PlatformCommand::ApplyPermissionBatch {
-        principal: exact.clone(),
-        decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
-    });
+    app.dispatch(PlatformCommand::ApplyPermissionChanges(permission_changes(
+        &app,
+        exact.clone(),
+        vec![permission(canary(), GrantDecision::AllowExactBuild)],
+    )));
     assert_eq!(
         app.permission_review(&exact).unwrap().capabilities[0].current_decision,
         GrantDecision::AllowExactBuild

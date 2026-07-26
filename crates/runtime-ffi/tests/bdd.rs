@@ -5,7 +5,10 @@ mod support;
 
 use cucumber::{World, given, then, when};
 use nmp_native_runtime_ffi::{
-    RuntimePermissionReviewSnapshot, RuntimeReceiptSnapshot, RuntimeSnapshot,
+    RuntimeGrantDecision, RuntimePermissionBatchUpdate, RuntimePermissionChangeRefusalCode,
+    RuntimePermissionDecisionController, RuntimePermissionDecisionSelection,
+    RuntimePermissionExistingDecision, RuntimePermissionReviewSnapshot, RuntimeReceiptSnapshot,
+    RuntimeSnapshot,
 };
 use support::{PermissionReviewRig, ReceiptProjectionRig};
 
@@ -13,6 +16,7 @@ use support::{PermissionReviewRig, ReceiptProjectionRig};
 struct RuntimeFfiWorld {
     rig: Option<PermissionReviewRig>,
     review: Option<RuntimePermissionReviewSnapshot>,
+    update: Option<RuntimePermissionBatchUpdate>,
     snapshot: Option<RuntimeSnapshot>,
     receipt_rig: Option<ReceiptProjectionRig>,
     receipt: Option<RuntimeReceiptSnapshot>,
@@ -42,9 +46,127 @@ fn given_hash_matching_entry_requirements(world: &mut RuntimeFfiWorld) {
     assert_eq!(world.rig().embedded_domains().len(), 6);
 }
 
+#[given(expr = "host policy manages the {string} permission")]
+fn given_host_policy_manages(world: &mut RuntimeFfiWorld, domain: String) {
+    world.rig().set_host_policy(&domain);
+}
+
+#[given("the caller has opened the current permission review")]
+fn given_current_review_open(world: &mut RuntimeFfiWorld) {
+    world.review = Some(world.rig().permission_review());
+}
+
 #[when("the exact build is requested through the runtime FFI permission facade")]
 fn when_permission_review_requested(world: &mut RuntimeFfiWorld) {
     world.review = Some(world.rig().permission_review());
+}
+
+#[when(expr = "the caller allows only {string} against the current review")]
+fn when_caller_allows_current_domain(world: &mut RuntimeFfiWorld, domain: String) {
+    let review = world.rig().permission_review();
+    world.update = Some(world.rig().apply_changes(
+        review.revision,
+        vec![RuntimePermissionDecisionSelection {
+            domain,
+            decision: RuntimeGrantDecision::AllowExactBuild,
+        }],
+    ));
+}
+
+#[when(expr = "host policy takes over {string} before the caller allows {string}")]
+fn when_policy_changes_before_apply(
+    world: &mut RuntimeFfiWorld,
+    managed_domain: String,
+    selected_domain: String,
+) {
+    let revision = world
+        .review
+        .as_ref()
+        .expect("Given step must open the review")
+        .revision
+        .clone();
+    world.rig().set_host_policy(&managed_domain);
+    world.update = Some(world.rig().apply_changes(
+        revision,
+        vec![RuntimePermissionDecisionSelection {
+            domain: selected_domain,
+            decision: RuntimeGrantDecision::AllowExactBuild,
+        }],
+    ));
+}
+
+#[then("the changed-domain permission update is applied")]
+fn then_changed_domain_update_applied(world: &mut RuntimeFfiWorld) {
+    let update = world
+        .update
+        .as_ref()
+        .expect("When step must apply permission changes");
+    assert!(update.applied);
+    assert!(update.changed);
+    assert!(update.refusal.is_none());
+}
+
+#[then(expr = "the {string} permission remains controlled by host policy")]
+fn then_permission_remains_managed(world: &mut RuntimeFfiWorld, domain: String) {
+    let review = world.rig().permission_review();
+    let capability = review
+        .capabilities
+        .iter()
+        .find(|capability| capability.domain == domain)
+        .expect("reviewed capability");
+    assert_eq!(
+        capability.controller,
+        RuntimePermissionDecisionController::HostPolicy {
+            reason: "this capability is managed by host policy".to_owned()
+        }
+    );
+    assert_eq!(
+        capability.existing_decision,
+        RuntimePermissionExistingDecision::Managed
+    );
+}
+
+#[then(expr = "the {string} permission is allowed for the exact build")]
+fn then_permission_allowed(world: &mut RuntimeFfiWorld, domain: String) {
+    let review = world.rig().permission_review();
+    assert_eq!(
+        review
+            .capabilities
+            .iter()
+            .find(|capability| capability.domain == domain)
+            .expect("reviewed capability")
+            .existing_decision,
+        RuntimePermissionExistingDecision::AllowExactBuild
+    );
+}
+
+#[then("the FFI returns a typed stale-review refusal with the current review")]
+fn then_stale_refusal_has_current_review(world: &mut RuntimeFfiWorld) {
+    let update = world
+        .update
+        .as_ref()
+        .expect("When step must apply permission changes");
+    assert!(!update.applied);
+    assert!(!update.changed);
+    assert_eq!(
+        update.refusal.as_ref().expect("typed refusal").code,
+        RuntimePermissionChangeRefusalCode::StaleReview
+    );
+    assert!(update.review.is_some());
+}
+
+#[then(expr = "the {string} permission remains denied")]
+fn then_permission_remains_denied(world: &mut RuntimeFfiWorld, domain: String) {
+    let review = world.rig().permission_review();
+    assert_eq!(
+        review
+            .capabilities
+            .iter()
+            .find(|capability| capability.domain == domain)
+            .expect("reviewed capability")
+            .existing_decision,
+        RuntimePermissionExistingDecision::Denied
+    );
 }
 
 #[then("the review contains exactly the authenticated normalized domains")]

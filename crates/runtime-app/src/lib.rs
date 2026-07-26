@@ -20,15 +20,17 @@ pub use activity::{
 pub use app::{AppObserver, ObservationClosed, RuntimeApp};
 pub use bounded::BoundedFacts;
 pub use commands::{
-    EventBatch, PlatformCommand, PlatformEvent, ProviderOperationId, SequencedPlatformEvent,
+    EventBatch, PermissionChangeRequest, PlatformCommand, PlatformEvent, ProviderOperationId,
+    SequencedPlatformEvent,
 };
 pub use limits::{AppLimits, ExecutableArtifact, KernelClock, OpenError, RuntimeAppConfig};
 pub use receipt::{AppReceipt, ReceiptObserver};
 pub use views::{
     AppErrorCode, AppErrorFact, AppSnapshot, AppTerminalReason, BindingView,
     InstalledBuildAvailability, InstalledBuildView, InstalledLibraryView, PermissionCapabilityView,
-    PermissionDecision, PermissionDecisionOption, PermissionPlatformAvailability,
-    PermissionReviewError, PermissionReviewView, ProviderPushLaneView, ProviderWriteProposalView,
-    ReceiptDeliveryState, ReceiptView, SectionRevisions, SessionDomainView, SnapshotSection,
-    WorkspaceView,
+    PermissionChangeRefusal, PermissionChangeRefusalCode, PermissionChangeResult,
+    PermissionChangeSuccess, PermissionDecision, PermissionDecisionController,
+    PermissionDecisionOption, PermissionPlatformAvailability, PermissionReviewError,
+    PermissionReviewView, ProviderPushLaneView, ProviderWriteProposalView, ReceiptDeliveryState,
+    ReceiptView, SectionRevisions, SessionDomainView, SnapshotSection, WorkspaceView,
 };

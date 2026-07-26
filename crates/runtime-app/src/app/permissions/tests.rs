@@ -1,6 +1,7 @@
 use super::*;
 use nmp_native_runtime_store::PermissionDefaultPreference;
 
+use super::policy::permission_decision_policy;
 use crate::views::PermissionPlatformAvailability;
 
 #[test]

@@ -14,8 +14,8 @@ use std::collections::BTreeSet;
 use cucumber::{World, given, then, when};
 use nmp_native_nap_bridge::{ProviderPushError, ProviderPushSender};
 use nmp_native_runtime_app::{
-    AppErrorCode, PermissionPlatformAvailability, PermissionReviewView, PlatformCommand,
-    PlatformEvent,
+    AppErrorCode, PermissionChangeRefusalCode, PermissionChangeRequest, PermissionChangeResult,
+    PermissionPlatformAvailability, PermissionReviewView, PlatformCommand,
 };
 use nmp_native_runtime_core::{
     CapabilityRequirement, GrantDecision, Principal, Sensitivity, SessionId,
@@ -29,9 +29,180 @@ struct RuntimeWorld {
     session: Option<SessionId>,
     sender: Option<ProviderPushSender>,
     review: Option<PermissionReviewView>,
+    permission_result: Option<PermissionChangeResult>,
     push_result: Option<Result<u64, ProviderPushError>>,
     before_revisions: Option<nmp_native_runtime_app::SectionRevisions>,
     after_revisions: Option<nmp_native_runtime_app::SectionRevisions>,
+}
+
+#[given("an installed napplet mixes a managed setting with a user permission")]
+fn given_mixed_managed_review(world: &mut RuntimeWorld) {
+    let rig = Rig::new(false);
+    let exact = principal('1');
+    let managed = nmp_native_runtime_core::Capability::new("managed-setting").unwrap();
+    rig.install_with_requests(
+        exact.clone(),
+        vec![
+            request(canary(), CapabilityRequirement::Required),
+            request(managed.clone(), CapabilityRequirement::Optional),
+        ],
+    );
+    rig.store
+        .set_grant(&exact, &managed, GrantDecision::Managed)
+        .unwrap();
+    world.review = Some(rig.app.permission_review(&exact).unwrap());
+    world.principal = Some(exact);
+    world.rig = Some(rig);
+}
+
+#[when("the caller allows only the user permission against that review")]
+fn when_user_change_applied(world: &mut RuntimeWorld) {
+    let principal = world.principal();
+    let review = world.review.as_ref().unwrap();
+    world.permission_result = Some(world.rig().app.apply_permission_changes(
+        PermissionChangeRequest {
+            principal,
+            review_revision: review.revision.clone(),
+            decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
+        },
+    ));
+}
+
+#[then("the user permission is allowed")]
+fn then_user_permission_allowed(world: &mut RuntimeWorld) {
+    assert!(world.permission_result.as_ref().unwrap().is_ok());
+    assert_eq!(
+        world
+            .rig()
+            .store
+            .grant(&world.principal(), &canary())
+            .unwrap(),
+        GrantDecision::AllowExactBuild
+    );
+}
+
+#[then("the managed setting remains managed")]
+fn then_managed_setting_remains(world: &mut RuntimeWorld) {
+    let managed = world
+        .review
+        .as_ref()
+        .unwrap()
+        .capabilities
+        .iter()
+        .find(|capability| capability.current_decision == GrantDecision::Managed)
+        .unwrap();
+    assert_eq!(
+        world
+            .rig()
+            .store
+            .grant(&world.principal(), &managed.capability)
+            .unwrap(),
+        GrantDecision::Managed
+    );
+}
+
+#[given("an installed napplet has only a managed permission")]
+fn given_all_managed_review(world: &mut RuntimeWorld) {
+    let rig = Rig::new(false);
+    let exact = principal('2');
+    rig.install_with_requests(
+        exact.clone(),
+        vec![request(canary(), CapabilityRequirement::Required)],
+    );
+    rig.store
+        .set_grant(&exact, &canary(), GrantDecision::Managed)
+        .unwrap();
+    world.review = Some(rig.app.permission_review(&exact).unwrap());
+    world.principal = Some(exact);
+    world.rig = Some(rig);
+}
+
+#[when("the caller submits no permission changes")]
+fn when_no_changes_submitted(world: &mut RuntimeWorld) {
+    let review = world.review.as_ref().unwrap();
+    world.permission_result = Some(world.rig().app.apply_permission_changes(
+        PermissionChangeRequest {
+            principal: world.principal(),
+            review_revision: review.revision.clone(),
+            decisions: Vec::new(),
+        },
+    ));
+}
+
+#[then("the permission change is refused as empty")]
+fn then_empty_change_refused(world: &mut RuntimeWorld) {
+    assert_eq!(
+        world
+            .permission_result
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .code,
+        PermissionChangeRefusalCode::EmptyChanges
+    );
+}
+
+#[given("an installed napplet has two user permissions under review")]
+fn given_two_user_permissions(world: &mut RuntimeWorld) {
+    let rig = Rig::new(false);
+    let exact = principal('3');
+    let second = nmp_native_runtime_core::Capability::new("second").unwrap();
+    rig.install_with_requests(
+        exact.clone(),
+        vec![
+            request(canary(), CapabilityRequirement::Required),
+            request(second, CapabilityRequirement::Optional),
+        ],
+    );
+    world.review = Some(rig.app.permission_review(&exact).unwrap());
+    world.principal = Some(exact);
+    world.rig = Some(rig);
+}
+
+#[when("host policy takes control before the caller applies one permission")]
+fn when_policy_changes_before_apply(world: &mut RuntimeWorld) {
+    let principal = world.principal();
+    let second = nmp_native_runtime_core::Capability::new("second").unwrap();
+    world.rig().app.dispatch(PlatformCommand::SetGrant {
+        principal: principal.clone(),
+        capability: second,
+        sensitivity: Sensitivity::Sensitive,
+        decision: GrantDecision::Managed,
+    });
+    world.permission_result = Some(world.rig().app.apply_permission_changes(
+        PermissionChangeRequest {
+            principal,
+            review_revision: world.review.as_ref().unwrap().revision.clone(),
+            decisions: vec![permission(canary(), GrantDecision::AllowExactBuild)],
+        },
+    ));
+}
+
+#[then("the permission change is refused as stale")]
+fn then_stale_change_refused(world: &mut RuntimeWorld) {
+    assert_eq!(
+        world
+            .permission_result
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .code,
+        PermissionChangeRefusalCode::StaleReview
+    );
+}
+
+#[then("no user permission change was applied")]
+fn then_no_user_change(world: &mut RuntimeWorld) {
+    assert_eq!(
+        world
+            .rig()
+            .store
+            .grant(&world.principal(), &canary())
+            .unwrap(),
+        GrantDecision::Denied
+    );
 }
 
 impl RuntimeWorld {
@@ -134,20 +305,17 @@ fn given_denied_batch(world: &mut RuntimeWorld) {
     world
         .rig()
         .app
-        .dispatch(PlatformCommand::ApplyPermissionBatch {
+        .dispatch(PlatformCommand::ApplyPermissionChanges(permission_changes(
+            &world.rig().app,
             principal,
-            decisions: vec![
+            vec![
                 permission(canary(), GrantDecision::Denied),
                 permission(
                     nmp_native_runtime_core::Capability::new("missing").unwrap(),
                     GrantDecision::Denied,
                 ),
             ],
-        });
-    assert!(matches!(
-        world.rig().app.events_after(0).events.last().unwrap().event,
-        PlatformEvent::PermissionBatchApplied { .. }
-    ));
+        )));
 }
 
 #[when("the caller attempts to launch the installed napplet")]

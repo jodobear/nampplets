@@ -8,6 +8,7 @@ public enum PermissionLimits {
     public static let maximumDTagUTF8Bytes = 256
     public static let maximumDisplayTextUTF8Bytes = 16_384
     public static let maximumReviewUTF8Bytes = 256 * 1_024
+    public static let reviewRevisionUTF8Bytes = 64
 }
 
 /// The exact executable identity to which every permission decision is bound.
@@ -145,6 +146,11 @@ public enum PermissionExistingDecision: String, Equatable, Sendable {
     }
 }
 
+public enum PermissionDecisionController: Equatable, Sendable {
+    case user
+    case hostPolicy(reason: String)
+}
+
 public enum PermissionRequestedDecision:
     String,
     CaseIterable,
@@ -213,6 +219,7 @@ public struct PermissionCapabilityReview: Identifiable, Equatable, Sendable {
     public let rationale: String
     public let dependencies: [PermissionCapabilityDependency]
     public let platformAvailability: PermissionPlatformAvailability
+    public let controller: PermissionDecisionController
     public let existingDecision: PermissionExistingDecision
     /// Rust's own classification of the decision in force: true when this
     /// capability is already allowed without prompting. The native layer
@@ -240,6 +247,7 @@ public struct PermissionCapabilityReview: Identifiable, Equatable, Sendable {
         rationale: String,
         dependencies: [PermissionCapabilityDependency],
         platformAvailability: PermissionPlatformAvailability,
+        controller: PermissionDecisionController,
         existingDecision: PermissionExistingDecision,
         isGranted: Bool,
         requestedDecision: PermissionRequestedDecision?,
@@ -254,9 +262,20 @@ public struct PermissionCapabilityReview: Identifiable, Equatable, Sendable {
             existingDecision == .managed
                 && decisionOptions.allSatisfy { !$0.isValid }
         )
-        let managedStateIsConsistent =
-            (existingDecision == .managed) == (requestedDecision == nil)
-            && (requestedDecision == nil) == (recommendedDecision == nil)
+        let controllerIsConsistent: Bool = switch controller {
+        case .user:
+            existingDecision != .managed
+                && requestedDecision != nil
+                && recommendedDecision != nil
+        case let .hostPolicy(reason):
+            !reason.isEmpty
+                && reason.utf8.count
+                    <= PermissionLimits.maximumDisplayTextUTF8Bytes
+                && existingDecision == .managed
+                && requestedDecision == nil
+                && recommendedDecision == nil
+                && decisionOptions.allSatisfy { !$0.isValid }
+        }
         let recommendationIsOffered = recommendedDecision.map { recommended in
             decisionOptions.contains {
                 $0.decision == recommended && $0.isValid
@@ -281,7 +300,7 @@ public struct PermissionCapabilityReview: Identifiable, Equatable, Sendable {
                 == PermissionRequestedDecision.allCases.count,
             uniqueOptions,
             validRequestedOption,
-            managedStateIsConsistent,
+            controllerIsConsistent,
             recommendationIsOffered,
             lockedOptionsExplainWhy,
             (platformAvailability.detail?.utf8.count ?? 0)
@@ -297,6 +316,7 @@ public struct PermissionCapabilityReview: Identifiable, Equatable, Sendable {
         self.rationale = rationale
         self.dependencies = dependencies
         self.platformAvailability = platformAvailability
+        self.controller = controller
         self.existingDecision = existingDecision
         self.isGranted = isGranted
         self.requestedDecision = requestedDecision
@@ -313,15 +333,19 @@ public struct PermissionCapabilityReview: Identifiable, Equatable, Sendable {
 
 public struct PermissionReview: Equatable, Sendable {
     public let principal: PermissionExactBuildPrincipal
+    public let revision: String
     public let publisherDisplayName: String?
     public let nappletTitle: String
     public let capabilities: [PermissionCapabilityReview]
+    public let isReadOnly: Bool
 
     public init?(
         principal: PermissionExactBuildPrincipal,
+        revision: String,
         publisherDisplayName: String?,
         nappletTitle: String,
-        capabilities: [PermissionCapabilityReview]
+        capabilities: [PermissionCapabilityReview],
+        isReadOnly: Bool
     ) {
         let uniqueDomains = Set(capabilities.map(\.domain)).count
             == capabilities.count
@@ -338,8 +362,16 @@ public struct PermissionReview: Equatable, Sendable {
                 + $0.decisionOptions.compactMap(\.invalidReason)
         }
         guard
+            Self.isReviewRevision(revision),
             capabilities.count <= PermissionLimits.maximumCapabilities,
             uniqueDomains,
+            isReadOnly
+                == capabilities.allSatisfy {
+                    if case .hostPolicy = $0.controller {
+                        return true
+                    }
+                    return false
+                },
             displayTexts.allSatisfy({
                 $0.utf8.count <= PermissionLimits.maximumDisplayTextUTF8Bytes
             }),
@@ -350,9 +382,18 @@ public struct PermissionReview: Equatable, Sendable {
         }
 
         self.principal = principal
+        self.revision = revision
         self.publisherDisplayName = publisherDisplayName
         self.nappletTitle = nappletTitle
         self.capabilities = capabilities
+        self.isReadOnly = isReadOnly
+    }
+
+    fileprivate static func isReviewRevision(_ value: String) -> Bool {
+        value.utf8.count == PermissionLimits.reviewRevisionUTF8Bytes
+            && value.utf8.allSatisfy { byte in
+                (48 ... 57).contains(byte) || (97 ... 102).contains(byte)
+            }
     }
 }
 
@@ -375,13 +416,16 @@ public struct PermissionDecisionSelection: Identifiable, Equatable, Sendable {
 
 public struct PermissionDecisionBatch: Equatable, Sendable {
     public let principal: PermissionExactBuildPrincipal
+    public let reviewRevision: String
     public let decisions: [PermissionDecisionSelection]
 
     public init?(
         principal: PermissionExactBuildPrincipal,
+        reviewRevision: String,
         decisions: [PermissionDecisionSelection]
     ) {
         guard
+            PermissionReview.isReviewRevision(reviewRevision),
             !decisions.isEmpty,
             decisions.count <= PermissionLimits.maximumCapabilities,
             Set(decisions.map(\.domain)).count == decisions.count
@@ -389,6 +433,7 @@ public struct PermissionDecisionBatch: Equatable, Sendable {
             return nil
         }
         self.principal = principal
+        self.reviewRevision = reviewRevision
         self.decisions = decisions
     }
 }

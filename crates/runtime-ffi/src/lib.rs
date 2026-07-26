@@ -51,11 +51,13 @@ pub use native_capabilities::{
 };
 pub use permission_types::{
     RuntimeExecutionProfile, RuntimeGrantDecision, RuntimePermissionBatchUpdate,
-    RuntimePermissionCapabilitySnapshot, RuntimePermissionDecisionBatch,
-    RuntimePermissionDecisionOption, RuntimePermissionDecisionSelection,
-    RuntimePermissionExistingDecision, RuntimePermissionPlatformAvailability,
-    RuntimePermissionRequirement, RuntimePermissionReviewResult, RuntimePermissionReviewSnapshot,
-    RuntimePermissionSensitivity, RuntimeSensitivity,
+    RuntimePermissionCapabilitySnapshot, RuntimePermissionChangeRefusal,
+    RuntimePermissionChangeRefusalCode, RuntimePermissionDecisionBatch,
+    RuntimePermissionDecisionController, RuntimePermissionDecisionOption,
+    RuntimePermissionDecisionSelection, RuntimePermissionExistingDecision,
+    RuntimePermissionPlatformAvailability, RuntimePermissionRequirement,
+    RuntimePermissionReviewResult, RuntimePermissionReviewSnapshot, RuntimePermissionSensitivity,
+    RuntimeSensitivity,
 };
 pub use profile_preferences::{
     RuntimeProfilePreferences, RuntimeProfilePreferencesUpdate, RuntimeStorageResetResult,

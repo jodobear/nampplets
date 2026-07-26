@@ -10,11 +10,15 @@ mod receipt;
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use nmp_native_artifact::{Sha256Digest, embedded_requirements};
+use nmp_native_runtime_core::{Capability, GrantDecision, Principal};
 use nmp_native_runtime_ffi::{
     ArtifactCoordinate, ArtifactFetchRequest, ArtifactFetchResponse, ArtifactSource, RuntimeConfig,
     RuntimeController, RuntimeExactBuildCoordinate, RuntimeExecutionProfile,
-    RuntimePermissionReviewSnapshot, RuntimeSnapshot, RuntimeSnapshotProjection, VerifiedArtifact,
+    RuntimePermissionBatchUpdate, RuntimePermissionDecisionBatch,
+    RuntimePermissionDecisionSelection, RuntimePermissionReviewSnapshot, RuntimeSnapshot,
+    RuntimeSnapshotProjection, VerifiedArtifact,
 };
+use nmp_native_runtime_store::{RuntimeStore, StoreLimits};
 use nmp_native_test_harness::{FixtureLoader, FsFixtureLoader};
 use tempfile::TempDir;
 
@@ -50,6 +54,7 @@ pub struct PermissionReviewRig {
     artifact: Arc<VerifiedArtifact>,
     embedded_domains: Vec<String>,
     coordinate: RuntimeExactBuildCoordinate,
+    runtime_store_path: PathBuf,
 }
 
 impl fmt::Debug for PermissionReviewRig {
@@ -78,9 +83,10 @@ impl PermissionReviewRig {
             .map(str::to_owned)
             .collect();
         let temp = TempDir::new().expect("temporary runtime directory");
+        let runtime_store_path = temp.path().join("runtime.sqlite3");
         let controller = RuntimeController::open(
             RuntimeConfig {
-                runtime_store_path: temp.path().join("runtime.sqlite3").display().to_string(),
+                runtime_store_path: runtime_store_path.display().to_string(),
                 nmp_store_path: None,
                 artifact_cache_path: temp.path().join("artifacts").display().to_string(),
                 ..RuntimeConfig::default()
@@ -110,6 +116,7 @@ impl PermissionReviewRig {
             artifact,
             embedded_domains,
             coordinate,
+            runtime_store_path,
         }
     }
 
@@ -130,6 +137,34 @@ impl PermissionReviewRig {
             .permission_review(self.coordinate.clone())
             .review
             .expect("installed exact build has a permission review")
+    }
+
+    pub fn set_host_policy(&self, domain: &str) {
+        let store = RuntimeStore::open(&self.runtime_store_path, StoreLimits::default())
+            .expect("test host policy opens the runtime store");
+        let principal = Principal::new(
+            &self.coordinate.manifest_author,
+            &self.coordinate.d_tag,
+            &self.coordinate.aggregate_hash,
+        )
+        .expect("fixture coordinate is a principal");
+        let capability = Capability::new(domain).expect("scenario uses a valid capability");
+        store
+            .set_grant(&principal, &capability, GrantDecision::Managed)
+            .expect("host policy persists");
+    }
+
+    pub fn apply_changes(
+        &self,
+        review_revision: String,
+        decisions: Vec<RuntimePermissionDecisionSelection>,
+    ) -> RuntimePermissionBatchUpdate {
+        self.controller
+            .apply_permission_decisions(RuntimePermissionDecisionBatch {
+                coordinate: self.coordinate.clone(),
+                review_revision,
+                decisions,
+            })
     }
 
     pub fn launch_without_grants(&self) {

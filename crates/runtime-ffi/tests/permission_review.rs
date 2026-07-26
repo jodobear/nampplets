@@ -31,10 +31,10 @@ fn published_exact_build_review_and_launch_refusal_cross_the_ffi_facade() {
         vec![
             ("identity", RuntimePermissionRequirement::Required),
             ("inc", RuntimePermissionRequirement::Required),
+            ("link", RuntimePermissionRequirement::Required),
             ("outbox", RuntimePermissionRequirement::Required),
-            ("resource", RuntimePermissionRequirement::Optional),
-            ("theme", RuntimePermissionRequirement::Optional),
-            ("link", RuntimePermissionRequirement::Optional),
+            ("resource", RuntimePermissionRequirement::Required),
+            ("theme", RuntimePermissionRequirement::Required),
         ]
     );
     assert!(!review.launch_permitted);

@@ -52,7 +52,10 @@ public final class RuntimeWorkbenchPermissionManager:
     }
 
     public func submit(_ batch: PermissionDecisionBatch) async {
-        guard batch.principal == current.review.principal else {
+        guard
+            batch.principal == current.review.principal,
+            batch.reviewRevision == current.review.revision
+        else {
             current = PermissionReviewSnapshot(
                 review: current.review,
                 submissionState: .refused(
@@ -68,6 +71,7 @@ public final class RuntimeWorkbenchPermissionManager:
 
         let nativeBatch = NativeRuntimePermissionDecisionBatch(
             coordinate: Self.nativeCoordinate(batch.principal),
+            reviewRevision: batch.reviewRevision,
             decisions: batch.decisions.map {
                 NativeRuntimePermissionDecisionSelection(
                     domain: $0.domain,
@@ -77,15 +81,20 @@ public final class RuntimeWorkbenchPermissionManager:
         )
         let update = native.applyPermissionDecisions(nativeBatch)
 
-        guard update.applied, update.refusal == nil, let review = update.review
-        else {
+        guard update.applied, update.refusal == nil, let review = update.review else {
+            let projectedReview = update.review.flatMap { try? Self.project($0) }
+            let reviewed = projectedReview?.principal == batch.principal
+                ? projectedReview!
+                : current.review
             let detail = update.refusal?.detail
-                ?? "The runtime did not apply the complete permission batch."
+                ?? "The runtime did not apply the permission changes."
             current = PermissionReviewSnapshot(
-                review: current.review,
+                review: reviewed,
                 submissionState: .refused(
                     Self.issue(
-                        title: "Permission decisions refused",
+                        title: update.refusal.map {
+                            Self.refusalTitle($0.code)
+                        } ?? "Permission decisions refused",
                         message: detail,
                         affectedDomains: batch.decisions.map(\.domain)
                     )
@@ -157,9 +166,11 @@ public final class RuntimeWorkbenchPermissionManager:
         guard
             let review = PermissionReview(
                 principal: principal,
+                revision: native.revision,
                 publisherDisplayName: nil,
                 nappletTitle: native.title,
-                capabilities: capabilities
+                capabilities: capabilities,
+                isReadOnly: native.readOnly
             )
         else {
             throw RuntimeWorkbenchPermissionError.malformed(
@@ -211,6 +222,7 @@ public final class RuntimeWorkbenchPermissionManager:
                 platformAvailability: availability(
                     native.platformAvailability
                 ),
+                controller: controller(native.controller),
                 existingDecision: existingDecision(native.existingDecision),
                 isGranted: native.isGranted,
                 requestedDecision: native.requestedDecision.map(
@@ -290,6 +302,34 @@ public final class RuntimeWorkbenchPermissionManager:
             .allowExactBuild
         case .managed:
             .managed
+        }
+    }
+
+    private static func controller(
+        _ value: NativeRuntimePermissionDecisionController
+    ) -> PermissionDecisionController {
+        switch value {
+        case .user:
+            .user
+        case let .hostPolicy(reason):
+            .hostPolicy(reason: reason)
+        }
+    }
+
+    private static func refusalTitle(
+        _ code: NativeRuntimePermissionChangeRefusalCode
+    ) -> String {
+        switch code {
+        case .staleReview:
+            "Permission review changed"
+        case .managedCapability:
+            "Permission managed by host"
+        case .dependencyDenied:
+            "Required dependency denied"
+        case .emptyChanges:
+            "No permission changes"
+        default:
+            "Permission decisions refused"
         }
     }
 
