@@ -22,7 +22,8 @@ class EvidenceError(Exception):
     def __init__(self, code: str, detail: str, path: str = "$") -> None:
         super().__init__(detail)
         self.code, self.detail, self.path = code, detail[:512], path
-class SchemaError(Exception): pass
+class SchemaError(Exception):
+    """Evidence does not conform to the selected schema."""
 def canonical_json(value: Any) -> bytes:
     options = {"ensure_ascii": False, "sort_keys": True, "separators": (",", ":"),
                "allow_nan": False}
@@ -102,7 +103,7 @@ def _check(value: Any, rule: dict[str, Any], root: dict[str, Any]) -> None:
                 _check(value, option, root)
                 matches += 1
             except SchemaError:
-                pass
+                continue
         if matches != 1:
             raise SchemaError("must match exactly one allowed shape")
         return
