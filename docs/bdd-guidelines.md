@@ -77,7 +77,11 @@ Bringing a new crate/package into scope means:
 ## Swift: Quick/Nimble
 
 `apps/workbench-macos/RuntimeWorkbenchPackage` owns the first Swift BDD
-pilot. When another Swift package is brought into scope:
+pilot. Its `Performance/PerformanceEvidenceSpec.swift` owner uses the same
+Quick/Nimble target and the single `ApplePerformanceRig` to exercise real
+`NativeRuntimeProfile` evidence; release/nonparallel expansion must reuse that
+rig rather than add another runner. When another Swift package is brought into
+scope:
 
 - Add `Quick` and `Nimble` as SPM dependencies scoped to the test target.
 - Use `describe`/`context`/`it` for scenario structure and Nimble matchers
