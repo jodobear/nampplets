@@ -11,7 +11,18 @@ class RuntimeNappletSessionTestCase: XCTestCase {
         "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5"
     let indexDigest =
         "ffd35eea5c84d03cdda74c23e1bbb2c40500f503833503aa688036faa52f3808"
-    let requiredGoodMorningDomains = ["identity", "inc", "outbox"]
+    /// Every domain the published fixture's own `napplet-requires` meta
+    /// declares. All of them are required -- no runtime code softens any of
+    /// them to optional on the strength of this build's identity -- so a test
+    /// that launches this fixture has to grant the whole set.
+    ///
+    /// `link` and `resource` have no registered provider, so `RuntimeApp`
+    /// drops them with a `required-domain-unavailable` activity rather than
+    /// blocking. `theme` does have one, so leaving it ungranted genuinely
+    /// refuses the launch.
+    let requiredGoodMorningDomains = [
+        "identity", "inc", "link", "outbox", "resource", "theme",
+    ]
 
     func repositoryRoot() -> URL {
         URL(fileURLWithPath: #filePath)

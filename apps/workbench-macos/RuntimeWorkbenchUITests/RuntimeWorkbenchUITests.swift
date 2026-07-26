@@ -81,7 +81,12 @@ final class RuntimeWorkbenchUITests: XCTestCase {
         )
         reopenReview.click()
 
-        for domain in ["identity", "inc", "outbox"] {
+        // Every domain the fixture declares is required now that no runtime
+        // code pins a profile onto its identity. `link` and `resource` have
+        // no provider on this build, so they stay at their default denial and
+        // launch drops them; `theme` does have one, so it must be granted or
+        // the launch is refused.
+        for domain in ["identity", "inc", "outbox", "theme"] {
             grantPermission(
                 domain: domain,
                 in: app,

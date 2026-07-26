@@ -5,8 +5,6 @@
 //! Rust-owned controller; native callers cannot construct principals or
 //! smuggle session authority through napplet envelopes.
 
-use nmp_native_runtime_core::CapabilityRequirement;
-
 mod activity;
 mod catalog;
 mod config;
@@ -35,9 +33,7 @@ pub use catalog::{
     RuntimeCatalogReviewResult, RuntimeCatalogShortfall, RuntimeCatalogSource,
     RuntimeCatalogSourceAccess, RuntimeCatalogSourceState, RuntimeCatalogWindowState,
 };
-pub use config::{
-    RuntimeConfig, RuntimeOpenError, RuntimePermissionDefault, RuntimePermissionMode,
-};
+pub use config::{RuntimeConfig, RuntimeOpenError, RuntimePermissionDefault};
 pub use controller::RuntimeController;
 pub use diagnostics::{
     RuntimeRelayAccess, RuntimeRelayCoverage, RuntimeRelayDiagnostics,
@@ -93,18 +89,4 @@ pub(crate) const MAXIMUM_WORKSPACE_FIELD_BYTES: usize = 64 * 1_024;
 pub(crate) const MAXIMUM_WORKSPACE_RECEIPTS: usize = 256;
 pub(crate) const MAXIMUM_WORKSPACE_POINT_SIZE: u16 = 4_096;
 pub(crate) const MAXIMUM_PERMISSION_DECISIONS: usize = 64;
-pub(crate) const GOOD_MORNING_AUTHOR: &str =
-    "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5";
-pub(crate) const GOOD_MORNING_D_TAG: &str = "good-morning";
-pub(crate) const GOOD_MORNING_AGGREGATE_HASH: &str =
-    "828a6df02afd56782ea20f805084acce65c53f7c37554948c1e0a64aa5a2b0a8";
-pub(crate) const GOOD_MORNING_CAPABILITY_PROFILE: &[(&str, CapabilityRequirement)] = &[
-    ("identity", CapabilityRequirement::Required),
-    ("inc", CapabilityRequirement::Required),
-    ("outbox", CapabilityRequirement::Required),
-    ("resource", CapabilityRequirement::Optional),
-    ("theme", CapabilityRequirement::Optional),
-    ("link", CapabilityRequirement::Optional),
-];
-
 uniffi::setup_scaffolding!();

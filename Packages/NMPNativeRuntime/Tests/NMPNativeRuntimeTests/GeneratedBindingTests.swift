@@ -74,17 +74,27 @@ final class GeneratedBindingTests: XCTestCase {
             controller.permissionReview(coordinate: coordinate).review
         )
         XCTAssertFalse(review.launchPermitted)
+        // Exactly the fixture's own `napplet-requires` meta, all required.
+        // This is the build the runtime used to pin into an
+        // identity/inc/outbox-required, link/resource/theme-optional shape by
+        // matching its author, d-tag, and aggregate. That pin is gone.
         XCTAssertEqual(
             review.capabilities.map(\.domain),
-            ["identity", "inc", "outbox", "resource", "theme", "link"]
+            ["identity", "inc", "link", "outbox", "resource", "theme"]
         )
+        XCTAssertTrue(review.capabilities.allSatisfy { $0.requirement == .required })
+        // A domain with no registered provider can only be denied. This bare
+        // controller registers no link, resource, or theme provider, so the
+        // fixture declares three domains it cannot be granted here -- the gap
+        // the pin was concealing by calling them optional.
+        let providedDomains: Set<String> = ["identity", "inc", "outbox"]
         let permissionUpdate = controller.applyPermissionDecisions(
             batch: RuntimePermissionDecisionBatch(
                 coordinate: coordinate,
                 decisions: review.capabilities.map {
                     RuntimePermissionDecisionSelection(
                         domain: $0.domain,
-                        decision: $0.requirement == .required
+                        decision: providedDomains.contains($0.domain)
                             ? .allowExactBuild
                             : .denied
                     )
@@ -92,8 +102,13 @@ final class GeneratedBindingTests: XCTestCase {
             )
         )
         XCTAssertTrue(permissionUpdate.applied)
-        XCTAssertTrue(permissionUpdate.review?.launchPermitted == true)
         XCTAssertNil(permissionUpdate.refusal)
+        // Launch is permitted even though three required domains were denied:
+        // a required capability with no registered provider can never receive
+        // a grant, so `projection::permission_review` deliberately does not
+        // let it block launch, and `RuntimeApp::launch` drops it rather than
+        // injecting it. The two agree.
+        XCTAssertTrue(permissionUpdate.review?.launchPermitted == true)
         controller.setGrant(
             artifact: artifact,
             capability: "shell",
@@ -257,7 +272,6 @@ final class GeneratedBindingTests: XCTestCase {
             maximumArtifactTotalBytes: 4_194_304,
             maximumVerifiedReadBytes: 1_048_576,
             maximumBlobSources: 4,
-            permissionMode: .interactive,
             permissionDefault: .askEveryTime
         )
     }

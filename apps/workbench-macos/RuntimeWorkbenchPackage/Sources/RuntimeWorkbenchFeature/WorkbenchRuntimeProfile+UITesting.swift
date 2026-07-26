@@ -14,10 +14,7 @@ extension WorkbenchRuntimeProfile {
             storageRoot: WorkbenchUITestStorage.prepareStorageRoot(
                 scenario: scenario
             ),
-            accountPersistence: .transient,
-            permissionMode: scenario == "full-window-layout-transition"
-                ? .demoPinnedGoodMorning
-                : .interactive
+            accountPersistence: .transient
         )
         if scenario == "full-window-layout-transition" {
             let registration = profile.native.registerLocalAccount(

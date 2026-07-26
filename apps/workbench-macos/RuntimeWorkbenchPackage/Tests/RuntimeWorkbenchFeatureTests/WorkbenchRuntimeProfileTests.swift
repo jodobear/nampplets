@@ -4,18 +4,6 @@ import NMPNativeRuntimeApple
 import Testing
 
 @Test
-func productionPermissionModeRequiresInteractiveExactBuildReview() {
-    switch WorkbenchRuntimeProfile.productionPermissionMode {
-    case .interactive:
-        break
-    case .demoPinnedGoodMorning:
-        Issue.record(
-            "Production must not auto-grant capabilities after the demo."
-        )
-    }
-}
-
-@Test
 func productionNetworkInputsAreFiniteSecureAndRoleSeparated() throws {
     let inputs = try WorkbenchRuntimeProfile.operatorNetworkInputs(
         infoDictionary: [
