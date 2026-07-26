@@ -7,14 +7,16 @@ import NMPNativeRuntime
 /// NMP remains the sole owner of delivery state and canonical event rows.
 public struct NativeRuntimeReceipt: Sendable, Identifiable {
     public let id: String
-    public let status: NativeRuntimeReceiptStatus
-    public let delivery: String
+    public let outcome: NativeRuntimeReceiptOutcome
+    public let observationLifecycle: NativeRuntimeReceiptObservationLifecycle
+    public let outcomeDetail: String?
     public let latestStateJSON: String?
 
     fileprivate init(_ receipt: RuntimeReceiptSnapshot) {
         id = receipt.receiptId
-        status = receipt.status
-        delivery = receipt.delivery
+        outcome = receipt.outcome
+        observationLifecycle = receipt.observationLifecycle
+        outcomeDetail = receipt.outcomeDetail
         latestStateJSON = receipt.latestStateJson
     }
 }
