@@ -110,6 +110,7 @@ fn permission_review_and_atomic_batch_are_exact_typed_and_restart_safe() {
 
     let duplicate = runtime.apply_permission_decisions(RuntimePermissionDecisionBatch {
         coordinate: coordinate.clone(),
+        review_revision: initial.revision.clone(),
         decisions: vec![
             RuntimePermissionDecisionSelection {
                 domain: "identity".to_owned(),
@@ -124,11 +125,12 @@ fn permission_review_and_atomic_batch_are_exact_typed_and_restart_safe() {
     assert!(!duplicate.applied);
     assert_eq!(
         duplicate.refusal.unwrap().code,
-        "duplicate-permission-domain"
+        RuntimePermissionChangeRefusalCode::DuplicateCapability
     );
 
     let applied = runtime.apply_permission_decisions(RuntimePermissionDecisionBatch {
         coordinate: coordinate.clone(),
+        review_revision: initial.revision,
         decisions: vec![
             RuntimePermissionDecisionSelection {
                 domain: "identity".to_owned(),
@@ -202,6 +204,7 @@ fn outbox_grant_survives_default_profile_restart() {
         .expect("installed napplet has a permission review");
     let update = runtime.apply_permission_decisions(RuntimePermissionDecisionBatch {
         coordinate: coordinate.clone(),
+        review_revision: review.revision.clone(),
         decisions: review
             .capabilities
             .iter()

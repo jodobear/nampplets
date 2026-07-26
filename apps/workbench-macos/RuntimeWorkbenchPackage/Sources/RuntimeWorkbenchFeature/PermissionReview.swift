@@ -17,6 +17,7 @@ final class PermissionReviewSheetModel {
     private let manager: any PermissionReviewManaging
     private(set) var snapshot: PermissionReviewSnapshot
     private(set) var selections: [String: PermissionRequestedDecision]
+    private(set) var changedDomains: Set<String> = []
     private(set) var transientIssue: PermissionReviewIssue?
     private(set) var isSubmitting = false
 
@@ -75,12 +76,8 @@ final class PermissionReviewSheetModel {
         issue.map { _ in .blocked("Couldn't apply those choices.") }
     }
 
-    /// Current Rust batch validation requires every requested domain while
-    /// also rejecting a user decision for managed domains. Until that contract
-    /// is reconciled, mixed and all-managed reviews cannot be submitted
-    /// truthfully as a partial or fabricated batch.
     var isManagedReviewBlocked: Bool {
-        !managedCapabilities.isEmpty
+        review.isReadOnly
     }
 
     var isApplied: Bool {
@@ -92,6 +89,7 @@ final class PermissionReviewSheetModel {
             && !isApplied
             && transientIssue == nil
             && !isManagedReviewBlocked
+            && !changedDomains.isEmpty
             && invalidSelections.isEmpty
     }
 
@@ -121,7 +119,11 @@ final class PermissionReviewSheetModel {
             return
         }
         selections[capability.domain] = decision
+        changedDomains.insert(capability.domain)
         transientIssue = nil
+        if isApplied {
+            snapshot = PermissionReviewSnapshot(review: review)
+        }
     }
 
     /// Applies Rust's recommended grant for one capability, or denies it.
@@ -174,6 +176,7 @@ final class PermissionReviewSheetModel {
                 continue
             }
             selections[capability.domain] = recommended
+            changedDomains.insert(capability.domain)
         }
         transientIssue = nil
     }
@@ -181,6 +184,7 @@ final class PermissionReviewSheetModel {
     /// Discards only transient native form state. It never calls the manager.
     func cancel() {
         selections = Self.defaultSelections(for: review)
+        changedDomains.removeAll()
         transientIssue = nil
     }
 
@@ -188,18 +192,15 @@ final class PermissionReviewSheetModel {
         guard canConfirm else {
             return
         }
-        guard !review.capabilities.isEmpty else {
-            snapshot = PermissionReviewSnapshot(
-                review: review,
-                submissionState: .applied
-            )
-            return
-        }
         guard
             let batch = PermissionDecisionBatch(
                 principal: review.principal,
+                reviewRevision: review.revision,
                 decisions: review.capabilities.compactMap { capability in
-                    guard let selection = selections[capability.domain] else {
+                    guard
+                        changedDomains.contains(capability.domain),
+                        let selection = selections[capability.domain]
+                    else {
                         return nil
                     }
                     return PermissionDecisionSelection(
@@ -208,7 +209,7 @@ final class PermissionReviewSheetModel {
                     )
                 }
             ),
-            batch.decisions.count == review.capabilities.count
+            batch.decisions.count == changedDomains.count
         else {
             transientIssue = PermissionReviewIssue(
                 title: "Permission review is incomplete",
@@ -228,6 +229,8 @@ final class PermissionReviewSheetModel {
             )!
         } else {
             snapshot = updatedSnapshot
+            selections = Self.defaultSelections(for: updatedSnapshot.review)
+            changedDomains.removeAll()
         }
         isSubmitting = false
     }

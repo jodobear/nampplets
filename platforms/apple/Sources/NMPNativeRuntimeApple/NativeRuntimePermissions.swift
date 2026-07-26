@@ -21,6 +21,8 @@ public typealias NativeRuntimePermissionPlatformAvailability =
     RuntimePermissionPlatformAvailability
 public typealias NativeRuntimePermissionExistingDecision =
     RuntimePermissionExistingDecision
+public typealias NativeRuntimePermissionDecisionController =
+    RuntimePermissionDecisionController
 public typealias NativeRuntimeGrantDecision =
     RuntimeGrantDecision
 public typealias NativeRuntimePermissionDecisionOption =
@@ -31,12 +33,16 @@ public typealias NativeRuntimePermissionDecisionBatch =
     RuntimePermissionDecisionBatch
 public typealias NativeRuntimePermissionBatchUpdate =
     RuntimePermissionBatchUpdate
+public typealias NativeRuntimePermissionChangeRefusal =
+    RuntimePermissionChangeRefusal
+public typealias NativeRuntimePermissionChangeRefusalCode =
+    RuntimePermissionChangeRefusalCode
 public typealias NativeRuntimePermissionRefusal = RuntimeRefusal
 
 /// The two-operation native permission boundary for one runtime profile.
 ///
-/// Review is read-only. Applying decisions commits one complete exact-build
-/// batch atomically in Rust and never launches the napplet.
+/// Review is read-only. Applying revision-bound changed-domain intent commits
+/// atomically in Rust and never launches the napplet.
 public protocol NativeRuntimePermissionManaging: AnyObject, Sendable {
     func permissionReview(
         for coordinate: NativeRuntimePermissionCoordinate
