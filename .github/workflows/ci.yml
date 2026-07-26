@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
   push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -31,6 +33,9 @@ jobs:
 
       - name: Run offline conformance tests
         run: python3 -m unittest discover -s conformance/tests -p 'test_*.py'
+
+      - name: Test the CI workflow event topology
+        run: python3 -m unittest scripts/ci/test_ci_workflow.py
 
       - name: Validate committed incomplete legacy evidence
         run: >-
