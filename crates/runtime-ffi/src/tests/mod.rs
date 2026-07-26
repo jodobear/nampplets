@@ -9,6 +9,7 @@ mod library;
 mod native_capabilities;
 mod permissions;
 mod profile_preferences;
+mod receipts;
 mod snapshot_delivery;
 mod snapshot_integrity;
 mod test_support;
