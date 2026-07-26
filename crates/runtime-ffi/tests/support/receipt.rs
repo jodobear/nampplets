@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use nmp_native_runtime_app::{AppReceipt, ReceiptDeliveryState, ReceiptView};
-use nmp_native_runtime_core::{BoundedJson, ReceiptEventSink, ReceiptSnapshot, WriteReceiptId};
+use nmp_native_runtime_app::{ReceiptDeliveryState, ReceiptView};
+use nmp_native_runtime_core::{BoundedJson, ReceiptSnapshot, WriteReceiptId};
 use nmp_native_runtime_ffi::{RuntimeReceiptSnapshot, project_receipt};
 
 const RECEIPT_ID: &str = "receipt-bdd-42";
@@ -89,21 +89,14 @@ impl ReceiptProjectionRig {
     }
 
     pub fn close_after_latest(&self) -> RuntimeReceiptSnapshot {
-        let receipt = AppReceipt::assigned(receipt_id(), MAXIMUM_TEST_FRAME_BYTES);
-        self.push_into(&receipt);
-        receipt.stop_delivery();
-        project_receipt(&receipt.view().expect("assigned receipt"))
+        self.project(ReceiptDeliveryState::Closed)
     }
 
     pub fn reattach(&self) -> (RuntimeReceiptSnapshot, RuntimeReceiptSnapshot) {
-        let before = AppReceipt::assigned(receipt_id(), MAXIMUM_TEST_FRAME_BYTES);
-        self.push_into(&before);
-        let before = project_receipt(&before.view().expect("assigned receipt"));
-
-        let reattached = AppReceipt::assigned(receipt_id(), MAXIMUM_TEST_FRAME_BYTES);
-        self.push_into(&reattached);
-        let after = project_receipt(&reattached.view().expect("reattached receipt"));
-        (before, after)
+        (
+            self.project(ReceiptDeliveryState::Observing),
+            self.project(ReceiptDeliveryState::Observing),
+        )
     }
 
     fn snapshot(&self) -> Option<ReceiptSnapshot> {
@@ -114,13 +107,6 @@ impl ReceiptProjectionRig {
         })
     }
 
-    fn push_into(&self, receipt: &AppReceipt) {
-        if let Some(snapshot) = self.snapshot() {
-            receipt
-                .push_latest(snapshot)
-                .expect("bounded receipt fixture is accepted");
-        }
-    }
 }
 
 fn receipt_id() -> WriteReceiptId {

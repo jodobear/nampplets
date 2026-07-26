@@ -1,27 +1,32 @@
 import NMPNativeRuntimeApple
 import SwiftUI
 
-/// Neutral presentation of a receipt observation.
-///
-/// Publication outcome and lifecycle both belong to NMP. The shell preserves
-/// Rust's typed status as evidence without deriving its own success styling or
-/// treating the observation lifecycle string as a delivery verdict.
+/// Typed presentation of NMP's durable outcome and the independent native
+/// observation lifecycle. Swift never decodes canonical receipt JSON.
 struct ReceiptStatusPresentation: Equatable, Sendable {
-    let title = "Delivery details available"
-    let systemImage = "doc.text.magnifyingglass"
+    let title: String
+    let systemImage: String
     let evidenceFields: [NappletField]
 
     init(
         receiptID: String,
-        status: NativeRuntimeReceiptStatus,
-        delivery: String,
+        outcome: NativeRuntimeReceiptOutcome,
+        observationLifecycle: NativeRuntimeReceiptObservationLifecycle,
+        outcomeDetail: String?,
         latestStateJSON: String?
     ) {
+        (title, systemImage) = outcome.presentation
         var fields = [
             NappletField("Receipt id", receiptID),
-            NappletField("Runtime status", status.evidenceTitle),
-            NappletField("Observation lifecycle", delivery),
+            NappletField("Durable outcome", outcome.evidenceTitle),
+            NappletField(
+                "Observation lifecycle",
+                observationLifecycle.evidenceTitle
+            ),
         ]
+        if let outcomeDetail {
+            fields.append(NappletField("Outcome detail", outcomeDetail))
+        }
         if let latestStateJSON {
             fields.append(NappletField("Latest NMP state", latestStateJSON))
         }
@@ -37,8 +42,9 @@ struct ReceiptStatusBar: View {
     private var presentation: ReceiptStatusPresentation {
         ReceiptStatusPresentation(
             receiptID: receipt.id,
-            status: receipt.status,
-            delivery: receipt.delivery,
+            outcome: receipt.outcome,
+            observationLifecycle: receipt.observationLifecycle,
+            outcomeDetail: receipt.outcomeDetail,
             latestStateJSON: receipt.latestStateJSON
         )
     }
@@ -64,11 +70,46 @@ struct ReceiptStatusBar: View {
     }
 }
 
-private extension NativeRuntimeReceiptStatus {
+private extension NativeRuntimeReceiptOutcome {
+    var presentation: (String, String) {
+        switch self {
+        case .inProgress: ("Delivery in progress", "clock")
+        case .delivered: ("Delivered", "checkmark.circle")
+        case .partialDelivery:
+            ("Partially delivered", "exclamationmark.triangle")
+        case .exhausted: ("Delivery not confirmed", "xmark.circle")
+        case .ambiguous: ("Delivery outcome unknown", "questionmark.circle")
+        case .refused: ("Delivery refused", "hand.raised")
+        case .failed: ("Delivery failed", "exclamationmark.octagon")
+        case .cancelled: ("Delivery cancelled", "xmark.circle")
+        case .conflict: ("Delivery conflict", "arrow.triangle.branch")
+        case .unavailable:
+            ("Delivery status unavailable", "questionmark.diamond")
+        }
+    }
+
     var evidenceTitle: String {
         switch self {
-        case .pending: "pending"
+        case .inProgress: "in progress"
         case .delivered: "delivered"
+        case .partialDelivery: "partial delivery"
+        case .exhausted: "exhausted"
+        case .ambiguous: "ambiguous"
+        case .refused: "refused"
+        case .failed: "failed"
+        case .cancelled: "cancelled"
+        case .conflict: "conflict"
+        case .unavailable: "unavailable"
+        }
+    }
+}
+
+private extension NativeRuntimeReceiptObservationLifecycle {
+    var evidenceTitle: String {
+        switch self {
+        case .observing: "observing"
+        case .notFound: "not found"
+        case .closed: "closed"
         }
     }
 }
