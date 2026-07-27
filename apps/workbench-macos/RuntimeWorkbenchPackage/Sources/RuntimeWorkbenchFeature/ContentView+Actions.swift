@@ -22,6 +22,7 @@ extension ContentView {
                 handleIntentActivation(request)
             }
         }
+        subscribeToRunningLibrarySessions()
         if await restorePersistedCanvasWindows() {
             return
         }
@@ -41,6 +42,51 @@ extension ContentView {
         } catch {
             activity = .failed(detail: error.localizedDescription)
         }
+    }
+
+    /// Keeps `runningLibrarySessionBuilds` in step with Rust's own view of
+    /// which exact builds have a live `.running` session, independent of
+    /// whether this process's window bookkeeping (`runningArtifacts`) still
+    /// thinks a napplet is open. Without this, the Inspector can only ever
+    /// say "Running" or "Not open" — it has no way to notice that Rust
+    /// already ended a session out from under an still-open window.
+    @MainActor
+    private func subscribeToRunningLibrarySessions() {
+        librarySessionSubscription?.cancel()
+        librarySessionSubscription = libraryManager.subscribe { [self] update in
+            let snapshot: WorkbenchLibrarySnapshot =
+                switch update {
+                case let .authoritative(snapshot), let .next(snapshot, _, _):
+                    snapshot
+                }
+            runningLibrarySessionBuilds = Self.buildsWithLiveSessions(in: snapshot)
+        }
+    }
+
+    /// The exact builds Rust currently reports at least one *live* session
+    /// for. Live, not whole: a session missing a required domain is degraded
+    /// but still running, and the Inspector must say "Running" for it rather
+    /// than "Session ended".
+    ///
+    /// This reads `isLive` instead of comparing against `.running`. The
+    /// comparison was written when `running` was the only live state, and
+    /// would have silently started excluding degraded sessions the moment
+    /// `.runningDegraded` existed — turning "the Inspector wrongly says
+    /// Running for a dead session" into "the Inspector wrongly says Session
+    /// ended for a live one", which is the same defect from the other side.
+    ///
+    /// Kept as a pure function so the distinction is testable without a live
+    /// runtime, matching `hasObservedRunningSession` below.
+    nonisolated static func buildsWithLiveSessions(
+        in snapshot: WorkbenchLibrarySnapshot
+    ) -> Set<WorkbenchLibraryExactBuild> {
+        Set(
+            snapshot.builds
+                .filter { build in
+                    build.sessions.contains(where: \.state.isLive)
+                }
+                .map(\.exactBuild)
+        )
     }
 
     @MainActor
