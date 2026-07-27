@@ -8,11 +8,62 @@ final class RuntimeWorkbenchAppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.activateWorkbenchWindow()
         }
+        // Deliberately no `didResize` observer. An earlier revision re-fitted
+        // the window on every resize, but `setFrame` itself raises
+        // `didResize`, so it could ping-pong with SwiftUI's own sizing and
+        // spin the main thread. That is what hung the first UI test at launch
+        // for the full 60s allowance while the app never became responsive.
+        //
+        // It is also unnecessary. The real defect was a minimum window size
+        // (1050x660) that a 1024pt display could not satisfy; with the floor
+        // lowered, AppKit's own `constrainFrameRect(_:to:)` keeps a new window
+        // inside the visible frame without any help from us.
     }
 
     private func activateWorkbenchWindow() {
         NSApplication.shared.activate(ignoringOtherApps: true)
-        NSApplication.shared.windows.first?.makeKeyAndOrderFront(nil)
+        guard let window = NSApplication.shared.windows.first else {
+            return
+        }
+        window.makeKeyAndOrderFront(nil)
+        fitToVisibleScreen(window)
+    }
+
+    /// Pulls the window out from under the Dock on displays too short for its
+    /// ideal size. See `WorkbenchWindowFitting` for why this is a correctness
+    /// fix and not a cosmetic one.
+    private func fitToVisibleScreen(_ window: NSWindow) {
+        // Sheets are windows too and will raise these notifications. Their
+        // height is bounded by `PermissionReviewSheetGeometry`; moving one by
+        // hand only fights AppKit's own sheet placement.
+        guard !window.isSheet else { return }
+        guard let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame
+        else {
+            return
+        }
+        let current = window.frame
+        let fitted = WorkbenchWindowFitting.fitted(current, into: visibleFrame)
+        // Observability, so the next CI run distinguishes "never ran" from "ran
+        // and was overridden" instead of leaving it to be inferred from an
+        // unchanged button frame. The previous attempt could not tell the two
+        // apart and cost a full cycle to learn nothing.
+        func describe(_ rect: NSRect) -> String {
+            "{{\(rect.minX), \(rect.minY)}, {\(rect.width), \(rect.height)}}"
+        }
+        NSLog(
+            "workbench-window-fit: visible=%@ current=%@ fitted=%@ applied=%@",
+            describe(visibleFrame),
+            describe(current),
+            describe(fitted),
+            WorkbenchWindowFitting.fits(current, in: visibleFrame)
+                ? "no-already-fits" : "yes"
+        )
+        // Terminates: once the window fits, this returns before setting a frame,
+        // so the resize notification it raises does not recur.
+        guard !WorkbenchWindowFitting.fits(current, in: visibleFrame) else {
+            return
+        }
+        window.setFrame(fitted, display: true)
     }
 }
 
@@ -40,8 +91,15 @@ struct RuntimeWorkbenchApp: App {
                 } else if let runtimeError {
                     ContentView(bootstrapError: runtimeError)
                 } else {
+                    // These were `minWidth`/`minHeight`, which SwiftUI turns
+                    // into the *window's* minimum size. 1050pt is wider than a
+                    // 1024pt display, so the window could not be shrunk to fit
+                    // and AppKit produced exactly the 1050x712 seen in CI
+                    // (660 content + 52 chrome). A loading placeholder must
+                    // express a preference, not a floor the window cannot honour.
                     ProgressView("Opening runtime…")
-                        .frame(minWidth: 1_050, minHeight: 660)
+                        .frame(idealWidth: 1_050, idealHeight: 660)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .preferredColorScheme(appearance.colorScheme)
