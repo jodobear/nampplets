@@ -45,7 +45,9 @@ nap = "5e3e086bbb83335efb1d35c68cc0cd88780ab60e2bc7dbb3bd9daac88f72909f"
 conformance = "889c72e3f36401018bee1c8eae10536812ac54d80f5ee07bee8408b97fc62ab4"
 
 [kehto]
-repository = "kehto/web"
+repository = "jodobear/kehto-web"
+upstream_repository = "kehto/web"
+source_branch = "fix/napplet-conformance-no-modulepreload"
 commit = "62241de0b4526ba4fdc8a7b3c766c2499d3ae24d"
 corpus_path = "apps/playground/napplets"
 playground_tree = "d1bab686acef6c21c0d377052c9f04cd2e59500f"
@@ -146,7 +148,7 @@ unsupported_domains = [
 
 [corpus]
 reference_fixture_digest = "5013983282a03741305b2f9740e2268ea6c038843b6e2214b0f34cbd611fd70a"
-kehto_fixture_digest = "ad05a0f042234fa1afdff63dac38a461dc8baf3507cc321d5803654ca6e11c19"
+kehto_fixture_digest = "225f96bc50c950260ecbdce14608fd2e82790acad64dc1cd2e835db5e1fc92a3"
 published_fixture_digest = "4bbd1218609000deaa273ef43c232211a90515c481dbd1929c40536c1e44e466"
 
 [artifact_profiles.good_morning]

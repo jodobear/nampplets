@@ -359,7 +359,7 @@
     "commit": "62241de0b4526ba4fdc8a7b3c766c2499d3ae24d",
     "corpus_tree": "24a7dfa6277f339612f9b0a33668fec26d9e8d9a",
     "exact_source_trees_verified": true,
-    "repository": "kehto/web"
+    "repository": "jodobear/kehto-web"
   },
   "status": "incomplete"
 }

@@ -90,6 +90,18 @@ class LegacyHostRunnerTests(unittest.TestCase):
         self.assertIn('"--frozen-lockfile"', source)
         self.assertIn('"./apps/playground/napplets/**"', source)
 
+    def test_kehto_runner_clones_the_lock_repository_only(self) -> None:
+        self.assertEqual(
+            kehto.github_remote("jodobear/kehto-web"),
+            "https://github.com/jodobear/kehto-web.git",
+        )
+        for invalid in ("kehto", "https://github.com/kehto/web", "kehto/web/extra"):
+            with self.assertRaisesRegex(
+                kehto.KehtoRunnerError,
+                "invalid-github-repository",
+            ):
+                kehto.github_remote(invalid)
+
     def test_legacy_runner_accepts_an_explicit_playwright_module_root(self) -> None:
         source = (
             ROOT / "conformance" / "legacy-host" / "run.py"

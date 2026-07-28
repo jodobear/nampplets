@@ -149,7 +149,12 @@ def parse_requires(vite_config: str) -> list[str]:
     return re.findall(r"['\"]([a-z][a-z0-9-]*)['\"]", match.group(1))
 
 
-def kehto_corpus(kehto_root: Path, commit: str, corpus_tree: str) -> dict[str, Any]:
+def kehto_corpus(
+    kehto_root: Path,
+    repository: str,
+    commit: str,
+    corpus_tree: str,
+) -> dict[str, Any]:
     base = "apps/playground/napplets"
     names = git(kehto_root, "ls-tree", "-d", "--name-only", f"HEAD:{base}").splitlines()
     applications: list[dict[str, Any]] = []
@@ -190,7 +195,7 @@ def kehto_corpus(kehto_root: Path, commit: str, corpus_tree: str) -> dict[str, A
     result: dict[str, Any] = {
         "schema": 1,
         "source": {
-            "repository": "kehto/web",
+            "repository": repository,
             "commit": commit,
             "path": base,
             "git_tree": corpus_tree,
@@ -267,6 +272,7 @@ def main() -> int:
 
     corpus = kehto_corpus(
         arguments.kehto,
+        lock["kehto"]["repository"],
         lock["kehto"]["commit"],
         lock["kehto"]["corpus_tree"],
     )

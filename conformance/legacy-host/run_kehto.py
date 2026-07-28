@@ -26,12 +26,19 @@ BUILD_TIMEOUT_SECONDS = 60
 MAX_PROCESS_OUTPUT_BYTES = 256 * 1024
 MAX_ARTIFACT_FILES = 512
 MAX_ARTIFACT_BYTES = 32 * 1024 * 1024
-KEHTO_REMOTE = "https://github.com/kehto/web.git"
 PACKAGE_MANAGER = "pnpm@10.8.0"
+GITHUB_REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
 
 class KehtoRunnerError(RuntimeError):
     """A pinned-source or bounded-process contract failed."""
+
+
+def github_remote(repository: str) -> str:
+    """Return the bounded HTTPS clone URL for a pinned GitHub repository."""
+    if GITHUB_REPOSITORY.fullmatch(repository) is None:
+        raise KehtoRunnerError("invalid-github-repository")
+    return f"https://github.com/{repository}.git"
 
 
 def bounded_process(
@@ -105,6 +112,7 @@ def acquire_source(
     source: Path | None,
     destination: Path,
     commit: str,
+    remote: str,
     allow_network: bool,
 ) -> Path:
     if source is None:
@@ -118,7 +126,7 @@ def acquire_source(
                 "clone",
                 "--filter=blob:none",
                 "--no-checkout",
-                KEHTO_REMOTE,
+                remote,
                 str(destination),
             ],
             cwd=destination.parent,
@@ -248,8 +256,11 @@ def main() -> int:
         )
     )
     commit = lock["kehto"]["commit"]
+    repository = lock["kehto"]["repository"]
     if index["source"]["commit"] != commit:
         raise KehtoRunnerError("Kehto index/lock commit mismatch")
+    if index["source"]["repository"] != repository:
+        raise KehtoRunnerError("Kehto index/lock repository mismatch")
 
     applications = [
         {
@@ -274,6 +285,7 @@ def main() -> int:
             source=arguments.source,
             destination=temporary_root / "kehto",
             commit=commit,
+            remote=github_remote(repository),
             allow_network=arguments.network,
         )
         if arguments.source is None:

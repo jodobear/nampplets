@@ -269,6 +269,11 @@ def verify_upgrade_report(lock: dict[str, Any]) -> dict[str, int]:
         raise BaselineError("upgrade report authority mismatch")
     if report["signoff"] != lock["signoff"]:
         raise BaselineError("upgrade report signoff mismatch")
+    if report["source_repositories"] != {
+        "kehto": lock["kehto"]["repository"],
+        "kehto_upstream": lock["kehto"]["upstream_repository"],
+    }:
+        raise BaselineError("upgrade report source repository mismatch")
     if report["explicitly_unsupported"] != [
         "registry-only-inc.channel.opened"
     ]:
@@ -293,6 +298,8 @@ def verify_corpus(lock: dict[str, Any]) -> tuple[int, int, int]:
         raise BaselineError("published corpus digest mismatch")
     if kehto["source"]["commit"] != lock["kehto"]["commit"]:
         raise BaselineError("Kehto corpus commit mismatch")
+    if kehto["source"]["repository"] != lock["kehto"]["repository"]:
+        raise BaselineError("Kehto corpus repository mismatch")
     if kehto["source"]["git_tree"] != lock["kehto"]["corpus_tree"]:
         raise BaselineError("Kehto corpus tree mismatch")
 

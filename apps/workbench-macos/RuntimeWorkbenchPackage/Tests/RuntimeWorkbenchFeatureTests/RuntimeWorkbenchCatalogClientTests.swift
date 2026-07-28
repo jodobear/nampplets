@@ -30,7 +30,7 @@ private func searchPage(
         "reference":
             "5cc6f85dca4a3db7ef63ce7d44f7bc18d2a233744e82bd3c2c4ac4b2e883685f",
         "kehto":
-            "93c51f2056936b8b5c047b7d40e0b07b128ede7431b8771f9e20e4133b7b1b6d",
+            "5b2b45e1d0cfde2ab0038ce5754c1940c1689434edf53f72ee455aa4da46c338",
     ]
 
     for (name, expectedDigest) in expected {
@@ -102,6 +102,10 @@ private func searchPage(
     #expect(page.evidence.locallyFilteredRows == 18)
     let demo = try #require(
         page.entries.first(where: { $0.title == "Resource Demo" })
+    )
+    #expect(
+        demo.publisher.displayName
+            == "jodobear/kehto-web @ 62241de0b452"
     )
     guard case let .incompatible(reason) = demo.compatibility else {
         Issue.record("Expected Kehto source entry to be incompatible")
