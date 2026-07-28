@@ -101,6 +101,27 @@ class BaselineTests(unittest.TestCase):
             },
         )
 
+    def test_registry_package_drift_is_not_hidden(self) -> None:
+        inventory = verify_baseline.load_json(
+            "conformance/envelopes/inventory.json"
+        )
+        unsupported = {
+            item["type"]: item["validator"]
+            for item in inventory["entries"]
+            if item["validator"] == "explicit-unsupported"
+        }
+        self.assertEqual(
+            unsupported,
+            {"inc.channel.opened": "explicit-unsupported"},
+        )
+
+    def test_upgrade_report_is_bound_to_the_lock(self) -> None:
+        lock = verify_baseline.load_lock()
+        self.assertEqual(
+            verify_baseline.verify_upgrade_report(lock),
+            {"accepted": 6, "rejected": 3, "explicitly_unsupported": 1},
+        )
+
     def test_m0_advertises_no_domains(self) -> None:
         lock = verify_baseline.load_lock()
         for platform in ("macos", "ios", "android"):

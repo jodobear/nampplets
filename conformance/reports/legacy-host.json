@@ -1,5 +1,5 @@
 {
-  "baseline": "native-runtime-compat-v1",
+  "baseline": "native-runtime-compat-v2",
   "baseline_status": "unratified",
   "claim": "This report does not claim M2 compatibility while any fixture fails, is not run, or the registry-only shell handshake is absent.",
   "classification_findings": [
@@ -162,7 +162,7 @@
             }
           },
           "status": "pass",
-          "version": "0.13.0"
+          "version": "0.14.0"
         },
         "emitted": [
           {
@@ -332,7 +332,7 @@
             }
           },
           "status": "pass",
-          "version": "0.13.0"
+          "version": "0.14.0"
         },
         "emitted": [
           {
@@ -480,7 +480,7 @@
             }
           },
           "status": "pass",
-          "version": "0.13.0"
+          "version": "0.14.0"
         },
         "emitted": [
           {
@@ -633,7 +633,7 @@
             }
           },
           "status": "pass",
-          "version": "0.13.0"
+          "version": "0.14.0"
         },
         "emitted": [
           {
@@ -674,19 +674,19 @@
   "sources": {
     "conformance_package": {
       "name": "@napplet/conformance",
-      "npm_sha256": "d26d943ee5423e7d3234ad4929605667d407ee06b804038e5175022be3f5df8b",
-      "version": "0.13.0"
+      "npm_sha256": "889c72e3f36401018bee1c8eae10536812ac54d80f5ee07bee8408b97fc62ab4",
+      "version": "0.14.0"
     },
-    "kehto_commit": "bb3929b3523b75356fd65f658f9bd14c7ff697e4",
-    "napplet_web_commit": "b335c40c77f55547f23af81d6d999e2e4e3a3623",
+    "kehto_commit": "62241de0b4526ba4fdc8a7b3c766c2499d3ae24d",
+    "napplet_web_commit": "60889f1c2476e063500c7ab6624af6abe0dbcbe5",
     "package_dependency_archives": {
       "@napplet/core": {
-        "npm_sha256": "812d92f5f1f926e952c5a59cdcd1b2a45bf0356e9b025b3666a5ec30df68429a",
-        "version": "0.28.0"
+        "npm_sha256": "d1670d3a27d0f23d65202052a153ab43d6b5ec5cb833c22a247ed5cea1dedd05",
+        "version": "0.29.0"
       },
       "@napplet/nap": {
-        "npm_sha256": "ff51a33cd35e06b5067b09407fb3e381c6bfe4ef229ce8c082b3beb156ebd5b6",
-        "version": "0.28.0"
+        "npm_sha256": "5e3e086bbb83335efb1d35c68cc0cd88780ab60e2bc7dbb3bd9daac88f72909f",
+        "version": "0.29.0"
       }
     },
     "trusted_shell_sha256": {

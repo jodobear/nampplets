@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "baseline": "native-runtime-compat-v2",
+  "captured_at": "2026-07-28",
+  "status": "unratified",
+  "from": {
+    "nip_5d": "78efc118278e3ed42201eba9b60530b65835d7ed",
+    "nap_registry": "6461e4b37c29dc09a20dff35d9515889c4433874",
+    "napplet_web": "b335c40c77f55547f23af81d6d999e2e4e3a3623",
+    "kehto": "bb3929b3523b75356fd65f658f9bd14c7ff697e4"
+  },
+  "to": {
+    "nip_5d": "eb45dfd7335b7f88cb53781984c553581d2b4c34",
+    "nap_registry": "5ac0490461ca6fec2f0d2e45b4835cf9bc08de24",
+    "napplet_web": "60889f1c2476e063500c7ab6624af6abe0dbcbe5",
+    "kehto": "62241de0b4526ba4fdc8a7b3c766c2499d3ae24d"
+  },
+  "accepted": [
+    "runtime-attested-inc-sender",
+    "queryless-convention-transposition",
+    "normalized-intent-request",
+    "independent-intent-delivery",
+    "strict-child-csp-guidance",
+    "kehto-artifacts-without-modulepreload-fetch"
+  ],
+  "rejected": [
+    "caller-supplied-inc-sender",
+    "malformed-or-conflicting-normalized-intent-identity",
+    "kehto-artifacts-with-modulepreload-fetch"
+  ],
+  "explicitly_unsupported": [
+    "registry-only-inc.channel.opened"
+  ],
+  "migration": {
+    "legacy_intent_protocol_alias": "accepted-at-rust-provider-boundary",
+    "legacy_optional_intent_fields": "accepted-at-rust-provider-boundary",
+    "platform_domains_advertised": []
+  },
+  "signoff": {
+    "product_owner": "pablof7z",
+    "compatibility_reviewer": "",
+    "security_reviewer": "",
+    "nmp_boundary_reviewer": ""
+  }
+}

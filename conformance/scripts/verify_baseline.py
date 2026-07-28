@@ -238,10 +238,46 @@ def verify_envelopes(lock: dict[str, Any]) -> int:
         "shell.ready": "registry-only-handshake",
     }:
         raise BaselineError("NAP-SHELL drift records changed")
+    unsupported = {
+        entry["type"]: entry["validator"]
+        for entry in entries
+        if entry["validator"] == "explicit-unsupported"
+    }
+    if unsupported != {"inc.channel.opened": "explicit-unsupported"}:
+        raise BaselineError("registry/package unsupported records changed")
     allowed = {"pinned-conformance", "registry-only-handshake", "explicit-unsupported"}
     if any(entry["validator"] not in allowed for entry in entries):
         raise BaselineError("envelope entry has no validator or unsupported record")
     return len(entries)
+
+
+def verify_upgrade_report(lock: dict[str, Any]) -> dict[str, int]:
+    report = load_json("conformance/reports/compatibility-v2.json")
+    if report["baseline"] != lock["baseline"]["name"]:
+        raise BaselineError("upgrade report baseline mismatch")
+    if report["captured_at"] != lock["baseline"]["created_at"]:
+        raise BaselineError("upgrade report capture date mismatch")
+    if report["status"] != lock["baseline"]["status"]:
+        raise BaselineError("upgrade report status mismatch")
+    expected_authorities = {
+        "nip_5d": lock["nip_5d"]["commit"],
+        "nap_registry": lock["nap_registry"]["commit"],
+        "napplet_web": lock["napplet_packages"]["commit"],
+        "kehto": lock["kehto"]["commit"],
+    }
+    if report["to"] != expected_authorities:
+        raise BaselineError("upgrade report authority mismatch")
+    if report["signoff"] != lock["signoff"]:
+        raise BaselineError("upgrade report signoff mismatch")
+    if report["explicitly_unsupported"] != [
+        "registry-only-inc.channel.opened"
+    ]:
+        raise BaselineError("upgrade report unsupported behavior mismatch")
+    return {
+        "accepted": len(report["accepted"]),
+        "rejected": len(report["rejected"]),
+        "explicitly_unsupported": len(report["explicitly_unsupported"]),
+    }
 
 
 def verify_corpus(lock: dict[str, Any]) -> tuple[int, int, int]:
@@ -423,6 +459,7 @@ def verify() -> dict[str, Any]:
     verify_lock(lock)
     files = verify_digest_manifest()
     envelopes = verify_envelopes(lock)
+    upgrade = verify_upgrade_report(lock)
     reference, kehto, published = verify_corpus(lock)
     falsifiers = verify_falsifiers()
     relay, blob, signer = verify_service_scenarios()
@@ -431,6 +468,7 @@ def verify() -> dict[str, Any]:
         "status": lock["baseline"]["status"],
         "verified_files": files,
         "envelopes": envelopes,
+        "upgrade_behaviors": upgrade,
         "corpus": {
             "reference": reference,
             "kehto": kehto,

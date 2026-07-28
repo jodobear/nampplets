@@ -1,7 +1,7 @@
 # NAP-RESOURCE provider
 
 This crate owns the Rust policy state machine for the pinned
-`napplet-web@0.28.0` resource domain. It is not a general network client and it
+`napplet-web@0.29.0` resource domain. It is not a general network client and it
 must not be registered until the host supplies both required capability ports:
 
 - `ResourceNetwork`: raw DNS and HTTPS execution that connects only to the

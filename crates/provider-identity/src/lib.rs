@@ -1,4 +1,4 @@
-//! Exact `@napplet/nap` 0.28.0 identity-provider contract.
+//! Exact `@napplet/nap` 0.29.0 identity-provider contract.
 //!
 //! The provider is read-only. It never receives signer capabilities or secret
 //! key material. The data-plane port freezes the active public account before
@@ -13,9 +13,9 @@ pub use nmp_native_runtime_core::{
 };
 
 pub const DOMAIN: &str = "identity";
-pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.28.0";
+pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.29.0";
 pub const PINNED_NPM_TARBALL_SHA256: &str =
-    "ff51a33cd35e06b5067b09407fb3e381c6bfe4ef229ce8c082b3beb156ebd5b6";
+    "5e3e086bbb83335efb1d35c68cc0cd88780ab60e2bc7dbb3bd9daac88f72909f";
 
 mod diagnostics;
 mod provider;

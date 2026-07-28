@@ -22,8 +22,8 @@ pub use storage::{StorageProvider, StorageProviderLimits};
 pub use theme::{ThemeProvider, ThemeProviderLimits, ThemeSnapshot, ThemeSource};
 
 /// Compatibility identifier recorded in `compatibility.lock`.
-pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.28.0";
-pub const PINNED_SHELL_PROTOCOL: &str = "NAP-SHELL@6461e4b37c29";
+pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.29.0";
+pub const PINNED_SHELL_PROTOCOL: &str = "NAP-SHELL@5ac0490461ca";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ProviderPushReport {

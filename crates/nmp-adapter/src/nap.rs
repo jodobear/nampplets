@@ -39,7 +39,7 @@ use super::NmpDataPlane;
 
 pub const OUTBOX_DOMAIN: &str = "outbox";
 pub const RELAY_DOMAIN: &str = "relay";
-const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.28.0";
+const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.29.0";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NapNostrProviderLimits {

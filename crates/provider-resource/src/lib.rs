@@ -23,7 +23,7 @@ pub use types::*;
 pub use wire::ResourceCensus;
 
 pub const DOMAIN: &str = "resource";
-pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.28.0";
+pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.29.0";
 pub const NATIVE_BLOB_ENCODING: &str = "base64-standard-padded";
 
 #[cfg(test)]

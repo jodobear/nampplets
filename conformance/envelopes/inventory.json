@@ -1,8 +1,9 @@
 {
   "counts": {
-    "pinned_conformance": 207,
+    "explicit_unsupported": 1,
+    "pinned_conformance": 208,
     "registry_only_handshake": 2,
-    "total": 209
+    "total": 211
   },
   "entries": [
     {
@@ -685,6 +686,13 @@
       "validator": "pinned-conformance"
     },
     {
+      "direction": "shell-to-napplet",
+      "domain": "inc",
+      "runtime_support": "not-advertised-m0",
+      "type": "inc.channel.opened",
+      "validator": "explicit-unsupported"
+    },
+    {
       "direction": "napplet-to-shell",
       "domain": "inc",
       "runtime_support": "not-advertised-m0",
@@ -738,6 +746,13 @@
       "domain": "intent",
       "runtime_support": "not-advertised-m0",
       "type": "intent.changed",
+      "validator": "pinned-conformance"
+    },
+    {
+      "direction": "shell-to-napplet",
+      "domain": "intent",
+      "runtime_support": "not-advertised-m0",
+      "type": "intent.deliver",
       "validator": "pinned-conformance"
     },
     {
@@ -1471,10 +1486,10 @@
   ],
   "schema": 1,
   "source": {
-    "commit": "b335c40c77f55547f23af81d6d999e2e4e3a3623",
+    "commit": "60889f1c2476e063500c7ab6624af6abe0dbcbe5",
     "file": "packages/conformance/src/validators/envelope.ts",
     "repository": "napplet/web",
-    "sha256": "5f842ca74fd69a63fd3f4ebb4f68a738ba689ec39af1df05562732bc74dcb2ba"
+    "sha256": "65ff091bc7344b07cd92eebe2e35493f02bf378d21b1e248cc76ac3d756270c5"
   },
   "unknown_message_policy": "ignore"
 }
