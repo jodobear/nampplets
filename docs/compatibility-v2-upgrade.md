@@ -11,7 +11,7 @@ Captured 2026-07-28. This is a candidate compatibility change from
 | NIP-5D PR 2303 | `78efc118278e3ed42201eba9b60530b65835d7ed` | `eb45dfd7335b7f88cb53781984c553581d2b4c34` | strict child CSP guidance added |
 | NAP registry | `6461e4b37c29dc09a20dff35d9515889c4433874` | `5ac0490461ca6fec2f0d2e45b4835cf9bc08de24` | convention URI transposition and symmetric INC channel semantics added |
 | napplet/web | `b335c40c77f55547f23af81d6d999e2e4e3a3623` | `60889f1c2476e063500c7ab6624af6abe0dbcbe5` | core/nap 0.29, shim 0.27, SDK 0.25, conformance 0.14 |
-| Kehto corpus | `bb3929b3523b75356fd65f658f9bd14c7ff697e4` | `62241de0b4526ba4fdc8a7b3c766c2499d3ae24d` | shared Vite config disables module preload so production artifacts contain no forbidden fetch helper |
+| Kehto corpus | `kehto/web@bb3929b3523b75356fd65f658f9bd14c7ff697e4` | `jodobear/kehto-web@62241de0b4526ba4fdc8a7b3c766c2499d3ae24d` | fork branch `fix/napplet-conformance-no-modulepreload` disables module preload so production artifacts contain no forbidden fetch helper; upstream merge is not assumed |
 | NMP | `005dc2a5f12aa414961b313d05ebb021934e385c` | unchanged | no facade or ownership change |
 
 All source-tree IDs, npm tarball SHA-256 values, vendored authority snapshots,

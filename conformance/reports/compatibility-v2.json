@@ -3,6 +3,10 @@
   "baseline": "native-runtime-compat-v2",
   "captured_at": "2026-07-28",
   "status": "unratified",
+  "source_repositories": {
+    "kehto": "jodobear/kehto-web",
+    "kehto_upstream": "kehto/web"
+  },
   "from": {
     "nip_5d": "78efc118278e3ed42201eba9b60530b65835d7ed",
     "nap_registry": "6461e4b37c29dc09a20dff35d9515889c4433874",

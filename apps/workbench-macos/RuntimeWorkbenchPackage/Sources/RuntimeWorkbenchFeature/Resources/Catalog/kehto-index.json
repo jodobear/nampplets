@@ -555,12 +555,12 @@
   ],
   "artifact_obligation": false,
   "classification": "kehto-source-corpus",
-  "digest": "ad05a0f042234fa1afdff63dac38a461dc8baf3507cc321d5803654ca6e11c19",
+  "digest": "225f96bc50c950260ecbdce14608fd2e82790acad64dc1cd2e835db5e1fc92a3",
   "schema": 1,
   "source": {
     "commit": "62241de0b4526ba4fdc8a7b3c766c2499d3ae24d",
     "git_tree": "24a7dfa6277f339612f9b0a33668fec26d9e8d9a",
     "path": "apps/playground/napplets",
-    "repository": "kehto/web"
+    "repository": "jodobear/kehto-web"
   }
 }

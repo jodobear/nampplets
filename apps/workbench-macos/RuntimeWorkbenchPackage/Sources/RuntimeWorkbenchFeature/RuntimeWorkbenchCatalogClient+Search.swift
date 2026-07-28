@@ -98,7 +98,8 @@ extension RuntimeWorkbenchCatalogClient {
               kehto.schema == 1,
               kehto.classification == "kehto-source-corpus",
               kehto.digest == kehtoDigest,
-              kehto.source.commit == kehtoCommit
+              kehto.source.commit == kehtoCommit,
+              kehto.source.repository == kehtoRepository
         else {
             throw CatalogResourceError.unexpectedBaseline
         }
@@ -114,9 +115,10 @@ extension RuntimeWorkbenchCatalogClient {
     private static let referenceDigest =
         "5013983282a03741305b2f9740e2268ea6c038843b6e2214b0f34cbd611fd70a"
     private static let kehtoDigest =
-        "ad05a0f042234fa1afdff63dac38a461dc8baf3507cc321d5803654ca6e11c19"
+        "225f96bc50c950260ecbdce14608fd2e82790acad64dc1cd2e835db5e1fc92a3"
     private static let kehtoCommit =
         "62241de0b4526ba4fdc8a7b3c766c2499d3ae24d"
+    private static let kehtoRepository = "jodobear/kehto-web"
 
     private static func publishedRecord(
         fixture: PublishedFixture
@@ -330,7 +332,7 @@ extension RuntimeWorkbenchCatalogClient {
             title: application.name.displayCatalogTitle,
             summary: reason,
             publisher: CatalogPublisher(
-                displayName: "kehto/web @ \(kehtoCommit.prefix(12))",
+                displayName: "\(kehtoRepository) @ \(kehtoCommit.prefix(12))",
                 publicKey: "Unavailable — source corpus is not a signed manifest"
             ),
             coordinate: coordinate,
@@ -496,6 +498,7 @@ private struct KehtoApplication: Decodable {
 
 private struct KehtoSource: Decodable {
     let commit: String
+    let repository: String
 }
 
 private extension String {
