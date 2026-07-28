@@ -4,7 +4,7 @@
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 58500
+        "total_bytes": 60217
       },
       "name": "ble-demo",
       "reason": {
@@ -17,14 +17,14 @@
       "requires": [
         "ble"
       ],
-      "source_tree": "035f7da7e4ceafb35eee3762dbb0b66ed65dd97c",
+      "source_tree": "dd3f9c6c3cd96e974652575cac8afaaf5cb1954f",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 62269
+        "total_bytes": 63930
       },
       "name": "bot",
       "reason": {
@@ -41,14 +41,14 @@
         "storage",
         "theme"
       ],
-      "source_tree": "ae77609686efb4c0299c23d0859dc5048e40dcc9",
+      "source_tree": "8f1ebbf590ecbb78c6e04602d4cc1902e1cb39ef",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 62879
+        "total_bytes": 64587
       },
       "name": "chat",
       "reason": {
@@ -67,14 +67,14 @@
         "relay",
         "theme"
       ],
-      "source_tree": "6cd9e903bbe88a450bcbe3139b27f6d036dacab7",
+      "source_tree": "2a4eaa27d272db5a475cc6e508a591491b7aa1b1",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 57743
+        "total_bytes": 59455
       },
       "name": "common-demo",
       "reason": {
@@ -87,14 +87,14 @@
       "requires": [
         "common"
       ],
-      "source_tree": "e3b9224836efb73d43265b54b31e83a31f132457",
+      "source_tree": "e7aa5b057456ff7b0ae4d63ce9784d5c44d73efd",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 62542
+        "total_bytes": 64253
       },
       "name": "composer",
       "reason": {
@@ -109,14 +109,14 @@
         "relay",
         "theme"
       ],
-      "source_tree": "32dd4b345b099848d0f2418512b24ab1cf6458f1",
+      "source_tree": "bf9d40e4e07c267748a3a83560c350333f99036a",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 62363
+        "total_bytes": 64074
       },
       "name": "cvm-relatr",
       "reason": {
@@ -131,40 +131,42 @@
         "cvm",
         "theme"
       ],
-      "source_tree": "13293cebd9447194030a204595ea09ec0bcab9b8",
+      "source_tree": "f4cba1db6964277024a11ebf038d705cc02be824",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 67633
+        "total_bytes": 70393
       },
       "name": "feed",
       "reason": {
         "code": "native-provider-preflight-blocked",
         "missing_required_domains": [
           "identity",
+          "intent",
           "relay",
-          "inc",
+          "resource",
           "theme"
         ],
         "note": "macOS advertises no package-active NAP domains in this baseline"
       },
       "requires": [
         "identity",
+        "intent",
         "relay",
-        "inc",
+        "resource",
         "theme"
       ],
-      "source_tree": "8a146f7511a4fc887cecc0f29ccbf4871234bc56",
+      "source_tree": "99343d9020f4b25b5b8c784db1e2b0d5c802ceb4",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 56457
+        "total_bytes": 58170
       },
       "name": "link-demo",
       "reason": {
@@ -177,14 +179,14 @@
       "requires": [
         "link"
       ],
-      "source_tree": "3a92aeab2a94003b7f595cd72bfb06b8b34a720a",
+      "source_tree": "4866ba34fe7c9cc25b55e78423fdfc09df65d9e9",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 56954
+        "total_bytes": 58665
       },
       "name": "lists-demo",
       "reason": {
@@ -197,14 +199,14 @@
       "requires": [
         "lists"
       ],
-      "source_tree": "ef7b40d8d2528c31a05f9883747dfc7c59aaaedd",
+      "source_tree": "28024cda44f2e5f96724793d17c2068203e1381b",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 62450
+        "total_bytes": 64156
       },
       "name": "preferences",
       "reason": {
@@ -219,38 +221,40 @@
         "storage",
         "theme"
       ],
-      "source_tree": "3232c28b1a532553f9cc52694a155dcd78e9ee49",
+      "source_tree": "aad337d2cfb2374af081e2fa0c5acc28854fafd7",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 63680
+        "total_bytes": 67535
       },
       "name": "profile-viewer",
       "reason": {
         "code": "native-provider-preflight-blocked",
         "missing_required_domains": [
-          "inc",
+          "intent",
           "relay",
+          "resource",
           "theme"
         ],
         "note": "macOS advertises no package-active NAP domains in this baseline"
       },
       "requires": [
-        "inc",
+        "intent",
         "relay",
+        "resource",
         "theme"
       ],
-      "source_tree": "beeadad9f8589d8a572f03763540666e797066d7",
+      "source_tree": "439dd0a187094feb4cb430f83c83e9640e4310d9",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 61635
+        "total_bytes": 63338
       },
       "name": "resource-demo",
       "reason": {
@@ -265,14 +269,14 @@
         "resource",
         "theme"
       ],
-      "source_tree": "3926e7884802c3e11f78dcfb9676dc02efcc6558",
+      "source_tree": "5fd7635193c583498c4258e6dc110b3b1156caa6",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 57072
+        "total_bytes": 58781
       },
       "name": "serial-demo",
       "reason": {
@@ -285,14 +289,14 @@
       "requires": [
         "serial"
       ],
-      "source_tree": "624cd649d32d0d90e4a77dfadfa2453f11eb5e31",
+      "source_tree": "866ac4082eb1738f7ef9b05bd0c64f7e1d9c1ee4",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 63026
+        "total_bytes": 64737
       },
       "name": "toaster",
       "reason": {
@@ -307,14 +311,14 @@
         "notify",
         "theme"
       ],
-      "source_tree": "97ae89c3d64bb098691063baedaee701edc622e5",
+      "source_tree": "9b9a6a38795fbf40427b308e4ecdde60c6315c09",
       "status": "built-not-run"
     },
     {
       "artifact": {
         "file_count": 2,
         "index_html": true,
-        "total_bytes": 57845
+        "total_bytes": 59554
       },
       "name": "webrtc-demo",
       "reason": {
@@ -327,11 +331,11 @@
       "requires": [
         "webrtc"
       ],
-      "source_tree": "1b0246b67622c1ab41c3df9a8f34e612e6861f74",
+      "source_tree": "e6bae59ee2d85444e7c1cce33c500e455fea4952",
       "status": "built-not-run"
     }
   ],
-  "baseline": "native-runtime-compat-v1",
+  "baseline": "native-runtime-compat-v2",
   "claim": "A build or preflight result is not a native-host boot result. No Kehto application is green unless its unchanged built bytes execute through the native host.",
   "counts": {
     "built-not-run": 15
@@ -352,8 +356,8 @@
   "package_manager": "pnpm@10.8.0",
   "schema": 1,
   "source": {
-    "commit": "bb3929b3523b75356fd65f658f9bd14c7ff697e4",
-    "corpus_tree": "a7685ad88f0639855ce540129119aa76830153d0",
+    "commit": "62241de0b4526ba4fdc8a7b3c766c2499d3ae24d",
+    "corpus_tree": "24a7dfa6277f339612f9b0a33668fec26d9e8d9a",
     "exact_source_trees_verified": true,
     "repository": "kehto/web"
   },

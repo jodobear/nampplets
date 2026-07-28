@@ -114,9 +114,9 @@ extension RuntimeWorkbenchCatalogClient {
     private static let referenceDigest =
         "5013983282a03741305b2f9740e2268ea6c038843b6e2214b0f34cbd611fd70a"
     private static let kehtoDigest =
-        "ea51178f523a911615ab84a0083d464aa729322384eda3ee35cffc09bbd506b2"
+        "ad05a0f042234fa1afdff63dac38a461dc8baf3507cc321d5803654ca6e11c19"
     private static let kehtoCommit =
-        "bb3929b3523b75356fd65f658f9bd14c7ff697e4"
+        "62241de0b4526ba4fdc8a7b3c766c2499d3ae24d"
 
     private static func publishedRecord(
         fixture: PublishedFixture

@@ -11,4 +11,4 @@ mod link;
 pub use intent::*;
 pub use link::*;
 
-pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.28.0";
+pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.29.0";

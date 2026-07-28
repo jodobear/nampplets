@@ -108,6 +108,20 @@ def envelope_inventory(web_root: Path, web_commit: str) -> dict[str, Any]:
             }
         )
 
+    # The pinned NAP-INC registry revision requires a symmetric target-side
+    # channel-open carrier, but the pinned @napplet/nap and conformance
+    # packages do not expose or validate it. Record the gap instead of making
+    # an unsupported carrier appear package-compatible.
+    entries.append(
+        {
+            "type": "inc.channel.opened",
+            "domain": "inc",
+            "direction": "shell-to-napplet",
+            "validator": "explicit-unsupported",
+            "runtime_support": "not-advertised-m0",
+        }
+    )
+
     entries.sort(key=lambda item: item["type"])
     return {
         "schema": 1,
@@ -123,6 +137,7 @@ def envelope_inventory(web_root: Path, web_commit: str) -> dict[str, Any]:
             "total": len(entries),
             "pinned_conformance": len(matches),
             "registry_only_handshake": 2,
+            "explicit_unsupported": 1,
         },
     }
 
@@ -258,6 +273,20 @@ def main() -> int:
     corpus_path = CONFORMANCE / "napplet-corpus" / "kehto" / "index.json"
     corpus_path.parent.mkdir(parents=True, exist_ok=True)
     corpus_path.write_text(
+        json.dumps(corpus, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    bundled_corpus_path = (
+        ROOT
+        / "apps"
+        / "workbench-macos"
+        / "RuntimeWorkbenchPackage"
+        / "Sources"
+        / "RuntimeWorkbenchFeature"
+        / "Resources"
+        / "Catalog"
+        / "kehto-index.json"
+    )
+    bundled_corpus_path.write_text(
         json.dumps(corpus, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 

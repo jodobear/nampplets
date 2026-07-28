@@ -30,7 +30,7 @@ private func searchPage(
         "reference":
             "5cc6f85dca4a3db7ef63ce7d44f7bc18d2a233744e82bd3c2c4ac4b2e883685f",
         "kehto":
-            "8070424a466a98c729ddf1885a3a76b8ae8f50d16b89e636e4f23b10de79c603",
+            "93c51f2056936b8b5c047b7d40e0b07b128ede7431b8771f9e20e4133b7b1b6d",
     ]
 
     for (name, expectedDigest) in expected {
@@ -79,7 +79,7 @@ private func searchPage(
         page.entries.contains {
             $0.id
                 == "kehto:feed:"
-                + "8a146f7511a4fc887cecc0f29ccbf4871234bc56"
+                + "99343d9020f4b25b5b8c784db1e2b0d5c802ceb4"
         }
     )
 }

@@ -167,15 +167,18 @@ def package_environment(
     return root / "node_modules" / "@napplet" / "conformance" / "dist" / "index.js"
 
 
-def playwright_environment() -> dict[str, str]:
-    result = bounded_run(["npm", "root", "-g"], cwd=ROOT)
-    if result.returncode != 0:
-        raise RunnerError("playwright-module-root-unavailable")
-    module_root = result.stdout.decode("utf-8").strip()
-    if not (Path(module_root) / "playwright").is_dir():
+def playwright_environment(module_root: Path | None = None) -> dict[str, str]:
+    if module_root is None:
+        result = bounded_run(["npm", "root", "-g"], cwd=ROOT)
+        if result.returncode != 0:
+            raise RunnerError("playwright-module-root-unavailable")
+        module_root = Path(result.stdout.decode("utf-8").strip())
+    else:
+        module_root = module_root.resolve()
+    if not (module_root / "playwright").is_dir():
         raise RunnerError("playwright-module-unavailable")
     environment = os.environ.copy()
-    environment["NODE_PATH"] = module_root
+    environment["NODE_PATH"] = str(module_root)
     return environment
 
 
@@ -361,6 +364,11 @@ def main() -> int:
     )
     parser.add_argument("--browser-channel", default="chrome")
     parser.add_argument("--package-cache", type=Path)
+    parser.add_argument(
+        "--playwright-module-root",
+        type=Path,
+        help="node_modules directory containing an exact Playwright installation",
+    )
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     arguments = parser.parse_args()
 
@@ -376,7 +384,7 @@ def main() -> int:
             arguments.allow_package_download,
             temporary_root / "packages",
         )
-        environment = playwright_environment()
+        environment = playwright_environment(arguments.playwright_module_root)
         records = fixture_records(
             lock,
             engine,

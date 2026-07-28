@@ -80,10 +80,10 @@ system. See `visual-identity-and-themes.md`.
 
 - Repository: <https://github.com/napplet/napplet>
 - Documentation: <https://napplet.run/docs>
-- Revision observed: `dbd2cc2e53a9e311cf263fa020d43105a7d75192`
-- Package snapshot: core `0.28.0`, shim `0.26.8`, SDK `0.24.4`, NAP package
-  `0.28.0`, Vite plugin `0.11.3`, conformance `0.13.0`, conformance CLI
-  `0.2.15`, CLI `0.2.1`
+- Revision observed: `60889f1c2476e063500c7ab6624af6abe0dbcbe5`
+- Package snapshot: core `0.29.0`, shim `0.27.0`, SDK `0.25.0`, NAP package
+  `0.29.0`, Vite plugin `0.12.0`, conformance `0.14.0`, conformance CLI
+  `0.2.16`, CLI `0.3.0`
 
 These are implementation surfaces, not protocol authority. Package docs
 explicitly warn of alpha drift. Inspect actual exports before recommending an

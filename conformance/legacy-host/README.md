@@ -35,6 +35,11 @@ python3 conformance/legacy-host/run.py \
   --package-cache /tmp/nampplets-npm-cache
 ```
 
+When Playwright is installed in a disposable or cached `node_modules` rather
+than globally, pass its parent directory with
+`--playwright-module-root /path/to/node_modules`. The runner verifies that the
+module is present before starting the bounded browser process.
+
 Omit `--allow-package-download` for an offline-only run. Missing verified
 archives then produce a runner prerequisite failure instead of a green report.
 The browser process, fixture size, captured envelopes, and subprocess output

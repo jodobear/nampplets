@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "baseline": "native-runtime-compat-v1",
-  "captured_at": "2026-07-24",
+  "baseline": "native-runtime-compat-v2",
+  "captured_at": "2026-07-28",
   "status": "unratified",
   "authorities": {
-    "nip_5d": "78efc118278e3ed42201eba9b60530b65835d7ed",
-    "nap_registry": "6461e4b37c29dc09a20dff35d9515889c4433874",
-    "napplet_web": "b335c40c77f55547f23af81d6d999e2e4e3a3623",
-    "kehto": "bb3929b3523b75356fd65f658f9bd14c7ff697e4",
+    "nip_5d": "eb45dfd7335b7f88cb53781984c553581d2b4c34",
+    "nap_registry": "5ac0490461ca6fec2f0d2e45b4835cf9bc08de24",
+    "napplet_web": "60889f1c2476e063500c7ab6624af6abe0dbcbe5",
+    "kehto": "62241de0b4526ba4fdc8a7b3c766c2499d3ae24d",
     "nmp": "005dc2a5f12aa414961b313d05ebb021934e385c"
   },
   "drift": [
@@ -32,6 +32,18 @@
       "nap_registry": "shell.ready and shell.init",
       "package_baseline": "no shell domain or shell envelope validator",
       "decision": "inventory as registry-only handshake and do not advertise before adapter conformance"
+    },
+    {
+      "id": "registry-package-inc",
+      "nap_registry": "inc.channel.opened and symmetric target-side handles",
+      "package_baseline": "no inc.channel.opened type, shim, or validator",
+      "decision": "inventory as explicit-unsupported and do not advertise"
+    },
+    {
+      "id": "registry-package-intent",
+      "nap_registry": "optional convention with INC or initial-state delivery",
+      "package_baseline": "normalized queryless convention identity and intent.deliver",
+      "decision": "pin the executable package carrier and retain the registry disagreement as an unratified risk"
     },
     {
       "id": "domain-breadth",

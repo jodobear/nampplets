@@ -41,7 +41,7 @@ class LegacyHostRunnerTests(unittest.TestCase):
         self.assertNotIn("shell", package_domains)
         self.assertEqual(
             lock["domain_versions"]["shell_handshake"],
-            "NAP-SHELL@6461e4b37c29",
+            "NAP-SHELL@5ac0490461ca",
         )
 
     def test_reference_and_published_fixture_bytes_are_verified(self) -> None:
@@ -90,10 +90,17 @@ class LegacyHostRunnerTests(unittest.TestCase):
         self.assertIn('"--frozen-lockfile"', source)
         self.assertIn('"./apps/playground/napplets/**"', source)
 
+    def test_legacy_runner_accepts_an_explicit_playwright_module_root(self) -> None:
+        source = (
+            ROOT / "conformance" / "legacy-host" / "run.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"--playwright-module-root"', source)
+        self.assertIn('module_root / "playwright"', source)
+
     def test_verified_package_cache_refuses_wrong_digest_offline(self) -> None:
         pin = legacy.PackagePin(
             name="@napplet/conformance",
-            version="0.13.0",
+            version="0.14.0",
             sha256="0" * 64,
         )
         with tempfile.TemporaryDirectory() as temporary:

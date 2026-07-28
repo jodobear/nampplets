@@ -1,7 +1,7 @@
 # Native link and intent providers
 
 This crate owns the Rust policy kernels for the pinned
-`napplet-web@0.28.0` `link` and `intent` domains.
+`napplet-web@0.29.0` `link` and `intent` domains.
 
 - `LinkProvider` accepts only absolute public `http`/`https` URLs, rejects
   credentials and local/private hosts, applies injected product policy, and
