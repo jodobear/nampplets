@@ -6,6 +6,7 @@ use std::sync::{
 };
 use std::{collections::BTreeMap, path::PathBuf};
 
+use crate::{RuntimeRefusal, support::now_millis};
 use nmp::EngineConfig;
 use nmp_native_artifact::{FileArtifactCache, VerifiedArtifactHandle};
 use nmp_native_nap_bridge::{BridgeLimits, Provider};
@@ -155,7 +156,7 @@ pub(super) fn open_runtime_controller(
     inc_action_executor: Option<Arc<dyn NativeIncActionExecutor>>,
     intent_activation_executor: Option<Arc<dyn NativeIntentActivationExecutor>>,
 ) -> Result<Arc<RuntimeController>, RuntimeOpenError> {
-    let config = config.validated()?;
+    let mut config = config.validated()?;
     let runtime_store = Arc::new(
         RuntimeStore::open(&config.runtime_store_path, StoreLimits::default()).map_err(
             |error| RuntimeOpenError::RuntimeStore {
@@ -179,6 +180,7 @@ pub(super) fn open_runtime_controller(
     let projected_profile_preferences = project_profile_preferences(&profile_preferences);
     let nmp_store_path = config.nmp_store_path.as_ref().map(PathBuf::from);
     let artifact_cache_path = PathBuf::from(&config.artifact_cache_path);
+    let dropped_relays = std::mem::take(&mut config.dropped_relays);
     let artifact_cache = Arc::new(
         FileArtifactCache::open(&config.artifact_cache_path).map_err(|error| {
             RuntimeOpenError::ArtifactCache {
@@ -395,6 +397,14 @@ pub(super) fn open_runtime_controller(
         intent_provider,
         artifacts,
         boundary_refusals: Mutex::new(BoundedFacts::with_capacity(config.maximum_boundary_events)),
+        refused_operator_relays: dropped_relays
+            .iter()
+            .map(|dropped| RuntimeRefusal {
+                code: "operator-relay-refused".to_owned(),
+                detail: dropped.detail(),
+                occurred_at_millis: now_millis(),
+            })
+            .collect(),
         projection_fault_latch: Mutex::new(Default::default()),
         maximum_boundary_events: config.maximum_boundary_events,
         signal,
@@ -412,5 +422,10 @@ pub(super) fn open_runtime_controller(
     // reopened, with the installation, its grants and its signed archetype
     // declaration all still intact in the store.
     controller.restore_intent_handlers();
+    // Also recorded on the ordinary refusal ring so it surfaces beside every
+    // other boundary fault; the durable copy above is what survives eviction.
+    for refusal in controller.refused_operator_relays.clone() {
+        controller.record_boundary_refusal(refusal);
+    }
     Ok(controller)
 }

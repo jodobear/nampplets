@@ -3,44 +3,62 @@ import Foundation
 import NMPNativeRuntimeApple
 import Testing
 
+/// The bundle lane is read, not judged.
+///
+/// Which relays are usable -- scheme, credentials, duplicates, the per-lane cap
+/// -- is the runtime's call, and it records every relay it drops as a boundary
+/// refusal. Deciding it here too would mean two hosts each holding an
+/// approximate copy of the same rules. Rust's side of this contract is pinned
+/// in `crates/runtime-ffi/src/tests/operator_relays.rs`.
 @Test
-func productionNetworkInputsAreFiniteSecureAndRoleSeparated() throws {
+func operatorLanesAreReadVerbatimForTheRuntimeToJudge() throws {
     let inputs = try WorkbenchRuntimeProfile.operatorNetworkInputs(
         infoDictionary: [
             "NMPIndexerRelays": [
-                "wss://purplepag.es",
+                "  wss://purplepag.es  ",
                 "wss://relay.primal.net",
             ],
             "NMPAppRelays": [
                 "wss://relay.primal.net",
+                "ws://insecure.example",
                 "wss://relay.damus.io",
-                "wss://nos.lol",
                 "wss://relay.damus.io",
             ],
         ]
     )
-    let indexers = inputs.indexerRelays
-    let appRelays = inputs.appRelays
 
-    #expect(indexers.count == 2)
-    #expect(appRelays.count == 3)
-    #expect(Set(indexers).count == indexers.count)
-    #expect(Set(appRelays).count == appRelays.count)
-    #expect((indexers + appRelays).allSatisfy { $0.hasPrefix("wss://") })
-    #expect(indexers.contains("wss://purplepag.es"))
-    #expect(appRelays.contains("wss://relay.damus.io"))
+    // Not even whitespace is repaired here: trimming would quietly fix one
+    // class of plist mistake while silently discarding another. The runtime
+    // judges every entry and names what it refuses.
+    #expect(inputs.indexerRelays == ["  wss://purplepag.es  ", "wss://relay.primal.net"])
+    // Passed through untouched: the duplicate and the insecure entry are the
+    // runtime's to refuse, by name, rather than this layer's to disappear.
+    #expect(inputs.appRelays == [
+        "wss://relay.primal.net",
+        "ws://insecure.example",
+        "wss://relay.damus.io",
+        "wss://relay.damus.io",
+    ])
 }
 
+/// An absent lane is a broken bundle rather than a relay to judge, so it is
+/// still caught here -- there is nothing to hand the runtime.
 @Test
-func productionNetworkInputsRefuseMissingOperatorLanes() {
+func productionNetworkInputsRefuseAnAbsentOperatorLane() {
     #expect(throws: (any Error).self) {
         try WorkbenchRuntimeProfile.operatorNetworkInputs(
-            infoDictionary: [
-                "NMPIndexerRelays": ["ws://insecure.example"],
-                "NMPAppRelays": ["wss://relay.example"],
-            ]
+            infoDictionary: ["NMPAppRelays": ["wss://relay.example"]]
         )
     }
+    // A whitespace-only entry is a configured entry: it reaches the runtime,
+    // which refuses it by name rather than letting this layer vanish it.
+    let whitespace = try? WorkbenchRuntimeProfile.operatorNetworkInputs(
+        infoDictionary: [
+            "NMPIndexerRelays": ["   "],
+            "NMPAppRelays": ["wss://relay.example"],
+        ]
+    )
+    #expect(whitespace?.indexerRelays == ["   "])
 }
 
 @Test
