@@ -15,9 +15,6 @@
     (typeof require === "function"
       ? require("./trusted-shell-prelude-domains.js")
       : null);
-  let activeFrame = null;
-  let activeDomains = Object.freeze(["shell"]);
-  let nativeSessionToken = null;
 
   function isPlainObject(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -317,17 +314,6 @@
       return null;
     }
     return event.data;
-  }
-
-  function forwardToNative(envelope) {
-    const payload = JSON.stringify({
-      session: nativeSessionToken,
-      envelope: envelope
-    });
-    const root = document.documentElement;
-    root.setAttribute("data-nmp-native-envelope", payload);
-    document.dispatchEvent(new Event(bridgeEventName));
-    root.removeAttribute("data-nmp-native-envelope");
   }
 
   function scriptJSON(value) {
@@ -1486,70 +1472,24 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
     return "<!doctype html>\n" + parsed.documentElement.outerHTML;
   }
 
-  global.__nmpTrustedShellMount = function mount(configuration) {
-    if (!isPlainObject(configuration) ||
-        typeof configuration.session !== "string" ||
-        typeof configuration.artifactHTML !== "string" ||
-        !isVerifiedArtifactBaseURL(configuration.artifactBaseURL)) {
-      return false;
-    }
-    nativeSessionToken = configuration.session;
-    const frame = document.createElement("iframe");
-    frame.id = "napplet-frame";
-    frame.setAttribute("sandbox", "allow-scripts");
-    frame.setAttribute("referrerpolicy", "no-referrer");
-    frame.setAttribute("aria-label", configuration.title || "Napplet");
-    frame.srcdoc = materialize(
-      configuration.artifactHTML,
-      configuration.artifactBaseURL,
-      configuration.domains
-    );
-    const surface = document.getElementById("surface");
-    surface.replaceChildren(frame);
-    activeFrame = frame;
-    activeDomains = Object.freeze(
-      Array.from(new Set(["shell"].concat(configuration.domains || []))).sort()
-    );
-    return true;
-  };
-
-  global.__nmpTrustedShellReceive = function receive(envelope) {
-    if (!activeFrame) {
-      return false;
-    }
-    const projected = projectNativeEnvelope(
-      envelope,
-      activeDomains.indexOf("resource") !== -1
-    );
-    if (projected === null) {
-      return false;
-    }
-    activeFrame.contentWindow.postMessage(projected, "*");
-    return true;
-  };
-
-  if (typeof global.addEventListener === "function") {
-    global.addEventListener("message", function receiveNappletMessage(event) {
-      const envelope = mappedEnvelope(event, activeFrame);
-      if (envelope !== null) {
-        forwardToNative(envelope);
-      }
-    });
-  }
+  const primitives = Object.freeze({
+    MAX_ENVELOPE_BYTES,
+    MAX_RESOURCE_TRANSPORT_BYTES,
+    MAX_RESOURCE_BLOB_BYTES,
+    bridgeEventName,
+    isPlainObject,
+    isBoundedEnvelope,
+    mappedEnvelope,
+    projectResourceTerminal,
+    projectNativeEnvelope,
+    materialize,
+    sandboxPolicyContent,
+    isVerifiedArtifactBaseURL,
+    compatibilityPreludeSource
+  });
+  global.NMPTrustedShellPrimitives = primitives;
 
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = {
-      MAX_ENVELOPE_BYTES,
-      MAX_RESOURCE_TRANSPORT_BYTES,
-      MAX_RESOURCE_BLOB_BYTES,
-      isBoundedEnvelope,
-      mappedEnvelope,
-      projectResourceTerminal,
-      projectNativeEnvelope,
-      materialize,
-      sandboxPolicyContent,
-      isVerifiedArtifactBaseURL,
-      compatibilityPreludeSource
-    };
+    module.exports = primitives;
   }
 })(typeof window === "undefined" ? globalThis : window);

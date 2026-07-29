@@ -99,13 +99,13 @@ test("the iframe sandbox and CSP deny ambient origin, network, and storage power
     path.join(__dirname, "..", "trusted-shell.html"),
     "utf8"
   );
-  const js = fs.readFileSync(
-    path.join(__dirname, "..", "trusted-shell.js"),
+  const hostJS = fs.readFileSync(
+    path.join(__dirname, "..", "trusted-shell-surface-host.js"),
     "utf8"
   );
 
-  assert.match(js, /setAttribute\("sandbox", "allow-scripts"\)/);
-  assert.doesNotMatch(js, /allow-same-origin/);
+  assert.match(hostJS, /setAttribute\("sandbox", "allow-scripts"\)/);
+  assert.doesNotMatch(hostJS, /allow-same-origin/);
   assert.match(html, /connect-src 'none'/);
   assert.match(shell.sandboxPolicyContent(), /connect-src 'none'/);
   assert.match(shell.sandboxPolicyContent(), /default-src 'none'/);

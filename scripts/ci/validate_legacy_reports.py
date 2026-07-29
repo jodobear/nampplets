@@ -116,6 +116,7 @@ def validate_legacy(
         "trusted-shell-policy.js",
         "trusted-shell-prelude-domains.js",
         "trusted-shell.js",
+        "trusted-shell-surface-host.js",
     }
     require(
         set(shell_hashes) == expected_shell_files,

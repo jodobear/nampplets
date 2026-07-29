@@ -3,8 +3,12 @@
 This directory is the canonical source for the bundled WebKit trust boundary.
 The platform package includes it as an immutable application resource.
 
-The top-level document is trusted. It creates exactly one untrusted
-`sandbox="allow-scripts"` iframe and maps messages using `MessageEvent.source`.
+The top-level document is trusted. Its backward-compatible default host creates
+one untrusted `sandbox="allow-scripts"` iframe. The reusable bounded surface
+host can mount up to 16 independently source-bound frames for native shells
+that compose multiple napplets. It maps every message using
+`MessageEvent.source` and routes native responses by the caller-owned surface
+identifier; session tokens remain private host/native correlation values.
 The native WebKit message handler lives in an isolated content world and is not
 injected into either page-world JavaScript or the napplet iframe.
 
@@ -83,5 +87,5 @@ adapter; the bundled raw fixture is an explicit internal M1 canary.
 Run the focused contract tests with:
 
 ```sh
-node --test tests/trusted-shell.test.js tests/trusted-shell-apple-snapshot.test.js
+node --test tests/trusted-shell.test.js tests/trusted-shell-surface-host.test.js tests/trusted-shell-apple-snapshot.test.js
 ```

@@ -25,6 +25,7 @@ const output = `<!doctype html>
   <script src="trusted-shell-policy.js"></script>
   <script src="trusted-shell-prelude-domains.js"></script>
   <script src="trusted-shell.js"></script>
+  <script src="trusted-shell-surface-host.js"></script>
 </body>
 </html>
 `;
