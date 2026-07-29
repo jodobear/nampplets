@@ -63,6 +63,8 @@
             typeof configuration.domains !== "undefined") ||
           (typeof configuration.onReady !== "undefined" &&
             typeof configuration.onReady !== "function") ||
+          (typeof configuration.onError !== "undefined" &&
+            typeof configuration.onError !== "function") ||
           (!surfaces.has(surfaceId) && surfaces.size >= MAX_SURFACES)) {
         return false;
       }
@@ -91,6 +93,7 @@
         frame,
         session: configuration.session,
         onReady: configuration.onReady,
+        onError: configuration.onError,
         acknowledgement: null,
         ready: false,
         domains: Object.freeze(Array.from(new Set(
@@ -123,7 +126,12 @@
           if (surfaces.get(surfaceId) !== state) return;
           const accepted = event.data === "accepted";
           closeAcknowledgement(state);
-          if (!accepted) return;
+          if (!accepted) {
+            try {
+              if (state.onError) state.onError(surfaceId, "shell.init rejected");
+            } catch (_) {}
+            return;
+          }
           state.ready = true;
           try {
             if (state.onReady) state.onReady(surfaceId);

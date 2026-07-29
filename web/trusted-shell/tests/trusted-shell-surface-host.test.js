@@ -138,11 +138,16 @@ test("surface readiness follows the prelude acknowledgement port", () => {
   const harness = createHarness();
   const target = surface();
   const ready = [];
+  const failures = [];
   assert.equal(
     harness.host.mount(
       "acknowledged",
       target,
-      { ...configuration("session-a"), onReady: (surfaceId) => ready.push(surfaceId) }
+      {
+        ...configuration("session-a"),
+        onReady: (surfaceId) => ready.push(surfaceId),
+        onError: (surfaceId, detail) => failures.push({ surfaceId, detail })
+      }
     ),
     true
   );
@@ -157,10 +162,15 @@ test("surface readiness follows the prelude acknowledgement port", () => {
   assert.deepEqual(ready, []);
   delivery.transfer[0].postMessage("rejected");
   assert.deepEqual(ready, []);
+  assert.deepEqual(failures, [{
+    surfaceId: "acknowledged",
+    detail: "shell.init rejected"
+  }]);
   assert.equal(harness.host.receive("acknowledged", delivery.envelope), true);
   const accepted = target.frame.contentWindow.posted[1].transfer[0];
   accepted.postMessage("accepted");
   assert.deepEqual(ready, ["acknowledged"]);
+  assert.equal(failures.length, 1);
   accepted.postMessage("accepted");
   assert.deepEqual(ready, ["acknowledged"]);
 });

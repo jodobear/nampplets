@@ -886,7 +886,7 @@
       var acknowledgement = event.ports && event.ports[0],
         accepted = acceptEnvironment(event.data);
       if (acknowledgement && messagePortPost && messagePortClose) {
-        try { if (accepted) messagePortPost.call(acknowledgement, "accepted"); }
+        try { messagePortPost.call(acknowledgement, accepted ? "accepted" : "rejected"); }
         finally { messagePortClose.call(acknowledgement); }
       }
       return;

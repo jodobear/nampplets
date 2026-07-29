@@ -73,7 +73,7 @@ test("the prelude acknowledges the first exact NAP-SHELL environment", async () 
   });
   assert.equal(context.napplet.shell.supports("theme"), false);
   assert.deepEqual(Array.from(context.napplet.shell.services), ["settings"]);
-  assert.deepEqual(rejectedPort.messages, []);
+  assert.deepEqual(rejectedPort.messages, ["rejected"]);
   assert.equal(rejectedPort.closed, true);
   assert.equal(sent.length, 1, "shell.init never causes another shell.ready");
 });
