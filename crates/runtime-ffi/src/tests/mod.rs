@@ -8,6 +8,7 @@ mod intent;
 mod intent_restore;
 mod library;
 mod native_capabilities;
+mod operator_relays;
 mod permissions;
 mod profile_preferences;
 mod receipt_slot;
@@ -242,6 +243,37 @@ fn install_permission_fixture(controller: &Arc<RuntimeController>) -> RuntimeExa
                     requirement: CapabilityRequirement::Optional,
                 },
             ],
+        },
+        artifact: executable,
+    });
+    exact_coordinate(&artifact)
+}
+
+/// Installs the fixture declaring `lists`, the domain a napplet uses to change
+/// the user's follow/mute/bookmark lists.
+fn install_lists_fixture(controller: &Arc<RuntimeController>) -> RuntimeExactBuildCoordinate {
+    let artifact = controller
+        .verify_artifact(
+            EVENT.to_vec(),
+            ArtifactCoordinate::Named {
+                author: AUTHOR.to_owned(),
+                d_tag: "good-morning".to_owned(),
+            },
+        )
+        .artifact
+        .unwrap();
+    let principal = artifact.principal.clone().unwrap();
+    let executable: Arc<dyn ExecutableArtifact> = artifact.handle.clone();
+    controller.app.dispatch(PlatformCommand::InstallVerified {
+        build: InstalledBuild {
+            principal,
+            title: Arc::from("Lists napplet"),
+            manifest_metadata: BoundedJson::from_value(&serde_json::json!({"kind": 35129}), 1_024)
+                .unwrap(),
+            capability_requests: vec![CapabilityRequest {
+                capability: Capability::new("lists").unwrap(),
+                requirement: CapabilityRequirement::Required,
+            }],
         },
         artifact: executable,
     });
