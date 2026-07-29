@@ -24,11 +24,15 @@ struct TrustedShellResourceTests {
             contentsOf: directory.appendingPathComponent("trusted-shell.js"),
             encoding: .utf8
         )
+        let surfaceHost = try String(
+            contentsOf: directory.appendingPathComponent("trusted-shell-surface-host.js"),
+            encoding: .utf8
+        )
         let document = try String(contentsOf: shellURL, encoding: .utf8)
 
         #expect(script.contains("event.source !== frame.contentWindow"))
-        #expect(script.contains("setAttribute(\"sandbox\", \"allow-scripts\")"))
-        #expect(!script.contains("allow-same-origin"))
+        #expect(surfaceHost.contains("setAttribute(\"sandbox\", \"allow-scripts\")"))
+        #expect(!surfaceHost.contains("allow-same-origin"))
         #expect(script.contains("new global.DOMParser()"))
         #expect(!script.contains("artifactHTML.replace"))
         #expect(document.contains("connect-src 'none'"))

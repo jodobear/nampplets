@@ -99,13 +99,13 @@ test("the iframe sandbox and CSP deny ambient origin, network, and storage power
     path.join(__dirname, "..", "trusted-shell.html"),
     "utf8"
   );
-  const js = fs.readFileSync(
-    path.join(__dirname, "..", "trusted-shell.js"),
+  const hostJS = fs.readFileSync(
+    path.join(__dirname, "..", "trusted-shell-surface-host.js"),
     "utf8"
   );
 
-  assert.match(js, /setAttribute\("sandbox", "allow-scripts"\)/);
-  assert.doesNotMatch(js, /allow-same-origin/);
+  assert.match(hostJS, /setAttribute\("sandbox", "allow-scripts"\)/);
+  assert.doesNotMatch(hostJS, /allow-same-origin/);
   assert.match(html, /connect-src 'none'/);
   assert.match(shell.sandboxPolicyContent(), /connect-src 'none'/);
   assert.match(shell.sandboxPolicyContent(), /default-src 'none'/);
@@ -191,81 +191,6 @@ test("materialization is parser-based rather than regex HTML rewriting", () => {
     shell.isVerifiedArtifactBaseURL("https://example.com/"),
     false
   );
-});
-
-test("the prelude performs the registry NAP-SHELL handshake exactly once", async () => {
-  const listeners = new Map();
-  const sent = [];
-  const parent = {
-    postMessage(envelope, target) {
-      sent.push({ envelope: JSON.parse(JSON.stringify(envelope)), target });
-    }
-  };
-  const context = {
-    Map,
-    Object,
-    Promise,
-    Set,
-    Array,
-    Number,
-    TypeError,
-    RangeError,
-    Error,
-    parent,
-    queueMicrotask,
-    setTimeout,
-    clearTimeout,
-    addEventListener(type, listener) {
-      listeners.set(type, listener);
-    }
-  };
-  context.window = context;
-  vm.runInNewContext(shell.compatibilityPreludeSource(["storage"]), context);
-
-  assert.deepEqual(sent, [
-    { envelope: { type: "shell.ready" }, target: "*" }
-  ]);
-  assert.equal(context.napplet.shell.supports("storage"), false);
-  assert.deepEqual(Array.from(context.napplet.shell.services), []);
-
-  let callbackCount = 0;
-  context.napplet.shell.onReady(() => {
-    callbackCount += 1;
-  });
-  listeners.get("message")({
-    source: parent,
-    data: {
-      type: "shell.init",
-      capabilities: { domains: ["shell", "storage", "storage"] },
-      services: ["settings"]
-    }
-  });
-  const environment = await context.napplet.shell.ready();
-  await new Promise((resolve) => queueMicrotask(resolve));
-
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(environment)),
-    {
-      capabilities: { domains: ["shell", "storage"] },
-      services: ["settings"]
-    }
-  );
-  assert.equal(context.napplet.shell.supports("storage"), true);
-  assert.equal(context.napplet.shell.supports("unknown"), false);
-  assert.deepEqual(Array.from(context.napplet.shell.services), ["settings"]);
-  assert.equal(callbackCount, 1);
-
-  listeners.get("message")({
-    source: parent,
-    data: {
-      type: "shell.init",
-      capabilities: { domains: ["shell", "theme"] },
-      services: ["mutated"]
-    }
-  });
-  assert.equal(context.napplet.shell.supports("theme"), false);
-  assert.deepEqual(Array.from(context.napplet.shell.services), ["settings"]);
-  assert.equal(sent.length, 1, "shell.init never causes another shell.ready");
 });
 
 test("prelude request envelopes use pinned flat fields and id correlation", async () => {

@@ -107,13 +107,14 @@ impl RuntimeController {
             published_ids,
             unprojectable,
         } = project_workspaces(&source.workspaces);
+        let refused_operator_relays = self.refused_operator_relays.clone();
         let (boundary_refusals, dropped_boundary_refusals) = {
             let refusals = self.boundary_refusals.lock();
             (refusals.iter().cloned().collect(), refusals.dropped())
         };
 
         let candidate = RuntimeSnapshot {
-            revision: source.revision,
+            revision: self.projected_revision(source.revision),
             closed: source.closed,
             installed_library: RuntimeInstalledLibrarySnapshot {
                 query: source.library.query.to_string(),
@@ -232,6 +233,7 @@ impl RuntimeController {
             dropped_errors: source.dropped_errors,
             boundary_refusals,
             dropped_boundary_refusals,
+            refused_operator_relays,
             active_resources: source.resources.admitted as u64,
             resource_high_watermark: source.resources.high_watermark as u64,
             resource_refusal_count: source.resources.refusal_count,

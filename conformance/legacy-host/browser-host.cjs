@@ -52,6 +52,10 @@ function createServer(shellRoot, fixtureRoot) {
   const routes = new Map([
     ["/trusted-shell.html", path.join(shellRoot, "trusted-shell.html")],
     ["/trusted-shell.js", path.join(shellRoot, "trusted-shell.js")],
+    [
+      "/trusted-shell-surface-host.js",
+      path.join(shellRoot, "trusted-shell-surface-host.js")
+    ],
     ["/trusted-shell-policy.js", path.join(shellRoot, "trusted-shell-policy.js")],
     [
       "/trusted-shell-prelude-domains.js",
