@@ -69,6 +69,10 @@
         configuration.domains
       );
       surface.replaceChildren(frame);
+      const previous = surfaces.get(surfaceId);
+      if (previous && typeof previous.frame.remove === "function") {
+        previous.frame.remove();
+      }
       surfaces.set(surfaceId, {
         frame,
         session: configuration.session,

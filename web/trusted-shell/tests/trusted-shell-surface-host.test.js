@@ -128,3 +128,24 @@ test("surface count is bounded and unmount releases capacity", () => {
   harness.host.dispose();
   assert.equal(harness.listeners.has("message"), false);
 });
+
+test("remounting a surface ID removes and unmaps its previous frame", () => {
+  const harness = createHarness();
+  const first = surface();
+  const second = surface();
+  assert.equal(harness.host.mount("stable", first, configuration("old")), true);
+  const previousFrame = first.frame;
+
+  assert.equal(harness.host.mount("stable", second, configuration("new")), true);
+  assert.equal(previousFrame.removed, true);
+  harness.listeners.get("message")({
+    source: previousFrame.contentWindow,
+    data: { type: "shell.ready" }
+  });
+  assert.equal(harness.forwarded.length, 0);
+  harness.listeners.get("message")({
+    source: second.frame.contentWindow,
+    data: { type: "shell.ready" }
+  });
+  assert.equal(harness.forwarded[0].payload.session, "new");
+});
