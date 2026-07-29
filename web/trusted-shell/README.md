@@ -92,5 +92,5 @@ adapter; the bundled raw fixture is an explicit internal M1 canary.
 Run the focused contract tests with:
 
 ```sh
-node --test tests/trusted-shell.test.js tests/trusted-shell-surface-host.test.js tests/trusted-shell-apple-snapshot.test.js
+node --test tests/trusted-shell.test.js tests/trusted-shell-acceptance.test.js tests/trusted-shell-surface-host.test.js tests/trusted-shell-apple-snapshot.test.js
 ```
