@@ -692,10 +692,10 @@
     "trusted_shell_sha256": {
       "trusted-shell-policy.js": "d130c02862f8934caba77bfaca4a72cc2f94158daecfaf888830c0807e2352c4",
       "trusted-shell-prelude-domains.js": "d4c930f66df0ae1767147598d2a05b9940a06ba8f6681a1093af36e6e35251c5",
-      "trusted-shell-surface-host.js": "4a90816305125b30fbeaa8ae3e64a992cab8f89734eabe7fa8adbee9f40bc8a4",
+      "trusted-shell-surface-host.js": "88c8b19ad652e1ef74a93824d71e25babe9f0ee3934540476a6c4e3dc19841d1",
       "trusted-shell.css": "087218b55e44b7682b46e01ce0ea4afda1e743bb94ad116a145ee5567f993055",
       "trusted-shell.html": "005c6bb8510cf2947628941156039f5af415ceee3554f7fefa8bc6770677ef90",
-      "trusted-shell.js": "036a63361eafa0f7c997cad02cb1cb80351c0cab58e6d746bf95fc0680a24a14"
+      "trusted-shell.js": "c39443bd0571dcbe74965fe97e90f78908c00cd57ba246b6a4509189890d7db6"
     }
   },
   "status": "incomplete",
