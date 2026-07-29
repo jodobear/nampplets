@@ -186,6 +186,18 @@ test("surface count is bounded and unmount releases capacity", () => {
   assert.equal(harness.listeners.has("message"), false);
 });
 
+test("disposing is terminal and refuses stale mounts", () => {
+  const harness = createHarness();
+  const target = surface();
+
+  harness.host.dispose();
+  harness.host.dispose();
+
+  assert.equal(harness.host.mount("late", target, configuration("late")), false);
+  assert.equal(target.frame, null);
+  assert.equal(harness.listeners.has("message"), false);
+});
+
 test("remounting a surface ID removes and unmaps its previous frame", () => {
   const harness = createHarness();
   const first = surface();

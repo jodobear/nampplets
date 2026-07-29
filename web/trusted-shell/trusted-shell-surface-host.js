@@ -19,6 +19,7 @@
       throw new Error("The trusted shell surface host is unavailable");
     }
     const surfaces = new Map();
+    let disposed = false;
 
     function closeAcknowledgement(state) {
       if (state.acknowledgement) {
@@ -50,7 +51,8 @@
     }
 
     function mount(surfaceId, surface, configuration) {
-      if (!validSurfaceId(surfaceId) ||
+      if (disposed ||
+          !validSurfaceId(surfaceId) ||
           !surface ||
           typeof surface.replaceChildren !== "function" ||
           !primitives.isPlainObject(configuration) ||
@@ -149,6 +151,8 @@
     }
 
     function dispose() {
+      if (disposed) return;
+      disposed = true;
       for (const surfaceId of Array.from(surfaces.keys())) {
         unmount(surfaceId);
       }
