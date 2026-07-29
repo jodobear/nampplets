@@ -196,6 +196,15 @@ test("materialization is parser-based rather than regex HTML rewriting", () => {
 test("the prelude performs the registry NAP-SHELL handshake exactly once", async () => {
   const listeners = new Map();
   const sent = [];
+  class TestMessagePort {
+    constructor() {
+      this.messages = [];
+      this.closed = false;
+    }
+
+    postMessage(message) { this.messages.push(message); }
+    close() { this.closed = true; }
+  }
   const parent = {
     postMessage(envelope, target) {
       sent.push({ envelope: JSON.parse(JSON.stringify(envelope)), target });
@@ -211,6 +220,7 @@ test("the prelude performs the registry NAP-SHELL handshake exactly once", async
     TypeError,
     RangeError,
     Error,
+    MessagePort: TestMessagePort,
     parent,
     queueMicrotask,
     setTimeout,
@@ -232,8 +242,10 @@ test("the prelude performs the registry NAP-SHELL handshake exactly once", async
   context.napplet.shell.onReady(() => {
     callbackCount += 1;
   });
+  const acceptedPort = new TestMessagePort();
   listeners.get("message")({
     source: parent,
+    ports: [acceptedPort],
     data: {
       type: "shell.init",
       capabilities: { domains: ["shell", "storage", "storage"] },
@@ -254,9 +266,13 @@ test("the prelude performs the registry NAP-SHELL handshake exactly once", async
   assert.equal(context.napplet.shell.supports("unknown"), false);
   assert.deepEqual(Array.from(context.napplet.shell.services), ["settings"]);
   assert.equal(callbackCount, 1);
+  assert.deepEqual(acceptedPort.messages, ["accepted"]);
+  assert.equal(acceptedPort.closed, true);
 
+  const rejectedPort = new TestMessagePort();
   listeners.get("message")({
     source: parent,
+    ports: [rejectedPort],
     data: {
       type: "shell.init",
       capabilities: { domains: ["shell", "theme"] },
@@ -265,6 +281,8 @@ test("the prelude performs the registry NAP-SHELL handshake exactly once", async
   });
   assert.equal(context.napplet.shell.supports("theme"), false);
   assert.deepEqual(Array.from(context.napplet.shell.services), ["settings"]);
+  assert.deepEqual(rejectedPort.messages, []);
+  assert.equal(rejectedPort.closed, true);
   assert.equal(sent.length, 1, "shell.init never causes another shell.ready");
 });
 

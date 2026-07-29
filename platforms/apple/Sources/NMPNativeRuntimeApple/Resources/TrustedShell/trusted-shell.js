@@ -380,8 +380,7 @@
   var MAX_CONSOLE_MESSAGE_CHARS = 4000;
   var MAX_CONSOLE_ENTRIES = 500;
   var consoleEntriesForwarded = 0;
-  // WebKit's \`Error.prototype.stack\` is only the frame list: unlike V8 it does
-  // not begin with "Name: message". Why that matters: tests/trusted-shell-console.test.js.
+  // WebKit stack omits "Name: message"; see trusted-shell-console.test.js.
   function describeThrowable(value) {
     if (typeof value === "string") return value;
     if (!(value instanceof Error)) {
@@ -454,6 +453,8 @@
   var relaySubscriptions = new Map();
   var openingChannels = 0;
   var resourceObjectUrls = new Set();
+  var messagePortPost = typeof MessagePort === "function" ? MessagePort.prototype.postMessage : null;
+  var messagePortClose = typeof MessagePort === "function" ? MessagePort.prototype.close : null;
   var resolveReady;
   var readyPromise = new Promise(function (resolve) {
     resolveReady = resolve;
@@ -628,14 +629,14 @@
     });
   }
   function acceptEnvironment(message) {
-    if (environment !== null) return;
+    if (environment !== null) return false;
     var accepted = normalizeEnvironment(message);
-    if (accepted === null) return;
+    if (accepted === null) return false;
     if (accepted.capabilities.domains.length !== projectedDomains.length ||
         accepted.capabilities.domains.some(function (domain, index) {
           return domain !== projectedDomains[index];
         })) {
-      return;
+      return false;
     }
     environment = accepted;
     resolveReady(environment);
@@ -643,6 +644,7 @@
       queueMicrotask(function () { handler(environment); });
     });
     readyHandlers.clear();
+    return true;
   }
   function errorMessage(error) {
     return typeof error === "string"
@@ -881,7 +883,12 @@
       return;
     }
     if (event.data.type === "shell.init") {
-      acceptEnvironment(event.data);
+      var acknowledgement = event.ports && event.ports[0],
+        accepted = acceptEnvironment(event.data);
+      if (acknowledgement && messagePortPost && messagePortClose) {
+        try { if (accepted) messagePortPost.call(acknowledgement, "accepted"); }
+        finally { messagePortClose.call(acknowledgement); }
+      }
       return;
     }
     if (event.data.type === "identity.changed") {
@@ -1408,10 +1415,6 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       });
     }
   }
-  // Replaceable on purpose: authority is the envelope and the native grant,
-  // not this object, which a napplet could bypass by posting envelopes
-  // itself. Napplets bundling the published SDK assign their own client here
-  // at load, where a locked property throws in strict mode and kills them.
   Object.defineProperty(window, "napplet",
     { configurable: true, enumerable: true, writable: true, value: Object.freeze(napplet) });
   parent.postMessage({ type: "shell.ready" }, "*");
@@ -1438,10 +1441,8 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       throw new Error("The verified artifact base URL is invalid");
     }
 
-    // Parsing into an inert document is security-critical. String/regex
-    // rewriting cannot model the HTML parser's error recovery, and can place
-    // the bootstrap after an executable node in malformed-but-valid input
-    // such as `<script>…</script><head>`.
+    // Inert parsing models HTML error recovery; string rewriting cannot and
+    // can place bootstrap after executable malformed-but-valid markup.
     const parser = new global.DOMParser();
     const parsed = parser.parseFromString(artifactHTML, "text/html");
     const head = parsed.head;
@@ -1462,9 +1463,7 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       manifestConfigSchema(parsed)
     );
 
-    // The enforced policy is the first child and the compatibility bootstrap
-    // is the second. DOMParser is inert, so no authored executable node can
-    // run before these nodes are serialized into the sandboxed srcdoc.
+    // Policy and bootstrap lead inert DOM serialization, before authored code.
     head.prepend(prelude);
     head.prepend(base);
     head.prepend(policy);

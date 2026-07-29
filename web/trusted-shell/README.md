@@ -9,6 +9,11 @@ host can mount up to 16 independently source-bound frames for native shells
 that compose multiple napplets. It maps every message using
 `MessageEvent.source` and routes native responses by the caller-owned surface
 identifier; session tokens remain private host/native correlation values.
+An optional per-mount `onReady(surfaceId)` callback fires only after the
+compatibility prelude accepts the exact projected `shell.init`. The host sends
+a one-shot `MessageChannel` port with that envelope; the prelude acknowledges
+only a valid environment and closes the port on every path. The acknowledgement
+is source/remount-bound lifecycle evidence and never enters native routing.
 The native WebKit message handler lives in an isolated content world and is not
 injected into either page-world JavaScript or the napplet iframe.
 

@@ -10,6 +10,30 @@ const { MAX_SURFACES, createSurfaceHost } = require(
 function createHarness() {
   const listeners = new Map();
   const forwarded = [];
+  class TestPort {
+    constructor() {
+      this.closed = false;
+      this.peer = null;
+      this.onmessage = null;
+    }
+
+    postMessage(data) {
+      if (!this.closed && !this.peer.closed && this.peer.onmessage) {
+        this.peer.onmessage({ data });
+      }
+    }
+
+    close() { this.closed = true; }
+    start() {}
+  }
+  class TestMessageChannel {
+    constructor() {
+      this.port1 = new TestPort();
+      this.port2 = new TestPort();
+      this.port1.peer = this.port2;
+      this.port2.peer = this.port1;
+    }
+  }
   const root = {
     payload: null,
     setAttribute(_name, value) { this.payload = value; },
@@ -17,6 +41,7 @@ function createHarness() {
   };
   const environment = {
     Event: class Event { constructor(type) { this.type = type; } },
+    MessageChannel: TestMessageChannel,
     document: {
       documentElement: root,
       createElement() {
@@ -24,8 +49,8 @@ function createHarness() {
           attributes: {},
           contentWindow: {
             posted: [],
-            postMessage(envelope, target) {
-              this.posted.push({ envelope, target });
+            postMessage(envelope, target, transfer = []) {
+              this.posted.push({ envelope, target, transfer });
             }
           },
           setAttribute(name, value) { this.attributes[name] = value; },
@@ -104,8 +129,40 @@ test("multiple surfaces retain independent source and native routing", () => {
   assert.equal(first.frame.contentWindow.posted.length, 0);
   assert.deepEqual(second.frame.contentWindow.posted, [{
     envelope: { type: "identity.changed" },
-    target: "*"
+    target: "*",
+    transfer: []
   }]);
+});
+
+test("surface readiness follows the prelude acknowledgement port", () => {
+  const harness = createHarness();
+  const target = surface();
+  const ready = [];
+  assert.equal(
+    harness.host.mount(
+      "acknowledged",
+      target,
+      { ...configuration("session-a"), onReady: (surfaceId) => ready.push(surfaceId) }
+    ),
+    true
+  );
+
+  assert.equal(harness.host.receive("acknowledged", {
+    type: "shell.init",
+    capabilities: { domains: ["shell"] },
+    services: []
+  }), true);
+  const delivery = target.frame.contentWindow.posted[0];
+  assert.equal(delivery.transfer.length, 1);
+  assert.deepEqual(ready, []);
+  delivery.transfer[0].postMessage("rejected");
+  assert.deepEqual(ready, []);
+  assert.equal(harness.host.receive("acknowledged", delivery.envelope), true);
+  const accepted = target.frame.contentWindow.posted[1].transfer[0];
+  accepted.postMessage("accepted");
+  assert.deepEqual(ready, ["acknowledged"]);
+  accepted.postMessage("accepted");
+  assert.deepEqual(ready, ["acknowledged"]);
 });
 
 test("surface count is bounded and unmount releases capacity", () => {

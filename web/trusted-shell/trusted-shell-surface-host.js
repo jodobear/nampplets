@@ -20,6 +20,13 @@
     }
     const surfaces = new Map();
 
+    function closeAcknowledgement(state) {
+      if (state.acknowledgement) {
+        state.acknowledgement.close();
+        state.acknowledgement = null;
+      }
+    }
+
     function forwardToNative(session, envelope) {
       const root = environment.document.documentElement;
       root.setAttribute("data-nmp-native-envelope", JSON.stringify({
@@ -52,6 +59,8 @@
           !primitives.isVerifiedArtifactBaseURL(configuration.artifactBaseURL) ||
           (!Array.isArray(configuration.domains) &&
             typeof configuration.domains !== "undefined") ||
+          (typeof configuration.onReady !== "undefined" &&
+            typeof configuration.onReady !== "function") ||
           (!surfaces.has(surfaceId) && surfaces.size >= MAX_SURFACES)) {
         return false;
       }
@@ -70,12 +79,18 @@
       );
       surface.replaceChildren(frame);
       const previous = surfaces.get(surfaceId);
+      if (previous) {
+        closeAcknowledgement(previous);
+      }
       if (previous && typeof previous.frame.remove === "function") {
         previous.frame.remove();
       }
       surfaces.set(surfaceId, {
         frame,
         session: configuration.session,
+        onReady: configuration.onReady,
+        acknowledgement: null,
+        ready: false,
         domains: Object.freeze(Array.from(new Set(
           ["shell"].concat(configuration.domains || [])
         )).sort())
@@ -95,7 +110,28 @@
       if (projected === null) {
         return false;
       }
-      state.frame.contentWindow.postMessage(projected, "*");
+      if (projected.type === "shell.init" && !state.ready) {
+        if (typeof environment.MessageChannel !== "function") {
+          return false;
+        }
+        closeAcknowledgement(state);
+        const channel = new environment.MessageChannel();
+        state.acknowledgement = channel.port1;
+        channel.port1.onmessage = function acknowledge(event) {
+          if (surfaces.get(surfaceId) !== state) return;
+          const accepted = event.data === "accepted";
+          closeAcknowledgement(state);
+          if (!accepted) return;
+          state.ready = true;
+          try {
+            if (state.onReady) state.onReady(surfaceId);
+          } catch (_) {}
+        };
+        if (typeof channel.port1.start === "function") channel.port1.start();
+        state.frame.contentWindow.postMessage(projected, "*", [channel.port2]);
+      } else {
+        state.frame.contentWindow.postMessage(projected, "*");
+      }
       return true;
     }
 
@@ -104,6 +140,7 @@
       if (!state) {
         return false;
       }
+      closeAcknowledgement(state);
       if (typeof state.frame.remove === "function") {
         state.frame.remove();
       }
