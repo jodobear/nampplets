@@ -39,6 +39,7 @@ pub mod catalog;
 mod debug;
 pub mod diagnostics;
 mod identity;
+mod identity_refresh;
 use identity::{
     identity_read_without_account, map_identity_engine_error, project_identity_frame,
     public_identity_query_name, supported_identity_kind, validate_identity_read_limits,
@@ -831,7 +832,7 @@ impl PublicIdentityDataPlane for NmpDataPlane {
         let subscription = self
             .engine
             .observe(
-                identity::public_identity_live_query(filter)?,
+                identity_refresh::public_identity_live_query(filter)?,
                 Some(Window::Expandable {
                     initial: window_size,
                     max: window_size,
@@ -842,7 +843,7 @@ impl PublicIdentityDataPlane for NmpDataPlane {
             subscription.cancel();
             return Err(PublicIdentityError::Cancelled);
         }
-        let frame = identity::receive_identity_frame(
+        let frame = identity_refresh::receive_identity_frame(
             subscription,
             cancellation,
             &self.closed,
