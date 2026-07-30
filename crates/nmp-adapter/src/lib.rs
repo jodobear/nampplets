@@ -19,10 +19,10 @@ use std::{
 };
 
 use nmp::{
-    Binding, Demand, Durability, Engine, EngineConfig, EngineError, FifoReceiver, Filter,
-    LiveQuery, ObservationCancel, ReceiptId, ReceiptReattachment as NmpReceiptReattachment,
-    ReceiptReplayCursor, ShortfallFact, SourceStatus, Window, WindowLoad, WriteIntent,
-    WritePayload, WriteRouting, WriteStatus,
+    AccessContext, Binding, Demand, Durability, Engine, EngineConfig, EngineError, FifoReceiver,
+    Filter, LiveQuery, ObservationCancel, ReceiptId, ReceiptReattachment as NmpReceiptReattachment,
+    ReceiptReplayCursor, ShortfallFact, SourceAuthority, SourceStatus, Window, WindowLoad,
+    WriteIntent, WritePayload, WriteRouting, WriteStatus,
 };
 use nmp_native_runtime_core::{
     AcceptedWrite, ApprovedWrite, BindingEventSink, BindingRequest, BindingSinkError, BoundedJson,
@@ -847,10 +847,11 @@ impl PublicIdentityDataPlane for NmpDataPlane {
         };
         let window_size =
             NonZeroUsize::new(limits.maximum_items).ok_or(PublicIdentityError::LimitExceeded)?;
+        let live_query = public_identity_live_query(filter)?;
         let subscription = self
             .engine
             .observe(
-                LiveQuery::from_filter(filter),
+                live_query,
                 Some(Window::Expandable {
                     initial: window_size,
                     max: window_size,
@@ -948,6 +949,18 @@ impl PublicIdentityDataPlane for NmpDataPlane {
             }),
         })
     }
+}
+
+fn public_identity_live_query(filter: Filter) -> Result<LiveQuery, PublicIdentityError> {
+    // Identity reads ask the operator-configured public lanes for generic
+    // public facts. A bare `from_filter` would classify this author-bearing
+    // selection as AuthorOutboxes, silently excluding app relays that cache
+    // canonical profile/contact events.
+    Demand::new(filter, SourceAuthority::Public, AccessContext::Public)
+        .map(LiveQuery)
+        .map_err(|error| PublicIdentityError::Failed {
+            reason: Arc::from(error.to_string()),
+        })
 }
 
 struct NmpIdentityObservation {
@@ -2068,6 +2081,21 @@ mod tests {
             event,
             sources: BTreeSet::new(),
         }
+    }
+
+    #[test]
+    fn identity_reads_use_operator_public_lanes_even_with_an_author_filter() {
+        let query = public_identity_live_query(Filter {
+            kinds: Some(BTreeSet::from([0])),
+            authors: Some(Binding::Literal(BTreeSet::from([
+                "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5".to_owned(),
+            ]))),
+            ..Filter::default()
+        })
+        .unwrap();
+
+        assert_eq!(query.0.source, SourceAuthority::Public);
+        assert_eq!(query.0.access, AccessContext::Public);
     }
 
     #[test]
