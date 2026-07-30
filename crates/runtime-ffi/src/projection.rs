@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use nmp::{NostrEntity, decode_nostr_entity};
 use nmp_native_artifact::ManifestCoordinate;
 use nmp_native_nmp_adapter::{
     AccountLifecycleError, LocalAccountHandle, LocalAccountKind, LocalAccountSnapshot,
@@ -94,6 +95,27 @@ pub(crate) fn parse_catalog_coordinate(value: &str) -> Result<ManifestCoordinate
                 .to_owned(),
         );
     }
+    let bech32_coordinate = value.strip_prefix("nostr:").unwrap_or(value);
+    if bech32_coordinate
+        .get(..6)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("naddr1"))
+    {
+        return match decode_nostr_entity(value) {
+            Ok(NostrEntity::Coordinate {
+                kind: 35_129,
+                author,
+                identifier,
+                ..
+            }) => {
+                ManifestCoordinate::named(&author, &identifier).map_err(|error| error.to_string())
+            }
+            Ok(NostrEntity::Coordinate { kind, .. }) => Err(format!(
+                "naddr kind {kind} is not a named NAP manifest; expected kind 35129"
+            )),
+            Ok(_) => Err("catalog coordinate must be a NAP manifest naddr".to_owned()),
+            Err(error) => Err(format!("invalid naddr: {error}")),
+        };
+    }
     let mut fields = value.splitn(3, ':');
     let kind = fields.next().unwrap_or_default();
     let first = fields
@@ -112,7 +134,7 @@ pub(crate) fn parse_catalog_coordinate(value: &str) -> Result<ManifestCoordinate
         }
         _ => {
             return Err(
-                "supported coordinates are 5129:event-id:author, 15129:author, and 35129:author:d-tag"
+                "supported coordinates are a kind-35129 naddr, 5129:event-id:author, 15129:author, and 35129:author:d-tag"
                     .to_owned(),
             );
         }
