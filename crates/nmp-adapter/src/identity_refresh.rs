@@ -40,12 +40,13 @@ pub(crate) fn receive_identity_frame(
 
     let deadline = Instant::now() + NETWORK_REFRESH_TIMEOUT;
     let cancel_handle = subscription.cancel_handle();
-    let cancellation_wait = cancellation.clone();
-    std::thread::spawn(move || {
-        if cancellation_wait.wait_until(deadline).is_ok() {
-            cancel_handle.cancel();
-        }
-    });
+    let _cancellation_wakeup = cancellation
+        .register_wakeup(move || cancel_handle.cancel())
+        .map_err(|error| match error {
+            nmp_native_runtime_core::CancellationWakeError::Capacity { capacity } => {
+                PublicIdentityError::CancellationCapacity { capacity }
+            }
+        })?;
 
     loop {
         if cancellation.is_cancelled() {
