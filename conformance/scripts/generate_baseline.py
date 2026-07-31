@@ -112,7 +112,7 @@ def main() -> int:
     )
 
     inventory = envelope_inventory(
-        arguments.napplet_web, lock["napplet_packages"]["commit"]
+        web_destination, lock["napplet_packages"]["commit"]
     )
     inventory_path = CONFORMANCE / "envelopes" / "inventory.json"
     inventory_path.parent.mkdir(parents=True, exist_ok=True)

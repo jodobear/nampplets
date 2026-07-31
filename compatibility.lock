@@ -30,7 +30,7 @@ sdk = "0.25.0"
 nap = "0.29.0"
 conformance = "0.14.0"
 local_patch = "conformance/patches/napplet-web/compat-v2.patch"
-local_patch_sha256 = "89fda68073249741e92014da4b7802ad83c3df2f6685c518831be465f8a30aad"
+local_patch_sha256 = "6f5fb2a0db7819e49ee9c500cf8b267efd92ee3eb282f840b8d77055ed133db4"
 
 [napplet_packages.source_trees]
 core = "1f9904103ce7684a302efdb0491c3315a92fb04a"

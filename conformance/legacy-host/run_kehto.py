@@ -7,15 +7,15 @@ import argparse
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
-import tarfile
 import tempfile
 import tomllib
 from pathlib import Path
 from typing import Any
+
+from kehto_source import KehtoRunnerError, acquire_source, github_remote
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,20 +27,6 @@ MAX_PROCESS_OUTPUT_BYTES = 256 * 1024
 MAX_ARTIFACT_FILES = 512
 MAX_ARTIFACT_BYTES = 32 * 1024 * 1024
 PACKAGE_MANAGER = "pnpm@10.8.0"
-GITHUB_REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
-
-
-class KehtoRunnerError(RuntimeError):
-    """A pinned-source or bounded-process contract failed."""
-
-
-def github_remote(repository: str) -> str:
-    """Return the bounded HTTPS clone URL for a pinned GitHub repository."""
-    if GITHUB_REPOSITORY.fullmatch(repository) is None:
-        raise KehtoRunnerError("invalid-github-repository")
-    return f"https://github.com/{repository}.git"
-
-
 def bounded_process(
     command: list[str],
     *,
@@ -105,68 +91,6 @@ def git(source: Path, *arguments: str) -> str:
             f"git {' '.join(arguments)} failed: {result.stderr.strip()}"
         )
     return result.stdout.strip()
-
-
-def acquire_source(
-    *,
-    source: Path | None,
-    destination: Path,
-    commit: str,
-    remote: str,
-    allow_network: bool,
-) -> Path:
-    if source is None:
-        if not allow_network:
-            raise KehtoRunnerError(
-                "exact Kehto source is absent; pass --source or explicitly allow --network"
-            )
-        result = bounded_process(
-            [
-                "git",
-                "clone",
-                "--filter=blob:none",
-                "--no-checkout",
-                remote,
-                str(destination),
-            ],
-            cwd=destination.parent,
-            timeout=120,
-        )
-        if result["status"] != "completed" or result["returncode"] != 0:
-            raise KehtoRunnerError(
-                f"Kehto clone failed: {result['status']}:{result['stderr'][:1000]}"
-            )
-        checkout = bounded_process(
-            ["git", "checkout", "--detach", commit],
-            cwd=destination,
-            timeout=30,
-        )
-        if checkout["status"] != "completed" or checkout["returncode"] != 0:
-            raise KehtoRunnerError(
-                f"Kehto checkout failed: {checkout['status']}:{checkout['stderr'][:1000]}"
-            )
-        return destination
-
-    source = source.resolve()
-    if git(source, "rev-parse", f"{commit}^{{commit}}") != commit:
-        raise KehtoRunnerError("provided source does not contain the pinned commit")
-    archive = destination.parent / "kehto-pinned.tar"
-    with archive.open("wb") as handle:
-        result = subprocess.run(
-            ["git", "-C", str(source), "archive", "--format=tar", commit],
-            stdout=handle,
-            stderr=subprocess.PIPE,
-            timeout=60,
-            check=False,
-        )
-    if result.returncode != 0:
-        raise KehtoRunnerError(
-            f"git archive failed: {result.stderr.decode(errors='replace')}"
-        )
-    destination.mkdir(parents=True)
-    with tarfile.open(archive, "r:") as bundle:
-        bundle.extractall(destination, filter="data")
-    return destination
 
 
 def classify_install_failure(process: dict[str, Any]) -> dict[str, Any]:
@@ -287,6 +211,8 @@ def main() -> int:
             commit=commit,
             remote=github_remote(repository),
             allow_network=arguments.network,
+            bounded_process=bounded_process,
+            git=git,
         )
         if arguments.source is None:
             verify_source_trees(

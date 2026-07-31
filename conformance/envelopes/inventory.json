@@ -1489,7 +1489,7 @@
     "commit": "60889f1c2476e063500c7ab6624af6abe0dbcbe5",
     "file": "packages/conformance/src/validators/envelope.ts",
     "repository": "napplet/web",
-    "sha256": "65ff091bc7344b07cd92eebe2e35493f02bf378d21b1e248cc76ac3d756270c5"
+    "sha256": "3504bea9ac086007e74e282e1abbe1146f235a232acc8e8680726f24e0f5283b"
   },
   "unknown_message_policy": "ignore"
 }

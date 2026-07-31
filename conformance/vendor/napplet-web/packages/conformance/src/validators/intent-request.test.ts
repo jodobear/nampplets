@@ -69,6 +69,22 @@ describe('intent.invoke request validation', () => {
     }
   });
 
+  it('rejects unknown top-level fields while leaving payload opaque', () => {
+    expect(validateEnvelope(intentInvoke({
+      archetype: 'note',
+      extra: true,
+      payload: { extra: true },
+    })).errors).toContainEqual(expect.objectContaining({
+      code: 'invalid-intent-request',
+      field: 'request.extra',
+    }));
+    expect(validateEnvelope(intentInvoke({
+      archetype: 'note',
+      payload: { extra: true },
+      behavior: { custom: true },
+    })).ok).toBe(true);
+  });
+
   it('rejects archetypes outside the runtime lowercase slug boundary', () => {
     for (const archetype of ['', 'Note', 'note\nopen', 'nöt', 'a'.repeat(257)]) {
       expect(validateEnvelope(intentInvoke({ archetype })).errors).toContainEqual(

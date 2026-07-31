@@ -92,6 +92,20 @@ class BaselineTests(unittest.TestCase):
         self.assertEqual(lock["web_projection"]["unknown_message_policy"], "ignore")
         self.assertEqual(inventory["unknown_message_policy"], "ignore")
 
+    def test_envelope_inventory_is_bound_to_patched_validator_bytes(self) -> None:
+        lock = verify_baseline.load_lock()
+        inventory = verify_baseline.load_json(
+            "conformance/envelopes/inventory.json"
+        )
+        inventory["source"]["sha256"] = "0" * 64
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=inventory):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "envelope inventory source digest mismatch",
+            ):
+                verify_baseline.verify_envelopes(lock)
+
     def test_shell_handshake_drift_is_not_hidden(self) -> None:
         inventory = verify_baseline.load_json(
             "conformance/envelopes/inventory.json"

@@ -205,8 +205,20 @@ def verify_digest_manifest() -> int:
 
 def verify_envelopes(lock: dict[str, Any], load_json: Callable[[str], Any]) -> int:
     inventory = load_json("conformance/envelopes/inventory.json")
-    if inventory["source"]["commit"] != lock["napplet_packages"]["commit"]:
+    source = inventory["source"]
+    if source["repository"] != lock["napplet_packages"]["repository"]:
+        raise BaselineError("envelope inventory source repository mismatch")
+    if source["commit"] != lock["napplet_packages"]["commit"]:
         raise BaselineError("envelope inventory source commit mismatch")
+    expected_source = "packages/conformance/src/validators/envelope.ts"
+    if source["file"] != expected_source:
+        raise BaselineError("envelope inventory source file mismatch")
+    source_relative = Path(source["file"])
+    if source_relative.is_absolute() or ".." in source_relative.parts:
+        raise BaselineError("envelope inventory source path is invalid")
+    source_file = CONFORMANCE / "vendor" / "napplet-web" / source_relative
+    if not source_file.is_file() or sha256_file(source_file) != source["sha256"]:
+        raise BaselineError("envelope inventory source digest mismatch")
     if inventory["unknown_message_policy"] != "ignore":
         raise BaselineError("envelope unknown-message policy mismatch")
     entries = inventory["entries"]

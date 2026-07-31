@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -17,6 +16,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from playwright_environment import resolve_playwright_environment
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -165,21 +166,6 @@ def package_environment(
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(source, destination)
     return root / "node_modules" / "@napplet" / "conformance" / "dist" / "index.js"
-
-
-def playwright_environment(module_root: Path | None = None) -> dict[str, str]:
-    if module_root is None:
-        result = bounded_run(["npm", "root", "-g"], cwd=ROOT)
-        if result.returncode != 0:
-            raise RunnerError("playwright-module-root-unavailable")
-        module_root = Path(result.stdout.decode("utf-8").strip())
-    else:
-        module_root = module_root.resolve()
-    if not (module_root / "playwright").is_dir():
-        raise RunnerError("playwright-module-unavailable")
-    environment = os.environ.copy()
-    environment["NODE_PATH"] = str(module_root)
-    return environment
 
 
 def verify_fixture_bytes(
@@ -384,7 +370,12 @@ def main() -> int:
             arguments.allow_package_download,
             temporary_root / "packages",
         )
-        environment = playwright_environment(arguments.playwright_module_root)
+        environment = resolve_playwright_environment(
+            arguments.playwright_module_root,
+            root=ROOT,
+            bounded_run=bounded_run,
+            error_type=RunnerError,
+        )
         records = fixture_records(
             lock,
             engine,

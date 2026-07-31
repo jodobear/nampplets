@@ -1525,10 +1525,10 @@ index 570d2106005014fb9d20cc02571a7a4770ce14a2..339520b3c367c8914e4c0319fb32dd17
   *
 diff --git a/packages/conformance/src/validators/intent-request.test.ts b/packages/conformance/src/validators/intent-request.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..cf8a6c9a416ac297dea22c21bfb924a48f1d9516
+index 0000000000000000000000000000000000000000..76b9543fd0d3ad27ea404200dc7c6cdbf9e86843
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.test.ts
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,144 @@
 +import { describe, expect, it } from 'vitest';
 +
 +import { validateEnvelope } from './envelope.js';
@@ -1600,6 +1600,22 @@ index 0000000000000000000000000000000000000000..cf8a6c9a416ac297dea22c21bfb924a4
 +    }
 +  });
 +
++  it('rejects unknown top-level fields while leaving payload opaque', () => {
++    expect(validateEnvelope(intentInvoke({
++      archetype: 'note',
++      extra: true,
++      payload: { extra: true },
++    })).errors).toContainEqual(expect.objectContaining({
++      code: 'invalid-intent-request',
++      field: 'request.extra',
++    }));
++    expect(validateEnvelope(intentInvoke({
++      archetype: 'note',
++      payload: { extra: true },
++      behavior: { custom: true },
++    })).ok).toBe(true);
++  });
++
 +  it('rejects archetypes outside the runtime lowercase slug boundary', () => {
 +    for (const archetype of ['', 'Note', 'note\nopen', 'nöt', 'a'.repeat(257)]) {
 +      expect(validateEnvelope(intentInvoke({ archetype })).errors).toContainEqual(
@@ -1659,14 +1675,23 @@ index 0000000000000000000000000000000000000000..cf8a6c9a416ac297dea22c21bfb924a4
 +});
 diff --git a/packages/conformance/src/validators/intent-request.ts b/packages/conformance/src/validators/intent-request.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..8446287926e05bec6f306440df78bc129f5decc5
+index 0000000000000000000000000000000000000000..4f70fa54b9f26f50abc5fe155661d8163f6c63d3
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.ts
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,109 @@
 +import type { EnvelopeError } from './envelope.js';
 +
 +const STABLE_CONVENTION = /^napplet:[^/?#\s]+\/[^/?#\s]+$/;
 +const INTENT_SLUG = /^[a-z0-9._-]{1,256}$/;
++const INTENT_REQUEST_FIELDS = new Set([
++  'archetype',
++  'action',
++  'convention',
++  'protocol',
++  'payload',
++  'handler',
++  'behavior',
++]);
 +
 +function optionalString(
 +  request: Record<string, unknown>,
@@ -1691,6 +1716,15 @@ index 0000000000000000000000000000000000000000..8446287926e05bec6f306440df78bc12
 +  if (typeof request !== 'object' || request === null || Array.isArray(request)) return;
 +
 +  const normalized = request as Record<string, unknown>;
++  for (const field of Object.keys(normalized)) {
++    if (field !== 'sender' && !INTENT_REQUEST_FIELDS.has(field)) {
++      errors.push({
++        code: 'invalid-intent-request',
++        message: `Unknown intent request field "${field}"`,
++        field: `request.${field}`,
++      });
++    }
++  }
 +  if (normalized.archetype === undefined) {
 +    errors.push({
 +      code: 'missing-field',

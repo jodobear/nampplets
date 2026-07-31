@@ -2,6 +2,15 @@ import type { EnvelopeError } from './envelope.js';
 
 const STABLE_CONVENTION = /^napplet:[^/?#\s]+\/[^/?#\s]+$/;
 const INTENT_SLUG = /^[a-z0-9._-]{1,256}$/;
+const INTENT_REQUEST_FIELDS = new Set([
+  'archetype',
+  'action',
+  'convention',
+  'protocol',
+  'payload',
+  'handler',
+  'behavior',
+]);
 
 function optionalString(
   request: Record<string, unknown>,
@@ -26,6 +35,15 @@ export function validateIntentInvokeRequest(
   if (typeof request !== 'object' || request === null || Array.isArray(request)) return;
 
   const normalized = request as Record<string, unknown>;
+  for (const field of Object.keys(normalized)) {
+    if (field !== 'sender' && !INTENT_REQUEST_FIELDS.has(field)) {
+      errors.push({
+        code: 'invalid-intent-request',
+        message: `Unknown intent request field "${field}"`,
+        field: `request.${field}`,
+      });
+    }
+  }
   if (normalized.archetype === undefined) {
     errors.push({
       code: 'missing-field',

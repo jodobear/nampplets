@@ -9,6 +9,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+LEGACY_HOST = ROOT / "conformance" / "legacy-host"
+sys.path.insert(0, str(LEGACY_HOST))
 
 
 def load_module(name: str, relative: str):
@@ -103,11 +105,12 @@ class LegacyHostRunnerTests(unittest.TestCase):
                 kehto.github_remote(invalid)
 
     def test_legacy_runner_accepts_an_explicit_playwright_module_root(self) -> None:
-        source = (
-            ROOT / "conformance" / "legacy-host" / "run.py"
-        ).read_text(encoding="utf-8")
-        self.assertIn('"--playwright-module-root"', source)
-        self.assertIn('module_root / "playwright"', source)
+        runner_source = (LEGACY_HOST / "run.py").read_text(encoding="utf-8")
+        helper_source = (LEGACY_HOST / "playwright_environment.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"--playwright-module-root"', runner_source)
+        self.assertIn('module_root / "playwright"', helper_source)
 
     def test_verified_package_cache_refuses_wrong_digest_offline(self) -> None:
         pin = legacy.PackagePin(
