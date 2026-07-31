@@ -265,6 +265,8 @@ final class GeneratedBindingTests: XCTestCase {
             allowedLocalRelayHosts: [],
             maximumNmpRelays: 8,
             maximumBridgeWorkers: 4,
+            maximumProviderPushEnvelopeBytes: 262_144,
+            maximumProviderPushPendingBytes: 524_288,
             maximumObservers: 2,
             maximumBoundaryEvents: 16,
             maximumConfigItems: 16,
