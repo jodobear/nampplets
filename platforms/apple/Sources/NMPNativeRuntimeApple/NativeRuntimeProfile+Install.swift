@@ -4,6 +4,12 @@ import NMPNativeRuntime
 // MARK: - Signed install, launch, and borrowed session plumbing
 
 extension NativeRuntimeProfile {
+    enum SessionLaunchAdmission: Equatable {
+        case admitted
+        case profileClosed
+        case capacity(maximum: Int)
+    }
+
     /// Verifies and installs one exact named build without granting or
     /// launching it. The returned opaque handle is bound to this profile.
     public func installSignedNamed(
