@@ -41,7 +41,7 @@ def verify_envelopes(lock: dict[str, Any]) -> int:
     return _verify_envelopes(lock, load_json)
 
 
-def verify_upgrade_report(lock: dict[str, Any]) -> int:
+def verify_upgrade_report(lock: dict[str, Any]) -> dict[str, int]:
     return _verify_upgrade_report(lock, load_json, BaselineError)
 
 
