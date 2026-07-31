@@ -46,6 +46,12 @@ class BaselineTests(unittest.TestCase):
 
             self.assertEqual(expected, generate_digests.manifest_bytes(root))
 
+    def test_digest_inputs_include_the_local_package_patch(self) -> None:
+        self.assertIn(
+            Path("conformance/patches/napplet-web/compat-v2.patch"),
+            generate_digests.tracked_inputs(),
+        )
+
     def test_full_offline_baseline(self) -> None:
         result = verify_baseline.verify()
         self.assertEqual(result["status"], "unratified")

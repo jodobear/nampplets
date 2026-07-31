@@ -140,6 +140,161 @@ index a41dc5920c486e83aac6eb4615d0cfd44efae409..6a9b9388e26e3d382e4b04b646963619
 +    degradedDeliveryState,
    };
  }
+diff --git a/packages/conformance/src/shell/reference-delivery.test.ts b/packages/conformance/src/shell/reference-delivery.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..82eb31b33bad1111316ab97c1b6cccd8fa3a1b94
+--- /dev/null
++++ b/packages/conformance/src/shell/reference-delivery.test.ts
+@@ -0,0 +1,149 @@
++import { describe, expect, it } from 'vitest';
++
++import {
++  createReferenceShell,
++  REFERENCE_DELIVERY_LIMITS,
++} from './reference-shell.js';
++
++const intentInvoke = (id: string) => ({
++  type: 'intent.invoke',
++  id,
++  request: {
++    archetype: 'note',
++    action: 'open',
++    convention: 'napplet:note/open',
++  },
++});
++describe('reference shell retained deliveries', () => {
++  it('defaults an archetype-only intent to open and its reference convention', () => {
++    const shell = createReferenceShell();
++
++    expect(shell.handle({
++      type: 'intent.invoke',
++      id: 'legacy-defaults',
++      request: { archetype: 'note' },
++    })).toEqual([{
++      type: 'intent.invoke.result',
++      id: 'legacy-defaults',
++      result: {
++        ok: true,
++        handled: true,
++        archetype: 'note',
++        action: 'open',
++        convention: 'napplet:note/open',
++        handler: 'reference-handler',
++      },
++    }]);
++    expect(shell.takeDeliveries('reference-handler')).toEqual([{
++      type: 'intent.deliver',
++      delivery: {
++        sender: 'reference-source',
++        archetype: 'note',
++        action: 'open',
++        convention: 'napplet:note/open',
++      },
++    }]);
++  });
++
++  it('reports handled true on delivery and handled false on refusal', () => {
++    const shell = createReferenceShell();
++
++    expect(shell.handle(intentInvoke('success'))).toEqual([{
++      type: 'intent.invoke.result',
++      id: 'success',
++      result: {
++        ok: true,
++        handled: true,
++        archetype: 'note',
++        action: 'open',
++        convention: 'napplet:note/open',
++        handler: 'reference-handler',
++      },
++    }]);
++    expect(shell.handle({
++      type: 'intent.invoke',
++      id: 'refused',
++      request: { archetype: 'profile', action: 'open', convention: 'napplet:profile/open' },
++    })).toEqual([{
++      type: 'intent.invoke.result',
++      id: 'refused',
++      result: {
++        ok: false,
++        handled: false,
++        archetype: 'profile',
++        action: 'open',
++        error: 'no reference handler for convention',
++      },
++    }]);
++  });
++
++  it('refuses intent delivery at the fixed per-target bound without retaining overflow', () => {
++    const shell = createReferenceShell();
++
++    for (let index = 0; index < REFERENCE_DELIVERY_LIMITS.perTarget; index += 1) {
++      const [response] = shell.handle(intentInvoke(`intent-${index}`)) as Array<{
++        result: { handled: boolean };
++      }>;
++      expect(response.result.handled).toBe(true);
++    }
++
++    expect(shell.handle(intentInvoke('overflow'))).toEqual([{
++      type: 'intent.invoke.result',
++      id: 'overflow',
++      result: {
++        ok: false,
++        handled: false,
++        archetype: 'note',
++        action: 'open',
++        error: 'reference delivery queue saturated',
++      },
++    }]);
++    expect(shell.deliveryState).toEqual({
++      retained: REFERENCE_DELIVERY_LIMITS.perTarget,
++      refused: 1,
++      lastRefusal: { target: 'reference-handler', reason: 'per-target-limit' },
++    });
++    expect(shell.takeDeliveries('reference-handler')).toHaveLength(
++      REFERENCE_DELIVERY_LIMITS.perTarget,
++    );
++    expect(shell.deliveryState.retained).toBe(0);
++  });
++
++  it('bounds combined invoke and INC retention and exposes fire-and-forget refusal', () => {
++    const shell = createReferenceShell();
++    const subscriberCapacity =
++      REFERENCE_DELIVERY_LIMITS.total - REFERENCE_DELIVERY_LIMITS.perTarget;
++
++    for (let index = 0; index < REFERENCE_DELIVERY_LIMITS.perTarget; index += 1) {
++      shell.handle(intentInvoke(`intent-${index}`));
++    }
++    for (let index = 0; index < subscriberCapacity; index += 1) {
++      expect(shell.handleFrom(
++        { dTag: `sender-${index}` },
++        { type: 'inc.emit', topic: 'napplet:note/open', payload: index },
++      )).toEqual([]);
++    }
++
++    expect(shell.deliveryState.retained).toBe(REFERENCE_DELIVERY_LIMITS.total);
++    expect(shell.handleFrom(
++      { dTag: 'overflow-sender' },
++      { type: 'inc.emit', topic: 'napplet:note/open', payload: 'overflow' },
++    )).toEqual([]);
++    expect(shell.deliveryState).toEqual({
++      retained: REFERENCE_DELIVERY_LIMITS.total,
++      refused: 1,
++      lastRefusal: { target: 'reference-subscriber', reason: 'global-limit' },
++    });
++    expect(shell.takeDeliveries('reference-subscriber')).toHaveLength(subscriberCapacity);
++  });
++
++  it('reset clears retained deliveries and saturation evidence', () => {
++    const shell = createReferenceShell();
++    shell.handle(intentInvoke('queued'));
++
++    shell.reset();
++
++    expect(shell.deliveryState).toEqual({ retained: 0, refused: 0, lastRefusal: null });
++    expect(shell.takeDeliveries('reference-handler')).toEqual([]);
++  });
++});
 diff --git a/packages/conformance/src/shell/reference-delivery.ts b/packages/conformance/src/shell/reference-delivery.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..b23cea50ce5a1b3f6fa5fe17fe166618b4b8d711
@@ -568,355 +723,17 @@ index 0000000000000000000000000000000000000000..de2d47212a168364f3cea10ec63f5c32
 +  'serial.close': (e) => ok({ type: 'serial.close.result', id: e.id }),
 +};
 diff --git a/packages/conformance/src/shell/reference-shell.test.ts b/packages/conformance/src/shell/reference-shell.test.ts
-index c37183d3d5ba9512577d31352c607fe68720bb2f..c735e4bb7636ea070d615f84ebbe9f924bd855ec 100644
+index c37183d3d5ba9512577d31352c607fe68720bb2f..d6107b16fb1510fc4cc227c2b5da9858392aab50 100644
 --- a/packages/conformance/src/shell/reference-shell.test.ts
 +++ b/packages/conformance/src/shell/reference-shell.test.ts
-@@ -1,235 +1,150 @@
--import { describe, it, expect } from 'vitest';
-+import { describe, expect, it } from 'vitest';
-+
- import {
-   createReferenceShell,
--  attachReferenceShell,
--  REFERENCE_PUBKEY,
--  type ReferenceEndpoint,
--  type MessageWindowLike,
-+  REFERENCE_DELIVERY_LIMITS,
- } from './reference-shell.js';
- 
--const authenticatedSource: ReferenceEndpoint = { dTag: 'authenticated-source' };
--
--describe('createReferenceShell — record + respond', () => {
--  it('records each inbound envelope with a verdict and timestamp', () => {
--    let t = 1000;
--    const shell = createReferenceShell({ now: () => (t += 5) });
--    shell.handle({ type: 'storage.get', id: '1', key: 'k' });
--    shell.handle({ type: 'relay.subscribe', id: '2', subId: 's', filters: [] });
--    expect(shell.records).toHaveLength(2);
--    expect(shell.records[0].verdict.ok).toBe(true);
--    expect(shell.records[0].timestamp).toBe(1005);
--    expect(shell.records[1].timestamp).toBe(1010);
--  });
--
--  it('records a malformed envelope with a failing verdict', () => {
--    const shell = createReferenceShell();
--    shell.handle({ type: 'relay.subscribe', id: '1' });
--    expect(shell.records[0].verdict.ok).toBe(false);
--  });
--
--  it('produces correlated, spec-valid responses', () => {
--    const shell = createReferenceShell();
--    expect(shell.handle({ type: 'storage.get', id: 'X', key: 'k' })).toEqual([
--      { type: 'storage.get.result', id: 'X', value: null },
--    ]);
--    expect(shell.handle({ type: 'identity.getPublicKey', id: 'Y' })).toEqual([
--      { type: 'identity.getPublicKey.result', id: 'Y', pubkey: REFERENCE_PUBKEY },
--    ]);
--    expect(shell.handle({ type: 'relay.subscribe', id: 'Z', subId: 'sub', filters: [] })).toEqual([
--      { type: 'relay.eose', subId: 'sub' },
--    ]);
--  });
--
--  it('advertises the reference intent handler through queryless contracts', () => {
--    const shell = createReferenceShell();
--
--    expect(shell.handle({ type: 'intent.available', id: 'intent-1', archetype: 'note' })).toEqual([
--      {
--        type: 'intent.available.result',
--        id: 'intent-1',
--        availability: {
--          archetype: 'note',
--          available: true,
--          candidates: [
--            {
--              dTag: 'reference-handler',
--              actions: ['open'],
--              conventions: ['napplet:note/open'],
--              contracts: [{ convention: 'napplet:note/open', eventKinds: [1, 30023] }],
--              isDefault: true,
--            },
--          ],
--          hasDefault: true,
--        },
--      },
--    ]);
--  });
-+const intentInvoke = (id: string) => ({
-+  type: 'intent.invoke',
-+  id,
-+  request: {
-+    archetype: 'note',
-+    action: 'open',
-+    convention: 'napplet:note/open',
-+  },
-+});
- 
--  it('accepts a normalized invoke before delivering the endpoint-attested target payload', () => {
-+describe('reference shell retained deliveries', () => {
-+  it('defaults an archetype-only intent to open and its reference convention', () => {
-     const shell = createReferenceShell();
--    const sourceAtAcceptance: ReferenceEndpoint = { dTag: 'source-at-acceptance' };
- 
--    expect(shell.handleFrom(sourceAtAcceptance, {
-+    expect(shell.handle({
-       type: 'intent.invoke',
--      id: 'intent-1',
--      request: {
-+      id: 'legacy-defaults',
-+      request: { archetype: 'note' },
-+    })).toEqual([{
-+      type: 'intent.invoke.result',
-+      id: 'legacy-defaults',
-+      result: {
-+        ok: true,
-+        handled: true,
-         archetype: 'note',
-         action: 'open',
-         convention: 'napplet:note/open',
--        payload: { event: 'abc123' },
--      },
--    })).toEqual([
--      {
--        type: 'intent.invoke.result',
--        id: 'intent-1',
--        result: {
--          ok: true,
--          archetype: 'note',
--          action: 'open',
--          convention: 'napplet:note/open',
--          handler: 'reference-handler',
--        },
-+        handler: 'reference-handler',
-       },
--    ]);
--
--    sourceAtAcceptance.dTag = 'source-after-acceptance';
--
--    expect(shell.takeDeliveries('reference-handler')).toEqual([
--      {
--        type: 'intent.deliver',
--        delivery: {
--          sender: 'source-at-acceptance',
--          archetype: 'note',
--          action: 'open',
--          convention: 'napplet:note/open',
--          payload: { event: 'abc123' },
--        },
-+    }]);
-+    expect(shell.takeDeliveries('reference-handler')).toEqual([{
-+      type: 'intent.deliver',
-+      delivery: {
-+        sender: 'reference-source',
-+        archetype: 'note',
-+        action: 'open',
-+        convention: 'napplet:note/open',
-       },
--    ]);
--    expect(shell.takeDeliveries('reference-handler')).toEqual([]);
-+    }]);
-   });
- 
--  it('records forged intent sender data as invalid and does not deliver it', () => {
-+  it('reports handled true on delivery and handled false on refusal', () => {
-     const shell = createReferenceShell();
- 
--    expect(shell.handleFrom(authenticatedSource, {
--      type: 'intent.invoke',
--      id: 'intent-forged-sender',
--      request: {
-+    expect(shell.handle(intentInvoke('success'))).toEqual([{
-+      type: 'intent.invoke.result',
-+      id: 'success',
-+      result: {
-+        ok: true,
-+        handled: true,
-         archetype: 'note',
-         action: 'open',
-         convention: 'napplet:note/open',
--        sender: 'forged-source',
-+        handler: 'reference-handler',
-       },
--    })).toEqual([]);
--    expect(shell.records.at(-1)?.verdict.ok).toBe(false);
--    expect(shell.takeDeliveries('reference-handler')).toEqual([]);
--  });
--
--  it('rejects normalized intent conflicts before handler resolution or target delivery', () => {
--    const shell = createReferenceShell();
--
--    expect(shell.handleFrom(authenticatedSource, {
-+    }]);
-+    expect(shell.handle({
-       type: 'intent.invoke',
--      id: 'intent-conflict',
--      request: {
--        archetype: 'note',
--        action: 'edit',
--        convention: 'napplet:note/open?event=abc123',
-+      id: 'refused',
-+      request: { archetype: 'profile', action: 'open', convention: 'napplet:profile/open' },
-+    })).toEqual([{
-+      type: 'intent.invoke.result',
-+      id: 'refused',
-+      result: {
-+        ok: false,
-+        handled: false,
-+        archetype: 'profile',
-+        action: 'open',
-+        error: 'no reference handler for convention',
-       },
--    })).toEqual([]);
--    expect(shell.records.at(-1)?.verdict.ok).toBe(false);
--    expect(shell.takeDeliveries('reference-handler')).toEqual([]);
-+    }]);
-   });
- 
--  it('routes INC only to the exact stable subscriber and derives sender from its endpoint', () => {
-+  it('refuses intent delivery at the fixed per-target bound without retaining overflow', () => {
-     const shell = createReferenceShell();
- 
--    expect(shell.handleFrom(authenticatedSource, {
--      type: 'inc.emit',
--      topic: 'napplet:note/open',
--      payload: { event: 'abc123' },
--    })).toEqual([]);
--    expect(shell.takeDeliveries('reference-subscriber')).toEqual([
--      {
--        type: 'inc.event',
--        topic: 'napplet:note/open',
--        sender: 'authenticated-source',
--        payload: { event: 'abc123' },
-+    for (let index = 0; index < REFERENCE_DELIVERY_LIMITS.perTarget; index += 1) {
-+      const [response] = shell.handle(intentInvoke(`intent-${index}`)) as Array<{
-+        result: { handled: boolean };
-+      }>;
-+      expect(response.result.handled).toBe(true);
-+    }
-+
-+    expect(shell.handle(intentInvoke('overflow'))).toEqual([{
-+      type: 'intent.invoke.result',
-+      id: 'overflow',
-+      result: {
-+        ok: false,
-+        handled: false,
-+        archetype: 'note',
-+        action: 'open',
-+        error: 'reference delivery queue saturated',
-       },
--    ]);
--
--    shell.handleFrom(authenticatedSource, {
--      type: 'inc.emit',
--      topic: 'napplet:note/open?event=abc123',
--      payload: { event: 'abc123' },
--    });
--    expect(shell.takeDeliveries('reference-subscriber')).toEqual([]);
--
--    shell.handleFrom(authenticatedSource, {
--      type: 'inc.emit',
--      topic: 'napplet:note/open',
--      sender: 'forged-source',
-+    }]);
-+    expect(shell.deliveryState).toEqual({
-+      retained: REFERENCE_DELIVERY_LIMITS.perTarget,
-+      refused: 1,
-+      lastRefusal: { target: 'reference-handler', reason: 'per-target-limit' },
-     });
--    expect(shell.takeDeliveries('reference-subscriber')).toEqual([]);
-+    expect(shell.takeDeliveries('reference-handler')).toHaveLength(
-+      REFERENCE_DELIVERY_LIMITS.perTarget,
-+    );
-+    expect(shell.deliveryState.retained).toBe(0);
-   });
- 
--  it('decodes data URLs for resource.bytes responses without fetch', async () => {
-+  it('bounds combined invoke and INC retention and exposes fire-and-forget refusal', () => {
-     const shell = createReferenceShell();
--    const [response] = shell.handle({
--      type: 'resource.bytes',
--      id: 'R',
--      url: 'data:text/plain;base64,aGk=',
--    }) as Array<{ type: string; id: string; blob: Blob; mime: string }>;
--
--    expect(response.type).toBe('resource.bytes.result');
--    expect(response.id).toBe('R');
--    expect(response.mime).toBe('text/plain');
--    expect(await response.blob.text()).toBe('hi');
-+    const subscriberCapacity =
-+      REFERENCE_DELIVERY_LIMITS.total - REFERENCE_DELIVERY_LIMITS.perTarget;
-+
-+    for (let index = 0; index < REFERENCE_DELIVERY_LIMITS.perTarget; index += 1) {
-+      shell.handle(intentInvoke(`intent-${index}`));
-+    }
-+    for (let index = 0; index < subscriberCapacity; index += 1) {
-+      expect(shell.handleFrom(
-+        { dTag: `sender-${index}` },
-+        { type: 'inc.emit', topic: 'napplet:note/open', payload: index },
-+      )).toEqual([]);
-+    }
-+
-+    expect(shell.deliveryState.retained).toBe(REFERENCE_DELIVERY_LIMITS.total);
-+    expect(shell.handleFrom(
-+      { dTag: 'overflow-sender' },
-+      { type: 'inc.emit', topic: 'napplet:note/open', payload: 'overflow' },
-+    )).toEqual([]);
-+    expect(shell.deliveryState).toEqual({
-+      retained: REFERENCE_DELIVERY_LIMITS.total,
-+      refused: 1,
-+      lastRefusal: { target: 'reference-subscriber', reason: 'global-limit' },
-+    });
-+    expect(shell.takeDeliveries('reference-subscriber')).toHaveLength(subscriberCapacity);
-   });
- 
--  it('returns no response for fire-and-forget and unknown messages', () => {
-+  it('reset clears retained deliveries and saturation evidence', () => {
-     const shell = createReferenceShell();
--    expect(shell.handle({ type: 'inc.emit', topic: 't' })).toEqual([]);
--    expect(shell.handle({ type: 'something.unknown' })).toEqual([]);
--    expect(shell.handle(42)).toEqual([]);
--  });
-+    shell.handle(intentInvoke('queued'));
- 
--  it('reset() clears records', () => {
--    const shell = createReferenceShell();
--    shell.handle({ type: 'storage.keys', id: '1' });
--    expect(shell.records).toHaveLength(1);
-     shell.reset();
--    expect(shell.records).toHaveLength(0);
--  });
--});
--
--describe('attachReferenceShell', () => {
--  it('wires message events to responses and honors the source guard', () => {
--    let listener: ((e: MessageEvent) => void) | undefined;
--    const host: MessageWindowLike = {
--      addEventListener: (_t, l) => {
--        listener = l;
--      },
--      removeEventListener: () => {
--        listener = undefined;
--      },
--    };
--    const posted: unknown[] = [];
--    const target = { postMessage: (m: unknown) => posted.push(m) };
--    const nappletWindow = {};
--
--    const shell = createReferenceShell();
--    const detach = attachReferenceShell(shell, { host, target, expectedSource: nappletWindow });
--    expect(typeof listener).toBe('function');
- 
--    listener!({ source: {}, data: { type: 'storage.get', id: '1', key: 'k' } } as unknown as MessageEvent);
--    expect(posted).toHaveLength(0);
--
--    listener!({ source: nappletWindow, data: { type: 'storage.get', id: '1', key: 'k' } } as unknown as MessageEvent);
--    expect(posted).toEqual([{ type: 'storage.get.result', id: '1', value: null }]);
--
--    detach();
--    expect(listener).toBeUndefined();
-+    expect(shell.deliveryState).toEqual({ retained: 0, refused: 0, lastRefusal: null });
-+    expect(shell.takeDeliveries('reference-handler')).toEqual([]);
-   });
- });
+@@ -84,6 +84,7 @@ describe('createReferenceShell — record + respond', () => {
+         id: 'intent-1',
+         result: {
+           ok: true,
++          handled: true,
+           archetype: 'note',
+           action: 'open',
+           convention: 'napplet:note/open',
 diff --git a/packages/conformance/src/shell/reference-shell.ts b/packages/conformance/src/shell/reference-shell.ts
 index 05a3145501642fc3772da749b2f76e3f91056559..d5e314c2d217f60ee94dc1cfbac17ca8ee48cdc7 100644
 --- a/packages/conformance/src/shell/reference-shell.ts
@@ -1400,284 +1217,75 @@ index 05a3145501642fc3772da749b2f76e3f91056559..d5e314c2d217f60ee94dc1cfbac17ca8
    const listener = (event: MessageEvent): void => {
      if (options.expectedSource !== undefined && event.source !== options.expectedSource) return;
 diff --git a/packages/conformance/src/validators/envelope.test.ts b/packages/conformance/src/validators/envelope.test.ts
-index 49d00e9e30c9125bf66efab9492b22f986df511b..4a229edc236c2fdc22fe9c742ca7df57d4522b63 100644
+index 49d00e9e30c9125bf66efab9492b22f986df511b..46370cf5df73a544993310cd4b1c29d25b1ce58c 100644
 --- a/packages/conformance/src/validators/envelope.test.ts
 +++ b/packages/conformance/src/validators/envelope.test.ts
-@@ -1,232 +1,59 @@
--import { describe, it, expect } from 'vitest';
--import { validateEnvelope, ENVELOPE_SPECS, knownEnvelopeTypes } from './envelope.js';
-+import { describe, expect, it } from 'vitest';
-+import { validateEnvelope } from './envelope.js';
- 
--describe('validateEnvelope — structural guards', () => {
--  it('rejects non-objects', () => {
--    for (const v of [null, undefined, 42, 'x', [], true]) {
--      const verdict = validateEnvelope(v as unknown);
--      expect(verdict.ok).toBe(false);
--    }
--    expect(validateEnvelope(null).errors[0].code).toBe('not-an-object');
--    expect(validateEnvelope([]).errors[0].code).toBe('not-an-object');
--  });
--
--  it('rejects a missing or non-string type', () => {
--    expect(validateEnvelope({}).errors[0].code).toBe('missing-type');
--    expect(validateEnvelope({ type: 5 }).errors[0].code).toBe('missing-type');
--  });
--
--  it('rejects a type without domain.action form', () => {
--    expect(validateEnvelope({ type: 'relay' }).errors[0].code).toBe('malformed-type');
--    expect(validateEnvelope({ type: '.action' }).errors[0].code).toBe('malformed-type');
--  });
--
--  it('rejects an unknown domain', () => {
--    const v = validateEnvelope({ type: 'bogus.thing' });
--    expect(v.ok).toBe(false);
--    expect(v.errors[0].code).toBe('unknown-domain');
--  });
--
--  it('rejects an unknown action within a known domain', () => {
--    const v = validateEnvelope({ type: 'relay.teleport', id: 'x' });
--    expect(v.ok).toBe(false);
--    expect(v.errors[0].code).toBe('unknown-type');
--  });
--});
--
--describe('validateEnvelope — direction enforcement', () => {
--  it('rejects a napplet emitting a shell→napplet (inbound) type', () => {
--    const v = validateEnvelope({ type: 'relay.event', subId: 's', result: { event: {} } });
--    expect(v.ok).toBe(false);
--    expect(v.direction).toBe('in');
--    expect(v.errors[0].code).toBe('inbound-type-emitted');
--  });
-+const invoke = (request: Record<string, unknown>) => ({
-+  type: 'intent.invoke',
-+  id: 'intent-1',
-+  request,
+@@ -230,3 +230,65 @@ describe('ENVELOPE_SPECS invariants', () => {
+     });
+   });
  });
- 
--describe('validateEnvelope — outbound field checks', () => {
--  it('accepts a well-formed relay.subscribe', () => {
--    const v = validateEnvelope({ type: 'relay.subscribe', id: 'a', subId: 'b', filters: [{ kinds: [1] }] });
--    expect(v.ok).toBe(true);
--    expect(v.direction).toBe('out');
--    expect(v.errors).toHaveLength(0);
--  });
--
--  it('flags missing required fields', () => {
--    const v = validateEnvelope({ type: 'relay.subscribe', id: 'a' });
--    expect(v.ok).toBe(false);
--    const missing = v.errors.filter((e) => e.code === 'missing-field').map((e) => e.field).sort();
--    expect(missing).toEqual(['filters', 'subId']);
--  });
--
--  it('flags wrong field kinds', () => {
--    const v = validateEnvelope({ type: 'relay.subscribe', id: 'a', subId: 'b', filters: { not: 'an array' } });
--    expect(v.ok).toBe(false);
--    expect(v.errors.some((e) => e.code === 'wrong-type' && e.field === 'filters')).toBe(true);
--  });
--
--  it('accepts a fire-and-forget inc.emit with only a topic and rejects caller sender data', () => {
--    const v = validateEnvelope({ type: 'inc.emit', topic: 'room' });
--    expect(v.ok).toBe(true);
--
--    const forged = validateEnvelope({ type: 'inc.emit', topic: 'room', sender: 'forged-source' });
--    expect(forged.ok).toBe(false);
--    expect(forged.errors).toContainEqual(expect.objectContaining({
--      code: 'forbidden-field',
--      field: 'sender',
--    }));
--  });
--
--  it('accepts a normalized intent request while leaving convention and payload values opaque', () => {
--    const v = validateEnvelope({
-+describe('intent.invoke request validation', () => {
-+  it('accepts the archetype-only contract and defaults the omitted action to open', () => {
-+    expect(validateEnvelope(invoke({ archetype: 'note' }))).toMatchObject({
++
++const intentInvoke = (request: Record<string, unknown>) => ({
++  type: 'intent.invoke',
++  id: 'intent-regression',
++  request,
++});
++
++describe('intent.invoke optional identity fields', () => {
++  it('accepts the archetype-only contract', () => {
++    expect(validateEnvelope(intentInvoke({ archetype: 'note' }))).toMatchObject({
 +      ok: true,
-       type: 'intent.invoke',
--      id: 'intent-1',
--      request: {
--        archetype: 'note',
--        action: 'open',
--        convention: 'napplet:note/open',
--        payload: { nested: ['opaque', { values: true }] },
--      },
++      type: 'intent.invoke',
 +      direction: 'out',
 +      errors: [],
-     });
--    expect(v.ok).toBe(true);
--
--    const malformed = validateEnvelope({ type: 'intent.invoke', id: 'intent-2', request: [] });
--    expect(malformed.ok).toBe(false);
--    expect(malformed.errors).toContainEqual(expect.objectContaining({
--      code: 'wrong-type',
--      field: 'request',
--    }));
-   });
- 
--  it('rejects malformed or forged normalized intent identities', () => {
--    const base = {
--      type: 'intent.invoke',
--      id: 'intent-3',
--      request: { archetype: 'note', action: 'open', convention: 'napplet:note/open' },
--    };
--    const invalidRequests = [
--      { ...base.request, convention: 'napplet:note/open?event=abc' },
--      { ...base.request, convention: 'napplet:note/open#preview' },
--      { ...base.request, action: 'edit' },
--      { ...base.request, sender: 'forged-source' },
--    ];
--
--    for (const request of invalidRequests) {
--      expect(validateEnvelope({ ...base, request }).ok).toBe(false);
--    }
++    });
++  });
++
 +  it('accepts optional action and convention independently when valid', () => {
-+    expect(validateEnvelope(invoke({ archetype: 'note', action: 'edit' })).ok).toBe(true);
-+    expect(validateEnvelope(invoke({
++    expect(validateEnvelope(intentInvoke({ archetype: 'note', action: 'edit' })).ok).toBe(true);
++    expect(validateEnvelope(intentInvoke({
 +      archetype: 'note',
 +      convention: 'napplet:note/open',
 +    })).ok).toBe(true);
-+    expect(validateEnvelope(invoke({
++    expect(validateEnvelope(intentInvoke({
 +      archetype: 'note',
 +      action: 'edit',
 +      convention: 'napplet:note/edit',
 +    })).ok).toBe(true);
-   });
- 
--  it('records adopted inbound INC and intent delivery carriers without correlation identifiers', () => {
--    const delivered = validateEnvelope({
--      type: 'intent.deliver',
--      delivery: {
--        sender: 'runtime-attested-source',
--        archetype: 'note',
--        action: 'open',
--        convention: 'napplet:note/open',
--        payload: { nested: ['opaque', { values: true }] },
--      },
--    });
--    expect(delivered.ok).toBe(false);
--    expect(delivered.direction).toBe('in');
--    expect(delivered.errors).toContainEqual(expect.objectContaining({ code: 'inbound-type-emitted' }));
--    expect(delivered.errors).not.toContainEqual(expect.objectContaining({
--      code: 'missing-field',
--      field: 'delivery',
--    }));
--
--    const missingDelivery = validateEnvelope({ type: 'intent.deliver' });
--    expect(missingDelivery.errors).toContainEqual(expect.objectContaining({
--      code: 'missing-field',
--      field: 'delivery',
++  });
++
 +  it('rejects malformed optional fields without making them required', () => {
-+    const wrongAction = validateEnvelope(invoke({ archetype: 'note', action: 1 }));
++    const wrongAction = validateEnvelope(intentInvoke({ archetype: 'note', action: 1 }));
 +    expect(wrongAction.errors).toContainEqual(expect.objectContaining({
 +      code: 'wrong-type',
 +      field: 'request.action',
-     }));
- 
--    const missingSender = validateEnvelope({ type: 'inc.event', topic: 'room' });
--    expect(missingSender.errors).toContainEqual(expect.objectContaining({
--      code: 'missing-field',
--      field: 'sender',
-+    const wrongConvention = validateEnvelope(invoke({ archetype: 'note', convention: false }));
++    }));
++
++    const wrongConvention = validateEnvelope(intentInvoke({
++      archetype: 'note',
++      convention: false,
++    }));
 +    expect(wrongConvention.errors).toContainEqual(expect.objectContaining({
 +      code: 'wrong-type',
 +      field: 'request.convention',
-     }));
-   });
- 
--  it('treats `present` fields as required-but-untyped (outbox.query filters union)', () => {
--    expect(validateEnvelope({ type: 'outbox.query', id: 'a', filters: { kinds: [1] } }).ok).toBe(true);
--    expect(validateEnvelope({ type: 'outbox.query', id: 'a', filters: [{ kinds: [1] }] }).ok).toBe(true);
--    expect(validateEnvelope({ type: 'outbox.query', id: 'a' }).ok).toBe(false);
--  });
--
--  it('requires resource.bytesMany to carry a URL array', () => {
--    expect(validateEnvelope({ type: 'resource.bytesMany', id: 'a', urls: ['https://x/y'] }).ok).toBe(true);
--    expect(validateEnvelope({ type: 'resource.bytesMany', id: 'a' }).errors[0].code).toBe('missing-field');
--    expect(validateEnvelope({ type: 'resource.bytesMany', id: 'a', urls: 'https://x/y' }).errors[0].code).toBe('wrong-type');
--  });
--
--  it('validates a representative outbound message from every NAP that has one', () => {
--    // One concrete happy-path per outbound-bearing domain.
--    const samples: Record<string, unknown> = {
--      relay: { type: 'relay.query', id: 'a', filters: [] },
--      identity: { type: 'identity.getPublicKey', id: 'a' },
--      storage: { type: 'storage.get', id: 'a', key: 'k' },
--      inc: { type: 'inc.subscribe', id: 'a', topic: 't' },
--      theme: { type: 'theme.get', id: 'a' },
--      keys: { type: 'keys.unregisterAction', actionId: 'x' },
--      media: { type: 'media.session.destroy', sessionId: 's' },
--      notify: { type: 'notify.badge', count: 3 },
--      config: { type: 'config.get', id: 'a' },
--      resource: { type: 'resource.bytesMany', id: 'a', urls: ['https://x/y'] },
--      cvm: { type: 'cvm.registry.call', id: 'a', family: 'relatr', tool: 'search_profiles' },
--      outbox: { type: 'outbox.close', id: 'a', subId: 's' },
--      upload: { type: 'upload.status', id: 'a', uploadId: 'u' },
--      intent: { type: 'intent.handlers', id: 'a' },
--      ble: { type: 'ble.read', id: 'a', sessionId: 's', target: { service: 'battery_service', characteristic: 'battery_level' } },
--      webrtc: {
--        type: 'webrtc.open',
--        id: 'a',
--        request: { scope: { type: 'direct', pubkey: 'abc123' } },
--      },
--      link: { type: 'link.open', id: 'a', url: 'https://example.com/post/123' },
--      count: { type: 'count.query', id: 'a', filters: [{ kinds: [7], '#e': ['event-id'] }] },
--      lists: {
--        type: 'lists.add',
--        id: 'a',
--        list: { type: 'mute-list' },
--        items: [{ itemType: 'pubkey', value: 'abc123' }],
--      },
--      common: { type: 'common.react', id: 'a', targetEventId: 'e'.repeat(64), reaction: '+' },
--      serial: { type: 'serial.write', id: 'a', sessionId: 's', data: [1, 2, 3] },
--    };
--    for (const [domain, msg] of Object.entries(samples)) {
--      const v = validateEnvelope(msg);
--      expect(v.ok, `${domain}: ${JSON.stringify(v.errors)}`).toBe(true);
++    }));
++  });
++
 +  it('binds an explicit convention to the explicit or defaulted action', () => {
 +    for (const request of [
 +      { archetype: 'note', convention: 'napplet:note/edit' },
 +      { archetype: 'note', action: 'edit', convention: 'napplet:note/open' },
 +      { archetype: 'note', convention: 'napplet:note/open?draft=true' },
 +    ]) {
-+      expect(validateEnvelope(invoke(request)).errors).toContainEqual(expect.objectContaining({
-+        code: 'invalid-intent-request',
-+        field: 'request.convention',
-+      }));
-     }
-   });
- });
--
--describe('validateEnvelope — no generic shell domain', () => {
--  it('rejects removed generic shell messages as an unknown domain', () => {
--    const removedReady = ['shell', 'ready'].join('.');
--    const removedInit = ['shell', 'init'].join('.');
--    expect(validateEnvelope({ type: removedReady }).errors[0].code).toBe('unknown-domain');
--    expect(validateEnvelope({ type: removedInit }).errors[0].code).toBe('unknown-domain');
--  });
--});
--
--describe('ENVELOPE_SPECS invariants', () => {
--  it('has 208 discriminants split 100 outbound / 108 inbound', () => {
--    const all = knownEnvelopeTypes();
--    expect(all).toHaveLength(208);
--    const out = all.filter((t) => ENVELOPE_SPECS[t].dir === 'out');
--    const inbound = all.filter((t) => ENVELOPE_SPECS[t].dir === 'in');
--    expect(out).toHaveLength(100);
--    expect(inbound).toHaveLength(108);
--  });
--
--  it('declares the adopted inbound carrier fields without delivery identifiers', () => {
--    expect(ENVELOPE_SPECS['inc.event']).toEqual({
--      dir: 'in',
--      fields: { topic: 'string', sender: 'string' },
--    });
--    expect(ENVELOPE_SPECS['intent.deliver']).toEqual({
--      dir: 'in',
--      fields: { delivery: 'object' },
--    });
--  });
--});
++      expect(validateEnvelope(intentInvoke(request)).errors).toContainEqual(
++        expect.objectContaining({
++          code: 'invalid-intent-request',
++          field: 'request.convention',
++        }),
++      );
++    }
++  });
++});
 diff --git a/packages/conformance/src/validators/envelope.ts b/packages/conformance/src/validators/envelope.ts
 index 570d2106005014fb9d20cc02571a7a4770ce14a2..038b92d8d0350a2980ef8f9f8c09bcf8be512945 100644
 --- a/packages/conformance/src/validators/envelope.ts
@@ -1723,229 +1331,35 @@ index 570d2106005014fb9d20cc02571a7a4770ce14a2..038b92d8d0350a2980ef8f9f8c09bcf8
    const parsed = /^napplet:([^/?#\s]+)\/([^/?#\s]+)$/.exec(convention);
    if (!parsed || parsed[1] !== archetype || parsed[2] !== action) {
 diff --git a/packages/nap/src/lists/shim.test.ts b/packages/nap/src/lists/shim.test.ts
-index 5e3ec7713cea7a4a0e0a463d3d09265e547f8527..e8e74b3422c31f3c504e57c0b440a786ad3f3197 100644
+index 5e3ec7713cea7a4a0e0a463d3d09265e547f8527..1922c3df10591fcd9e9fd0e1b5681d95730fd0df 100644
 --- a/packages/nap/src/lists/shim.test.ts
 +++ b/packages/nap/src/lists/shim.test.ts
-@@ -1,198 +1,35 @@
--import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-+import { afterEach, describe, expect, it, vi } from 'vitest';
+@@ -195,4 +195,26 @@ describe('@napplet/nap/lists shim', () => {
  
--interface PostedMessage {
--  msg: any;
--  targetOrigin: string;
--}
-+const { postToShell } = vi.hoisted(() => ({ postToShell: vi.fn() }));
-+vi.mock('../boundary.js', () => ({ postToShell }));
- 
--let postedMessages: PostedMessage[];
--let uuidCounter: number;
--let originalCryptoDescriptor: PropertyDescriptor | undefined;
-+import {
-+  installListsShim,
-+  LISTS_PENDING_REQUEST_LIMIT,
-+  supported,
-+} from './shim.js';
- 
--beforeEach(() => {
--  postedMessages = [];
--  uuidCounter = 0;
--  originalCryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
-+describe('lists shim pending-request admission', () => {
-+  const cleanup = installListsShim();
- 
--  Object.defineProperty(globalThis, 'crypto', {
--    configurable: true,
--    value: {
--      randomUUID: () => `lists-test-${++uuidCounter}`,
--    },
--  });
--
--  Object.defineProperty(globalThis, 'window', {
--    configurable: true,
--    value: {
--      parent: {
--        postMessage(msg: unknown, targetOrigin: string) {
--          postedMessages.push({ msg, targetOrigin });
--        },
--      },
--    },
--  });
--
--  vi.resetModules();
--});
--
--afterEach(() => {
--  vi.restoreAllMocks();
--  if (originalCryptoDescriptor) {
--    Object.defineProperty(globalThis, 'crypto', originalCryptoDescriptor);
--  } else {
--    Reflect.deleteProperty(globalThis, 'crypto');
--  }
--  Reflect.deleteProperty(globalThis, 'window');
--});
--
--/** Find the most recent posted message of a given type. */
--function lastPosted(type: string): any {
--  for (let i = postedMessages.length - 1; i >= 0; i--) {
--    if (postedMessages[i].msg?.type === type) return postedMessages[i].msg;
--  }
--  throw new Error(`no posted message of type ${type}`);
--}
--
--describe('@napplet/nap/lists shim', () => {
--  it('posts lists.supported and resolves supported lists', async () => {
--    const { supported, handleListsMessage } = await import('./shim.js');
--
--    const promise = supported();
--    const sent = lastPosted('lists.supported');
--    expect(sent).toMatchObject({ id: 'lists-test-1' });
--
--    handleListsMessage({
--      type: 'lists.supported.result',
--      id: sent.id,
--      lists: [
--        {
--          kind: 10000,
--          type: 'mute-list',
--          addressable: false,
--          supportedItemTypes: ['pubkey', 'word'],
--          privateItems: true,
--        },
--      ],
--    });
--
--    await expect(promise).resolves.toEqual([
--      {
--        kind: 10000,
--        type: 'mute-list',
--        addressable: false,
--        supportedItemTypes: ['pubkey', 'word'],
--        privateItems: true,
--      },
--    ]);
-+  afterEach(() => {
-+    cleanup();
-+    postToShell.mockClear();
+     await expect(promise).rejects.toThrow('lists shim uninstalled');
    });
- 
--  it('posts lists.add and resolves mutation results', async () => {
--    const { add, handleListsMessage } = await import('./shim.js');
--
--    const promise = add(
--      { type: 'mute-list' },
--      [{ itemType: 'pubkey', value: 'abc123', visibility: 'private' }],
--      { create: true, title: 'Muted' },
++
 +  it('immediately refuses global overflow without posting or retaining it', async () => {
++    const {
++      installListsShim,
++      LISTS_PENDING_REQUEST_LIMIT,
++      supported,
++    } = await import('./shim.js');
++    const cleanup = installListsShim();
 +    const admitted = Array.from(
 +      { length: LISTS_PENDING_REQUEST_LIMIT },
 +      () => supported(),
-     );
--    const sent = lastPosted('lists.add');
--    expect(sent).toMatchObject({
--      id: 'lists-test-1',
--      list: { type: 'mute-list' },
--      items: [{ itemType: 'pubkey', value: 'abc123', visibility: 'private' }],
--      options: { create: true, title: 'Muted' },
--    });
++    );
 +    const settled = Promise.allSettled(admitted);
- 
--    handleListsMessage({
--      type: 'lists.add.result',
--      id: sent.id,
--      ok: true,
--      eventId: 'event-1',
--      added: 1,
--      removed: 99,
--      skipped: 0,
--    });
--
--    await expect(promise).resolves.toEqual({
--      ok: true,
--      eventId: 'event-1',
--      added: 1,
--      skipped: 0,
--    });
--  });
--
--  it('resolves unsupported-list remove results without rejecting', async () => {
--    const { remove, handleListsMessage } = await import('./shim.js');
--
--    const promise = remove({ kind: 30004, identifier: 'curation' }, [
--      { itemType: 'address', value: '30023:pubkey:d-tag' },
--    ]);
--    const sent = lastPosted('lists.remove');
--
--    handleListsMessage({
--      type: 'lists.remove.result',
--      id: sent.id,
--      ok: false,
--      error: 'unsupported-list',
--      reason: 'kind not enabled',
--      supported: [],
--    });
--
--    await expect(promise).resolves.toEqual({
--      ok: false,
--      error: 'unsupported-list',
--      reason: 'kind not enabled',
--      supported: [],
--    });
--  });
--
--  it('posts lists.remove and resolves removed mutation results', async () => {
--    const { remove, handleListsMessage } = await import('./shim.js');
--
--    const promise = remove(
--      { type: 'mute-list' },
--      [{ itemType: 'pubkey', value: 'abc123', visibility: 'private' }],
++
 +    await expect(supported()).rejects.toThrow(
 +      `lists request capacity reached (${LISTS_PENDING_REQUEST_LIMIT} pending)`,
-     );
--    const sent = lastPosted('lists.remove');
--    expect(sent).toMatchObject({
--      id: 'lists-test-1',
--      list: { type: 'mute-list' },
--      items: [{ itemType: 'pubkey', value: 'abc123', visibility: 'private' }],
--    });
--
--    handleListsMessage({
--      type: 'lists.remove.result',
--      id: sent.id,
--      ok: true,
--      eventId: 'event-2',
--      added: 99,
--      removed: 1,
--      skipped: 0,
--    });
-+    expect(postToShell).toHaveBeenCalledTimes(LISTS_PENDING_REQUEST_LIMIT);
- 
--    await expect(promise).resolves.toEqual({
--      ok: true,
--      eventId: 'event-2',
--      removed: 1,
--      skipped: 0,
--    });
--  });
--
--  it('ignores unknown and uncorrelated messages without throwing', async () => {
--    const { handleListsMessage } = await import('./shim.js');
--
--    expect(() => handleListsMessage({ type: 'unknown.domain' })).not.toThrow();
--    expect(() => handleListsMessage({ type: 'lists.add.result', id: 'no-such-id', ok: true })).not.toThrow();
--  });
--
--  it('install cleanup clears pending requests', async () => {
--    const { add, installListsShim, handleListsMessage } = await import('./shim.js');
--
--    const cleanup = installListsShim();
--    const promise = add({ type: 'mute-list' }, [{ itemType: 'word', value: 'spam' }]);
--    const sent = lastPosted('lists.add');
-     cleanup();
--    handleListsMessage({ type: 'lists.add.result', id: sent.id, ok: true, added: 1 });
--
--    await expect(promise).rejects.toThrow('lists shim uninstalled');
++    );
++    expect(postedMessages).toHaveLength(LISTS_PENDING_REQUEST_LIMIT);
++
++    cleanup();
 +    await settled;
-   });
++  });
  });
 diff --git a/packages/nap/src/lists/shim.ts b/packages/nap/src/lists/shim.ts
 index 3498a8c215fdf73fd6bc19cce5777d04d58c458c..ea673e4ea49cd9a848ad4d3c7beea6085ba76d67 100644

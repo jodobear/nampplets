@@ -67,7 +67,9 @@ def verify_upgrade_report(
         "explicitly_unsupported": ["registry-only-inc.channel.opened"],
         "migration": {
             "legacy_intent_protocol_alias": "accepted-at-rust-provider-boundary",
-            "legacy_optional_intent_fields": "accepted-at-rust-provider-boundary",
+            "legacy_optional_intent_fields": (
+                "accepted-and-defaulted-at-web-and-rust-boundaries"
+            ),
             "platform_domains_advertised": [],
         },
     }

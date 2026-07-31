@@ -31,8 +31,9 @@ conformance digest manifest.
 - The 0.29 web binding transposes supported convention URI query parameters to
   a queryless identity plus text payload before the carrier crosses the trust
   boundary.
-- `intent.invoke.request` carries matching `archetype`, `action`, and queryless
-  `convention` fields.
+- `intent.invoke.request` requires `archetype`; omitted `action` defaults to
+  `open`, and omitted `convention` defaults to the matching queryless
+  `napplet:<archetype>/<action>` identity before reference delivery.
 - `intent.deliver` is an independent shell-to-napplet carrier with
   runtime-attested sender provenance.
 - The NIP-5D source snapshot now recommends a strict self-contained iframe CSP.
@@ -51,9 +52,9 @@ conformance digest manifest.
 ## No-longer-accepted package behavior
 
 - A napplet-emitted `inc.emit.sender` is rejected.
-- A 0.29 intent request with a missing identity field, a queried or fragmented
-  convention, mismatched archetype/action, or caller-supplied sender is rejected
-  by the pinned conformance validator.
+- A 0.29 intent request with malformed optional identity fields, a queried or
+  fragmented convention, mismatched explicit archetype/action/convention, or
+  caller-supplied sender is rejected by the pinned conformance validator.
 - Kehto production artifacts containing Vite's module-preload `fetch` helper
   are not compatibility fixtures.
 - Raw NIP-51 tags such as `{ "type": "p" }`, kind-only selector handling, and
@@ -77,11 +78,12 @@ ratified and does not advertise private-item support.
 
 ## Migration and dual support
 
-Existing 0.28-built napplets remain source-compatible at the current provider
-boundary: legacy optional intent fields and the historic `protocol` alias are
-still accepted by the Rust provider. The stricter 0.29 web binding emits the
-normalized form. This tolerance is one-way; the runtime never emits a forged
-sender or converts a 0.29 carrier back into caller-controlled identity.
+Existing 0.28-built napplets remain source-compatible: optional intent fields
+are accepted and defaulted by both the patched web reference boundary and the
+Rust provider, while Rust also accepts the historic `protocol` alias. Delivery
+uses the normalized identity. This tolerance is one-way; the runtime never
+emits a forged sender or converts a carrier back into caller-controlled
+identity.
 
 No platform advertises a domain at M0. The executable package evidence pins
 intent 0.29, but the current Rust intent provider descriptor remains on 0.28

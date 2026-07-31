@@ -11,7 +11,7 @@
   "local_patches": {
     "napplet_web": {
       "path": "conformance/patches/napplet-web/compat-v2.patch",
-      "sha256": "3748d91858fb3828237d8fd3a11ac6f8d7c635706bb49eaed1639360d54360ee"
+      "sha256": "a1f758cc50d726adb4ca93b75bc39ec8936329be40062a2a63150adcb3c0e440"
     }
   },
   "from": {
@@ -49,7 +49,7 @@
   ],
   "migration": {
     "legacy_intent_protocol_alias": "accepted-at-rust-provider-boundary",
-    "legacy_optional_intent_fields": "accepted-at-rust-provider-boundary",
+    "legacy_optional_intent_fields": "accepted-and-defaulted-at-web-and-rust-boundaries",
     "platform_domains_advertised": []
   },
   "signoff": {
