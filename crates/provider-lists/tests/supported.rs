@@ -104,6 +104,14 @@ fn the_descriptor_advertises_exactly_the_pinned_action_set() {
         nmp_native_nap_bridge::ProviderPlatformAvailability::Available
     );
     assert_eq!(descriptor.domain.as_str(), DOMAIN);
+    assert_eq!(
+        descriptor
+            .protocol_versions
+            .iter()
+            .map(|version| version.as_ref())
+            .collect::<Vec<_>>(),
+        vec![PINNED_NAP_PROTOCOL]
+    );
     assert!(descriptor.dependencies.is_empty());
 }
 

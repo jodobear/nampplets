@@ -30,6 +30,12 @@ worktrees at those exact revisions.
 - `intent.deliver` is an independent shell-to-napplet carrier with
   runtime-attested sender provenance.
 - The NIP-5D source snapshot now recommends a strict self-contained iframe CSP.
+- The `lists.supported`, `lists.add`, and `lists.remove` wire types are
+  byte-for-byte unchanged between exact napplet/web commits
+  `b335c40c77f55547f23af81d6d999e2e4e3a3623` and
+  `60889f1c2476e063500c7ab6624af6abe0dbcbe5`; the merged-main Rust LISTS
+  provider therefore advances its advertised protocol to 0.29 without changing
+  its request/result semantics.
 
 ## No-longer-accepted package behavior
 
