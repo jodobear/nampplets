@@ -69,11 +69,6 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         }
     }
 
-    struct StoppingSession {
-        let session: RustRuntimeNappletSession
-        let minimumTerminalRevision: UInt64
-    }
-
     enum SessionLaunchAdmission: Equatable {
         case admitted
         case profileClosed

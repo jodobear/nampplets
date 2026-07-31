@@ -6,6 +6,78 @@ import XCTest
 // MARK: - Stop terminal-response handoff
 
 final class RuntimeSessionStopDeliveryTests: RuntimeNappletSessionTestCase {
+    func testLostStopFramePreservesTerminalSinkAcrossLaterCleanFrames() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "runtime-apple-stop-evidence-loss-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profile = try NativeRuntimeProfile.open(
+            configuration: NativeRuntimeProfileConfiguration(storageRoot: root)
+        )
+        defer { profile.close() }
+        let session = RustRuntimeNappletSession(
+            profile: profile,
+            sessionID: UInt64.max,
+            maximumReadBytes: 1_024
+        )
+        var terminalSnapshot = try profile.snapshotForTesting
+        terminalSnapshot.revision = UInt64.max
+        let stopping = NativeRuntimeProfile.StoppingSession(
+            session: session,
+            minimumTerminalRevision: UInt64.max
+        )
+        profile.lock.lock()
+        profile.stoppingSessions[session.sessionID] = stopping
+        profile.lock.unlock()
+        func frame(stale: Bool, lost: UInt64) -> RuntimeObservationFrame {
+            RuntimeObservationFrame(
+                snapshot: .snapshot(terminalSnapshot),
+                catalog: profile.catalogSnapshotForTesting,
+                events: [],
+                oldestAvailableEvent: 1,
+                newestAvailableEvent: 1,
+                eventCursorWasStale: stale,
+                lostBeforeBatch: lost
+            )
+        }
+
+        profile.completeStopsAfterDelivery(
+            frame: frame(stale: true, lost: 1),
+            snapshot: terminalSnapshot,
+            activeSessions: [session],
+            stoppingSessionsAtFrameStart: [session.sessionID: stopping]
+        )
+        profile.lock.lock()
+        let preserved = profile.stoppingSessions[session.sessionID]
+        profile.lock.unlock()
+        XCTAssertEqual(preserved?.terminalEvidenceWasLost, true)
+
+        profile.completeStopsAfterDelivery(
+            frame: frame(stale: false, lost: 0),
+            snapshot: terminalSnapshot,
+            activeSessions: [session],
+            stoppingSessionsAtFrameStart: [session.sessionID: try XCTUnwrap(preserved)]
+        )
+        profile.lock.lock()
+        let stillPreserved = profile.stoppingSessions[session.sessionID]
+        profile.lock.unlock()
+        XCTAssertEqual(stillPreserved?.terminalEvidenceWasLost, true)
+
+        XCTAssertEqual(
+            NativeRuntimeProfile.stopFrameDisposition(
+                snapshotRevision: 12,
+                minimumTerminalRevision: 12,
+                snapshotRetainsSession: false,
+                eventCursorWasStale: false,
+                lostBeforeBatch: 1,
+                terminalEvidenceWasLost: false
+            ),
+            .preserveAfterEvidenceLoss
+        )
+    }
+
     func testLaunchOccupancyUnionsActiveStoppingAndReservations() {
         XCTAssertEqual(
             NativeRuntimeProfile.sessionLaunchOccupancy(

@@ -223,26 +223,12 @@ extension NativeRuntimeProfile {
             session.deliver(frame: frame)
         }
         if let snapshot {
-            let retainedSessionIDs = Set(snapshot.sessions.map(\.id))
-            let completedStops = activeSessions.filter { session in
-                stoppingSessionsAtFrameStart[session.sessionID]
-                    .map { snapshot.revision >= $0.minimumTerminalRevision }
-                    == true
-                    && !retainedSessionIDs.contains(session.sessionID)
-                    && session.completeStopAfterTerminalDelivery()
-            }
-            if !completedStops.isEmpty {
-                lock.lock()
-                for session in completedStops {
-                    if sessions[session.sessionID]?.value === session {
-                        sessions.removeValue(forKey: session.sessionID)
-                    }
-                    if stoppingSessions[session.sessionID]?.session === session {
-                        stoppingSessions.removeValue(forKey: session.sessionID)
-                    }
-                }
-                lock.unlock()
-            }
+            completeStopsAfterDelivery(
+                frame: frame,
+                snapshot: snapshot,
+                activeSessions: activeSessions,
+                stoppingSessionsAtFrameStart: stoppingSessionsAtFrameStart
+            )
         }
         if let snapshot,
            snapshot.revision > previousActivityRevision
