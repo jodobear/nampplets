@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import subprocess
@@ -134,6 +135,22 @@ class BaselineTests(unittest.TestCase):
             verify_baseline.verify_upgrade_report(lock),
             {"accepted": 7, "rejected": 4, "explicitly_unsupported": 1},
         )
+
+    def test_upgrade_report_binds_every_lists_authority(self) -> None:
+        lock = verify_baseline.load_lock()
+        for authority in (
+            "semantic_commit",
+            "package_merge_commit",
+            "nip_51_commit",
+        ):
+            with self.subTest(authority=authority):
+                drifted = copy.deepcopy(lock)
+                drifted["nap_lists"][authority] = "0" * 40
+                with self.assertRaisesRegex(
+                    verify_baseline.BaselineError,
+                    "upgrade report authority mismatch",
+                ):
+                    verify_baseline.verify_upgrade_report(drifted)
 
     def test_upgrade_report_rejects_accepted_decision_drift(self) -> None:
         lock = verify_baseline.load_lock()

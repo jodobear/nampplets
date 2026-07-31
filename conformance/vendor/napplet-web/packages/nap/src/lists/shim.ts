@@ -26,6 +26,8 @@ import type {
 
 /** Default timeout for lists request-responses (30s; aligns with other NAPs). */
 const REQUEST_TIMEOUT_MS = 30_000;
+/** Global bound across supported/add/remove requests awaiting shell results. */
+export const LISTS_PENDING_REQUEST_LIMIT = 64;
 
 interface Pending<T> {
   resolve: (result: T) => void;
@@ -124,6 +126,12 @@ function request<T>(
   pending: Map<string, Pending<T>>,
   payload: Omit<ListsSupportedMessage | ListsAddMessage | ListsRemoveMessage, 'type' | 'id'>,
 ): Promise<T> {
+  const retained = pendingSupported.size + pendingAdd.size + pendingRemove.size;
+  if (retained >= LISTS_PENDING_REQUEST_LIMIT) {
+    return Promise.reject(
+      new Error(`lists request capacity reached (${LISTS_PENDING_REQUEST_LIMIT} pending)`),
+    );
+  }
   const id = crypto.randomUUID();
   return new Promise<T>((resolve, reject) => {
     const timeout = setTimeout(() => {

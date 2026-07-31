@@ -41,6 +41,8 @@ describe('reference shell retained deliveries', () => {
       result: {
         ok: false,
         handled: false,
+        archetype: 'profile',
+        action: 'open',
         error: 'no reference handler for convention',
       },
     }]);
@@ -62,6 +64,8 @@ describe('reference shell retained deliveries', () => {
       result: {
         ok: false,
         handled: false,
+        archetype: 'note',
+        action: 'open',
         error: 'reference delivery queue saturated',
       },
     }]);

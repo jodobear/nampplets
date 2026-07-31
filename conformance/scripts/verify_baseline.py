@@ -278,6 +278,9 @@ def verify_upgrade_report(lock: dict[str, Any]) -> dict[str, int]:
         "nip_5d": lock["nip_5d"]["commit"],
         "nap_registry": lock["nap_registry"]["commit"],
         "napplet_web": lock["napplet_packages"]["commit"],
+        "nap_lists_semantic": lock["nap_lists"]["semantic_commit"],
+        "nap_lists_package_merge": lock["nap_lists"]["package_merge_commit"],
+        "nip_51": lock["nap_lists"]["nip_51_commit"],
         "kehto": lock["kehto"]["commit"],
     }
     if report["to"] != expected_authorities:
