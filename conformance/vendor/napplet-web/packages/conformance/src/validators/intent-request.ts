@@ -50,6 +50,14 @@ export function validateIntentInvokeRequest(
     optionalString(normalized, field, errors);
   }
 
+  if (typeof normalized.action === 'string' && !INTENT_SLUG.test(normalized.action)) {
+    errors.push({
+      code: 'invalid-intent-request',
+      message: 'Intent request field "action" must be a lowercase role slug',
+      field: 'request.action',
+    });
+  }
+
   if ('sender' in normalized) {
     errors.push({
       code: 'forbidden-field',
