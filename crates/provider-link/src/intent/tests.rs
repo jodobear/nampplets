@@ -216,6 +216,32 @@ fn default_handler_receives_exact_validated_dispatch_and_result_is_pushed() {
 }
 
 #[test]
+fn omitted_legacy_identity_fields_are_defaulted_before_native_dispatch() {
+    let rig = Rig::new(Arc::new(CancelIntentChoice));
+    let handler = principal("note-viewer", 'c');
+    rig.provider
+        .register_handler(handler.clone(), vec![note_declaration()])
+        .unwrap();
+    rig.provider.set_default("note", Some(handler)).unwrap();
+    let _ = rig.observer.drain(16).unwrap();
+
+    assert_eq!(
+        rig.dispatch(json!({
+            "type":"intent.invoke",
+            "id":"invoke-defaults-1",
+            "request":{"archetype":"note"}
+        }))
+        .unwrap(),
+        None
+    );
+
+    let requests = rig.dispatcher.requests.lock();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].action.as_ref(), "open");
+    assert_eq!(requests[0].convention.as_deref(), Some("napplet:note/open"));
+}
+
+#[test]
 fn protocol_field_is_accepted_as_a_convention_alias() {
     // Real published napplets are built against the `@napplet/nap` SDK,
     // whose `intent.open(archetype, payload, { protocol })` sugar sends

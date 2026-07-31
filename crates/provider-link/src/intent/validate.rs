@@ -61,15 +61,15 @@ pub(super) fn validate_invocation(
             "`convention` and its `protocol` alias must agree",
         ));
     }
-    let convention = named_convention.or(protocol_alias);
-    if let Some(convention) = convention.as_deref() {
-        let expected = format!("napplet:{archetype}/{action}");
-        if convention != expected {
-            return Err(invalid(
-                request,
-                "intent convention must exactly match its archetype and action",
-            ));
-        }
+    let expected_convention = format!("napplet:{archetype}/{action}");
+    let convention = named_convention
+        .or(protocol_alias)
+        .unwrap_or_else(|| Arc::from(expected_convention.as_str()));
+    if convention.as_ref() != expected_convention.as_str() {
+        return Err(invalid(
+            request,
+            "intent convention must exactly match its archetype and action",
+        ));
     }
     let handler_request = match object.get("handler").and_then(Value::as_str) {
         None | Some("default") => IntentHandlerRequest::Default,
@@ -95,7 +95,7 @@ pub(super) fn validate_invocation(
     Ok(ValidatedInvocation {
         archetype,
         action,
-        convention,
+        convention: Some(convention),
         payload,
         handler_request,
         behavior,
