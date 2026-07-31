@@ -105,7 +105,7 @@ fn private_items_are_typed_unsupported_before_any_read() {
 }
 
 #[test]
-fn create_option_is_accepted_and_false_refuses_a_missing_list() {
+fn only_add_with_explicit_create_true_may_create_a_missing_list() {
     let (provider, source) = provider_with(Vec::new());
     source.set_exists(false);
     let (_registry, _observer) = opened_session(provider.clone());
@@ -121,16 +121,22 @@ fn create_option_is_accepted_and_false_refuses_a_missing_list() {
     );
     assert!(created.take_write_proposal().is_some());
 
-    let answer = response(
-        &provider,
-        "add",
-        json!({
+    for (action, options) in [
+        ("add", None),
+        ("add", Some(json!({"create": false}))),
+        ("remove", Some(json!({"create": true}))),
+    ] {
+        let mut payload = json!({
             "list": follows(),
             "items": [p(&pubkey("c"))],
-            "options": {"create": false},
-        }),
-    );
-    assert_eq!(answer["error"], "list-not-found");
+        });
+        if let Some(options) = options {
+            payload["options"] = options;
+        }
+        let answer = response(&provider, action, payload);
+        assert_eq!(answer["ok"], false);
+        assert_eq!(answer["error"], "list-not-found");
+    }
 }
 
 #[test]

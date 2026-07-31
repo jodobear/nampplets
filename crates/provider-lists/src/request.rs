@@ -53,8 +53,10 @@ pub enum ListRefusal {
     MalformedOptions,
     #[error("list title, description, and image options are not supported by this runtime")]
     MetadataOptionsUnsupported,
-    #[error("the requested list does not exist and create is false")]
+    #[error("the requested list does not exist and create was not explicitly true")]
     ListNotFound,
+    #[error("the requested list is unavailable: {0}")]
+    ListUnavailable(Arc<str>),
     #[error("private list items cannot be safely removed without decrypting the list")]
     DecryptFailed,
     #[error("no account is connected, so there is no list to change")]
@@ -80,6 +82,7 @@ impl ListRefusal {
             | Self::ListFull(_) => "invalid-item",
             Self::MalformedOptions | Self::MetadataOptionsUnsupported => "unsupported",
             Self::ListNotFound => "list-not-found",
+            Self::ListUnavailable(_) => "list-unavailable",
             Self::DecryptFailed => "decrypt-failed",
             Self::NoAccount => "not-signed-in",
         }

@@ -36,6 +36,7 @@ use nmp_native_provider_lists::*;
 #[derive(Debug)]
 pub struct FakeSource {
     account: Mutex<Option<AccountRef>>,
+    account_error: Mutex<Option<ListsDataError>>,
     snapshot: Mutex<ListSnapshot>,
     reads: AtomicUsize,
     drafts: Mutex<Vec<Vec<ListEntry>>>,
@@ -48,6 +49,7 @@ impl FakeSource {
     pub fn new(entries: Vec<ListEntry>) -> Arc<Self> {
         Arc::new(Self {
             account: Mutex::new(Some(AccountRef(Arc::from("a".repeat(64))))),
+            account_error: Mutex::new(None),
             snapshot: Mutex::new(ListSnapshot {
                 exists: true,
                 entries,
@@ -81,6 +83,10 @@ impl FakeSource {
         *self.account.lock() = None;
     }
 
+    pub fn fail_account_freeze(&self, error: ListsDataError) {
+        *self.account_error.lock() = Some(error);
+    }
+
     pub fn fail_reads(&self, error: ListsDataError) {
         *self.read_error.lock() = Some(error);
     }
@@ -109,6 +115,9 @@ fn retained() -> BoundedJson {
 
 impl ListsDataPlane for FakeSource {
     fn freeze_account(&self) -> Result<Option<AccountRef>, ListsDataError> {
+        if let Some(error) = self.account_error.lock().clone() {
+            return Err(error);
+        }
         Ok(self.account.lock().clone())
     }
 
@@ -268,8 +277,16 @@ pub fn entry(seed: &str) -> ListEntry {
 
 /// One NMP receipt frame in the given delivery state.
 pub fn receipt(state: &str) -> ReceiptSnapshot {
+    let mut value = json!({"state": state});
+    if matches!(state, "delivered" | "partial_delivery") {
+        value["eventId"] = Value::String("e".repeat(64));
+    }
+    receipt_value(value)
+}
+
+pub fn receipt_value(value: Value) -> ReceiptSnapshot {
     ReceiptSnapshot {
         receipt_id: WriteReceiptId(Arc::from("receipt-1")),
-        state: BoundedJson::from_value(&json!({"state": state}), 1024).unwrap(),
+        state: BoundedJson::from_value(&value, 1024).unwrap(),
     }
 }

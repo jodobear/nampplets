@@ -79,7 +79,7 @@ impl ProviderWriteCompletion for ListsWriteCompletion {
     fn refused(self: Box<Self>, reason: Arc<str>) {
         (*self)
             .into_sink()
-            .deliver(false, Some("user-denied"), Some(reason.to_string()));
+            .deliver(false, None, Some("user-denied"), Some(reason.to_string()));
     }
 }
 
@@ -107,7 +107,13 @@ impl fmt::Debug for ListsReceiptSink {
 impl ListsReceiptSink {
     /// Emits exactly one result for this mutation, whatever path gets here
     /// first.
-    fn deliver(&self, ok: bool, error: Option<&str>, reason: Option<String>) {
+    fn deliver(
+        &self,
+        ok: bool,
+        event_id: Option<&str>,
+        error: Option<&str>,
+        reason: Option<String>,
+    ) {
         if self.delivered.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -123,6 +129,9 @@ impl ListsReceiptSink {
             "skipped".to_owned(),
             Value::from(if ok { self.skipped } else { 0 }),
         );
+        if let Some(event_id) = event_id {
+            envelope.insert("eventId".to_owned(), Value::from(event_id));
+        }
         if let Some(error) = error {
             envelope.insert("error".to_owned(), Value::from(error));
         }
@@ -160,6 +169,19 @@ impl ReceiptEventSink for ListsReceiptSink {
             // the napplet is told nothing before then.
             _ => return Ok(()),
         };
+        let event_id = value
+            .get("eventId")
+            .and_then(Value::as_str)
+            .filter(|value| valid_event_id(value));
+        if ok && event_id.is_none() {
+            self.deliver(
+                false,
+                None,
+                Some("publish-failed"),
+                Some("NMP delivered the list change without a valid eventId".to_owned()),
+            );
+            return Ok(());
+        }
         let reason = (!ok).then(|| {
             value
                 .get("failure")
@@ -167,7 +189,7 @@ impl ReceiptEventSink for ListsReceiptSink {
                 .unwrap_or("NMP did not durably write the list change")
                 .to_owned()
         });
-        self.deliver(ok, (!ok).then_some("publish-failed"), reason);
+        self.deliver(ok, event_id, (!ok).then_some("publish-failed"), reason);
         Ok(())
     }
 
@@ -175,6 +197,13 @@ impl ReceiptEventSink for ListsReceiptSink {
         let reason = reason
             .map(|reason| reason.to_string())
             .unwrap_or_else(|| "the list change was not accepted".to_owned());
-        self.deliver(false, Some("publish-failed"), Some(reason));
+        self.deliver(false, None, Some("publish-failed"), Some(reason));
     }
+}
+
+fn valid_event_id(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }

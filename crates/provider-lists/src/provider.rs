@@ -13,8 +13,8 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::{
-    DOMAIN, ListMutation, ListReadLimits, ListSelector, ListSnapshot, ListsDataError,
-    ListsDataPlane, ListsProviderLimits, PINNED_NAP_PROTOCOL,
+    DOMAIN, ListMutation, ListReadLimits, ListSelector, ListSnapshot, ListsDataPlane,
+    ListsProviderLimits, PINNED_NAP_PROTOCOL,
     request::{ListRefusal, parse_items, parse_options, parse_selector},
     validate::{apply_add, apply_remove, selector_value, validate_limits},
     wire::{
@@ -141,7 +141,9 @@ impl ListsProvider {
         let account = match self.source.freeze_account() {
             Ok(Some(account)) => account,
             Ok(None) => return refuse(&ListRefusal::NoAccount),
-            Err(error) => return Err(failed(&request.action, error.to_string())),
+            Err(error) => {
+                return refuse(&ListRefusal::ListUnavailable(Arc::from(error.to_string())));
+            }
         };
         if request.work.cancellation().is_cancelled() {
             return Err(failed(&request.action, "the request was cancelled"));
@@ -156,9 +158,11 @@ impl ListsProvider {
             },
         ) {
             Ok(snapshot) => snapshot,
-            Err(error) => return Err(failed(&request.action, error.to_string())),
+            Err(error) => {
+                return refuse(&ListRefusal::ListUnavailable(Arc::from(error.to_string())));
+            }
         };
-        if !snapshot.exists && options.create == Some(false) {
+        if !(snapshot.exists || action == ListsAction::Add && options.create == Some(true)) {
             return refuse(&ListRefusal::ListNotFound);
         }
         if action == ListsAction::Remove && items.remove_private_matches {
@@ -201,21 +205,26 @@ impl ListsProvider {
         mutation: ListMutation,
         outbound: ProviderPushSender,
     ) -> Result<ProviderCall, ProviderError> {
-        let draft = self
-            .source
-            .draft_replacement(
-                &account,
-                &selector,
-                &snapshot,
-                &mutation.entries,
-                self.limits.maximum_draft_bytes,
-            )
-            .map_err(|error| match error {
-                ListsDataError::DraftTooLarge => {
-                    failed(&request.action, ListsDataError::DraftTooLarge.to_string())
-                }
-                error => failed(&request.action, error.to_string()),
-            })?;
+        let draft = match self.source.draft_replacement(
+            &account,
+            &selector,
+            &snapshot,
+            &mutation.entries,
+            self.limits.maximum_draft_bytes,
+        ) {
+            Ok(draft) => draft,
+            Err(error) => {
+                return completed(
+                    &refusal_result(
+                        action,
+                        &id,
+                        &ListRefusal::ListUnavailable(Arc::from(error.to_string())),
+                    ),
+                    self.limits,
+                    &request.action,
+                );
+            }
+        };
         let write = ApprovedWrite {
             approval_id: approval_id(action, &selector, &id),
             origin_principal: request.principal.clone(),
