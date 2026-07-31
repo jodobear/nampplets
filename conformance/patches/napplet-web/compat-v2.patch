@@ -370,10 +370,10 @@ index 0000000000000000000000000000000000000000..b23cea50ce5a1b3f6fa5fe17fe166618
 +}
 diff --git a/packages/conformance/src/shell/reference-intent.test.ts b/packages/conformance/src/shell/reference-intent.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..5b8f49d0d8d3527d0d45c5aa89b4d90941344b87
+index 0000000000000000000000000000000000000000..ed184dbe600f24c43b0cce664d9c6650b78f15c0
 --- /dev/null
 +++ b/packages/conformance/src/shell/reference-intent.test.ts
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,149 @@
 +import { describe, expect, it } from 'vitest';
 +
 +import { createReferenceShell } from './reference-shell.js';
@@ -416,6 +416,63 @@ index 0000000000000000000000000000000000000000..5b8f49d0d8d3527d0d45c5aa89b4d909
 +        payload: { event: 'abc123' },
 +      },
 +    }]);
++  });
++
++  it('routes the legacy protocol alias as the same explicit convention identity', () => {
++    const shell = createReferenceShell();
++
++    expect(shell.handleFrom(authenticatedSource, {
++      type: 'intent.invoke',
++      id: 'intent-protocol-alias',
++      request: {
++        archetype: 'note',
++        action: 'open',
++        protocol: 'napplet:article/read',
++      },
++    })).toEqual([{
++      type: 'intent.invoke.result',
++      id: 'intent-protocol-alias',
++      result: {
++        ok: true,
++        handled: true,
++        archetype: 'note',
++        action: 'open',
++        convention: 'napplet:article/read',
++        handler: 'reference-handler',
++      },
++    }]);
++    expect(shell.takeDeliveries('reference-handler')).toEqual([{
++      type: 'intent.deliver',
++      delivery: {
++        sender: 'authenticated-source',
++        archetype: 'note',
++        action: 'open',
++        convention: 'napplet:article/read',
++      },
++    }]);
++  });
++
++  it('rejects conflicting convention aliases before queuing any delivery', () => {
++    const shell = createReferenceShell();
++
++    expect(shell.handleFrom(authenticatedSource, {
++      type: 'intent.invoke',
++      id: 'intent-conflicting-aliases',
++      request: {
++        archetype: 'note',
++        action: 'open',
++        convention: 'napplet:note/open',
++        protocol: 'napplet:article/read',
++      },
++    })).toEqual([]);
++    expect(shell.records.at(-1)?.verdict).toMatchObject({
++      ok: false,
++      errors: [expect.objectContaining({
++        code: 'invalid-intent-request',
++        field: 'request.protocol',
++      })],
++    });
++    expect(shell.takeDeliveries('reference-handler')).toEqual([]);
 +  });
 +
 +  it('refuses an unavailable explicit handler without accepting or queuing delivery', () => {
@@ -468,10 +525,10 @@ index 0000000000000000000000000000000000000000..5b8f49d0d8d3527d0d45c5aa89b4d909
 +});
 diff --git a/packages/conformance/src/shell/reference-intent.ts b/packages/conformance/src/shell/reference-intent.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..51a25024596eda50bee425e64a968cff48406173
+index 0000000000000000000000000000000000000000..f5117d9fc35c4e43ad51f3c247a7ac5057c393b5
 --- /dev/null
 +++ b/packages/conformance/src/shell/reference-intent.ts
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,145 @@
 +import type { ReferenceDeliveryQueue } from './reference-delivery.js';
 +
 +const REFERENCE_HANDLER = 'reference-handler';
@@ -548,7 +605,16 @@ index 0000000000000000000000000000000000000000..51a25024596eda50bee425e64a968cff
 +    return unavailableIntent(env.id, archetype, action, 'requested intent handler is unavailable');
 +  }
 +
-+  const convention = normalized.convention ?? REFERENCE_CONVENTION;
++  const namedConvention = normalized.convention;
++  const protocolAlias = normalized.protocol;
++  if (
++    typeof namedConvention === 'string'
++    && typeof protocolAlias === 'string'
++    && namedConvention !== protocolAlias
++  ) {
++    return unavailableIntent(env.id, archetype, action, 'intent convention aliases conflict');
++  }
++  const convention = namedConvention ?? protocolAlias ?? REFERENCE_CONVENTION;
 +  if (typeof convention !== 'string') {
 +    return unavailableIntent(env.id, archetype, action, 'intent convention must be a string');
 +  }
@@ -1459,10 +1525,10 @@ index 570d2106005014fb9d20cc02571a7a4770ce14a2..339520b3c367c8914e4c0319fb32dd17
   *
 diff --git a/packages/conformance/src/validators/intent-request.test.ts b/packages/conformance/src/validators/intent-request.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..6d1aba3ad2c525b15bd274b17d479f09223685b7
+index 0000000000000000000000000000000000000000..4c64fa62bbb4e2aff61d03b47989572bb53ff21f
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.test.ts
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,106 @@
 +import { describe, expect, it } from 'vitest';
 +
 +import { validateEnvelope } from './envelope.js';
@@ -1499,6 +1565,19 @@ index 0000000000000000000000000000000000000000..6d1aba3ad2c525b15bd274b17d479f09
 +    })).ok).toBe(true);
 +  });
 +
++  it('accepts an agreeing legacy protocol alias without changing explicit routing identity', () => {
++    expect(validateEnvelope(intentInvoke({
++      archetype: 'note',
++      action: 'open',
++      protocol: 'napplet:article/read',
++    })).ok).toBe(true);
++    expect(validateEnvelope(intentInvoke({
++      archetype: 'note',
++      convention: 'napplet:article/read',
++      protocol: 'napplet:article/read',
++    })).ok).toBe(true);
++  });
++
 +  it('rejects missing, malformed, and caller-forged fields', () => {
 +    const malformedRequest = validateEnvelope(intentInvoke([]));
 +    expect(malformedRequest.errors).toContainEqual(expect.objectContaining({
@@ -1511,6 +1590,7 @@ index 0000000000000000000000000000000000000000..6d1aba3ad2c525b15bd274b17d479f09
 +      [{ archetype: 1 }, 'request.archetype'],
 +      [{ archetype: 'note', action: 1 }, 'request.action'],
 +      [{ archetype: 'note', convention: false }, 'request.convention'],
++      [{ archetype: 'note', protocol: false }, 'request.protocol'],
 +      [{ archetype: 'note', handler: false }, 'request.handler'],
 +      [{ archetype: 'note', sender: 'forged-source' }, 'request.sender'],
 +    ] as const) {
@@ -1532,21 +1612,42 @@ index 0000000000000000000000000000000000000000..6d1aba3ad2c525b15bd274b17d479f09
 +          field: 'request.convention',
 +        }));
 +    }
++    expect(validateEnvelope(intentInvoke({
++      archetype: 'note',
++      protocol: 'napplet:note/open?draft=true',
++    })).errors).toContainEqual(expect.objectContaining({
++      code: 'invalid-intent-request',
++      field: 'request.protocol',
++    }));
++  });
++
++  it('rejects conflicting convention and legacy protocol aliases', () => {
++    expect(validateEnvelope(intentInvoke({
++      archetype: 'note',
++      convention: 'napplet:note/open',
++      protocol: 'napplet:article/read',
++    }))).toMatchObject({
++      ok: false,
++      errors: [expect.objectContaining({
++        code: 'invalid-intent-request',
++        field: 'request.protocol',
++      })],
++    });
 +  });
 +});
 diff --git a/packages/conformance/src/validators/intent-request.ts b/packages/conformance/src/validators/intent-request.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..37129b57518fddb06f60f254e570ad26e50e94f2
+index 0000000000000000000000000000000000000000..7de78d6349e23ccc23be294de1a585f32623d032
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.ts
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,76 @@
 +import type { EnvelopeError } from './envelope.js';
 +
 +const STABLE_CONVENTION = /^napplet:[^/?#\s]+\/[^/?#\s]+$/;
 +
 +function optionalString(
 +  request: Record<string, unknown>,
-+  field: 'action' | 'convention' | 'handler',
++  field: 'action' | 'convention' | 'protocol' | 'handler',
 +  errors: EnvelopeError[],
 +): void {
 +  const value = request[field];
@@ -1581,7 +1682,7 @@ index 0000000000000000000000000000000000000000..37129b57518fddb06f60f254e570ad26
 +    });
 +  }
 +
-+  for (const field of ['action', 'convention', 'handler'] as const) {
++  for (const field of ['action', 'convention', 'protocol', 'handler'] as const) {
 +    optionalString(normalized, field, errors);
 +  }
 +
@@ -1593,14 +1694,26 @@ index 0000000000000000000000000000000000000000..37129b57518fddb06f60f254e570ad26
 +    });
 +  }
 +
++  for (const field of ['convention', 'protocol'] as const) {
++    const convention = normalized[field];
++    if (typeof convention === 'string' && !STABLE_CONVENTION.test(convention)) {
++      errors.push({
++        code: 'invalid-intent-request',
++        message: 'Intent convention must be a stable queryless napplet convention',
++        field: `request.${field}`,
++      });
++    }
++  }
++
 +  if (
 +    typeof normalized.convention === 'string'
-+    && !STABLE_CONVENTION.test(normalized.convention)
++    && typeof normalized.protocol === 'string'
++    && normalized.convention !== normalized.protocol
 +  ) {
 +    errors.push({
 +      code: 'invalid-intent-request',
-+      message: 'Intent convention must be a stable queryless napplet convention',
-+      field: 'request.convention',
++      message: 'Intent convention and its legacy protocol alias must agree',
++      field: 'request.protocol',
 +    });
 +  }
 +}

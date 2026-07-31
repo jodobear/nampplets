@@ -11,7 +11,7 @@
   "local_patches": {
     "napplet_web": {
       "path": "conformance/patches/napplet-web/compat-v2.patch",
-      "sha256": "a962a7f9146a94a7f5bc40df8f0dbd53064cc4419daa0a1a72bc6ac74458ffb2"
+      "sha256": "213660575b0f5f848bd9d247de05226c1d3179a26121d555c41c3630a5117089"
     }
   },
   "from": {
