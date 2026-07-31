@@ -18,8 +18,8 @@ use crate::{
     request::{ListRefusal, parse_items, parse_options, parse_selector},
     validate::{apply_add, apply_remove, selector_value, validate_limits},
     wire::{
-        completed, correlation_id, denied, exact_payload, failed, mutation_payload,
-        mutation_result, refusal_result, supported_result,
+        completed, completed_refusal, correlation_id, denied, exact_payload, failed,
+        mutation_payload, mutation_result, supported_result,
     },
     write::{ListsAction, ListsWriteCompletion},
 };
@@ -122,11 +122,7 @@ impl ListsProvider {
         let payload = mutation_payload(&request)?;
 
         let refuse = |refusal: &ListRefusal| {
-            completed(
-                &refusal_result(action, &id, refusal),
-                self.limits,
-                &request.action,
-            )
+            completed_refusal(action, &id, refusal, self.limits, &request.action)
         };
 
         let (supported, selector) = match parse_selector(payload.get("list"), self.limits) {
@@ -217,12 +213,10 @@ impl ListsProvider {
         ) {
             Ok(draft) => draft,
             Err(error) => {
-                return completed(
-                    &refusal_result(
-                        action,
-                        &id,
-                        &ListRefusal::ListUnavailable(Arc::from(error.to_string())),
-                    ),
+                return completed_refusal(
+                    action,
+                    &id,
+                    &ListRefusal::ListUnavailable(Arc::from(error.to_string())),
                     self.limits,
                     &request.action,
                 );

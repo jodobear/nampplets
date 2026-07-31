@@ -113,6 +113,27 @@ pub(crate) fn completed(
     )?)))
 }
 
+pub(crate) fn completed_refusal(
+    action: ListsAction,
+    id: &str,
+    refusal: &ListRefusal,
+    limits: ListsProviderLimits,
+    request_action: &str,
+) -> Result<ProviderCall, ProviderError> {
+    completed(
+        &refusal_result(action, id, refusal, true),
+        limits,
+        request_action,
+    )
+    .or_else(|_| {
+        completed(
+            &refusal_result(action, id, refusal, false),
+            limits,
+            request_action,
+        )
+    })
+}
+
 /// The whole answer to `lists.supported`, projected from the pinned catalog.
 fn list_supports() -> Vec<Value> {
     SUPPORTED_LISTS
@@ -154,16 +175,33 @@ pub(crate) fn mutation_result(
 
 /// A refused mutation. The counts stay present and zero so a napplet reading
 /// them unconditionally cannot mistake a refusal for a partial success.
-pub(crate) fn refusal_result(action: ListsAction, id: &str, refusal: &ListRefusal) -> Value {
+fn refusal_result(
+    action: ListsAction,
+    id: &str,
+    refusal: &ListRefusal,
+    include_reason: bool,
+) -> Value {
     let mut envelope = mutation_envelope(action, id, false, 0, 0, Some(refusal.code().to_owned()));
     let object = envelope
         .as_object_mut()
         .expect("mutation envelope is an object");
-    object.insert("reason".to_owned(), Value::from(refusal.to_string()));
+    if include_reason {
+        object.insert("reason".to_owned(), Value::from(refusal.to_string()));
+    }
     if refusal.include_supported() {
         object.insert("supported".to_owned(), Value::from(list_supports()));
     }
     envelope
+}
+
+pub(crate) fn minimum_catalog_response_bytes(maximum_correlation_id_bytes: usize) -> Option<usize> {
+    let escaped_id_bytes = maximum_correlation_id_bytes.checked_mul(6)?;
+    let mut largest = serde_json::to_vec(&supported_result("")).ok()?.len();
+    for action in [ListsAction::Add, ListsAction::Remove] {
+        let response = refusal_result(action, "", &ListRefusal::UnsupportedKind(u16::MAX), true);
+        largest = largest.max(serde_json::to_vec(&response).ok()?.len());
+    }
+    largest.checked_add(escaped_id_bytes)
 }
 
 fn mutation_envelope(

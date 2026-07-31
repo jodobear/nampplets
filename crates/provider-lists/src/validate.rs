@@ -4,7 +4,8 @@ use serde_json::{Map, Value};
 
 use crate::{
     ListEntry, ListItemTag, ListMutation, ListSelector, ListsProviderLimits, SupportedList,
-    request::ListRefusal, write_terminal::minimum_terminal_response_bytes,
+    request::ListRefusal, wire::minimum_catalog_response_bytes,
+    write_terminal::minimum_terminal_response_bytes,
 };
 
 pub(crate) fn validate_value(
@@ -143,7 +144,9 @@ pub(crate) fn validate_limits(limits: ListsProviderLimits) -> bool {
         limits.maximum_request_items,
     )
     .is_some_and(|minimum| limits.maximum_response_bytes >= minimum);
-    finite && terminal_response_fits
+    let catalog_response_fits = minimum_catalog_response_bytes(limits.maximum_correlation_id_bytes)
+        .is_some_and(|minimum| limits.maximum_response_bytes >= minimum);
+    finite && terminal_response_fits && catalog_response_fits
 }
 
 pub(crate) fn selector_value(selector: &ListSelector) -> Map<String, Value> {

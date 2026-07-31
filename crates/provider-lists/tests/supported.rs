@@ -141,7 +141,7 @@ fn zero_limits_are_refused_at_construction() {
     assert_eq!(error, ListsProviderBuildError::InvalidLimits);
 }
 
-fn exact_terminal_limits() -> (String, usize, ListsProviderLimits) {
+fn terminal_fallback_limits() -> (String, usize, ListsProviderLimits) {
     let maximum_id_bytes = 32;
     let id = "\u{0001}".repeat(maximum_id_bytes);
     let success = json!({
@@ -165,7 +165,6 @@ fn exact_terminal_limits() -> (String, usize, ListsProviderLimits) {
         .max()
         .unwrap();
     let limits = ListsProviderLimits {
-        maximum_response_bytes: minimum,
         maximum_correlation_id_bytes: maximum_id_bytes,
         maximum_request_items: 1,
         ..ListsProviderLimits::default()
@@ -174,40 +173,8 @@ fn exact_terminal_limits() -> (String, usize, ListsProviderLimits) {
 }
 
 #[test]
-fn exact_terminal_bound_preserves_a_delivered_mutation_without_event_id() {
-    let (id, minimum, limits) = exact_terminal_limits();
-    let source: Arc<dyn ListsDataPlane> = FakeSource::new(vec![entry("b")]);
-    let provider = ListsProvider::new(source, limits).unwrap();
-    let (_registry, observer) = opened_session(provider.clone());
-    let mut request = request(
-        "remove",
-        json!({"list": follows(), "items": [p(&pubkey("b"))]}),
-    );
-    request.correlation_id = Some(Arc::from(id.as_str()));
-    let mut result = provider.call(request).unwrap();
-    let (_write, completion, _work) = result.take_write_proposal().unwrap().into_parts();
-    completion
-        .into_receipt_sink()
-        .push_latest(receipt("delivered"))
-        .unwrap();
-    let pushed = drain(&observer);
-    assert_eq!(pushed.len(), 1);
-    assert_eq!(
-        pushed[0],
-        json!({
-            "type": "lists.remove.result",
-            "id": id,
-            "ok": true,
-            "removed": 1,
-            "skipped": 0,
-        })
-    );
-    assert!(serde_json::to_vec(&pushed[0]).unwrap().len() <= minimum);
-}
-
-#[test]
-fn exact_terminal_bound_preserves_a_system_refusal_and_refuses_one_less() {
-    let (id, minimum, limits) = exact_terminal_limits();
+fn oversized_system_refusal_preserves_the_exact_terminal_semantics() {
+    let (id, minimum, limits) = terminal_fallback_limits();
     let source: Arc<dyn ListsDataPlane> = FakeSource::new(vec![entry("b")]);
     let provider = ListsProvider::new(source, limits).unwrap();
     let (_registry, _observer) = opened_session(provider.clone());
@@ -220,7 +187,9 @@ fn exact_terminal_bound_preserves_a_system_refusal_and_refuses_one_less() {
     let response = result
         .take_write_proposal()
         .unwrap()
-        .refuse_system(Arc::from("upstream failure ".repeat(minimum)))
+        .refuse_system(Arc::from(
+            "upstream failure ".repeat(limits.maximum_response_bytes),
+        ))
         .expect("admitted terminal bound always carries the typed refusal");
     assert_eq!(response.byte_len(), minimum);
     assert_eq!(
@@ -233,19 +202,6 @@ fn exact_terminal_bound_preserves_a_system_refusal_and_refuses_one_less() {
             "skipped": 0,
             "error": "list-unavailable",
         })
-    );
-
-    let source: Arc<dyn ListsDataPlane> = FakeSource::new(Vec::new());
-    assert_eq!(
-        ListsProvider::new(
-            source,
-            ListsProviderLimits {
-                maximum_response_bytes: minimum - 1,
-                ..limits
-            }
-        )
-        .unwrap_err(),
-        ListsProviderBuildError::InvalidLimits
     );
 }
 
