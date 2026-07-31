@@ -194,6 +194,20 @@ class BaselineTests(unittest.TestCase):
             ):
                 verify_baseline.verify_upgrade_report(lock)
 
+    def test_upgrade_report_rejects_local_patch_drift(self) -> None:
+        lock = verify_baseline.load_lock()
+        report = verify_baseline.load_json(
+            "conformance/reports/compatibility-v2.json"
+        )
+        report["local_patches"]["napplet_web"]["sha256"] = "0" * 64
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=report):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "upgrade report local patch mismatch",
+            ):
+                verify_baseline.verify_upgrade_report(lock)
+
     def test_m0_advertises_no_domains(self) -> None:
         lock = verify_baseline.load_lock()
         for platform in ("macos", "ios", "android"):

@@ -47,6 +47,15 @@ def verify_lock(lock: dict[str, Any]) -> None:
     if any(not re.fullmatch(r"[0-9a-f]{40}", commit) for commit in required_commits):
         raise BaselineError("every upstream commit must be exact 40-hex")
 
+    patch = lock["napplet_packages"]["local_patch"]
+    if patch != "conformance/patches/napplet-web/compat-v2.patch":
+        raise BaselineError("napplet/web compatibility patch path drifted")
+    expected_patch_sha256 = lock["napplet_packages"]["local_patch_sha256"]
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_patch_sha256):
+        raise BaselineError("napplet/web compatibility patch digest is invalid")
+    if sha256_file(ROOT / patch) != expected_patch_sha256:
+        raise BaselineError("napplet/web compatibility patch digest mismatch")
+
     source_snapshots = {
         "conformance/vendor/nap-lists/naps/NAP-LISTS.md": lock["nap_lists"][
             "document_sha256"

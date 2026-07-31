@@ -5,7 +5,14 @@
   "status": "unratified",
   "source_repositories": {
     "kehto": "jodobear/kehto-web",
-    "kehto_upstream": "kehto/web"
+    "kehto_upstream": "kehto/web",
+    "napplet_web": "napplet/web"
+  },
+  "local_patches": {
+    "napplet_web": {
+      "path": "conformance/patches/napplet-web/compat-v2.patch",
+      "sha256": "3748d91858fb3828237d8fd3a11ac6f8d7c635706bb49eaed1639360d54360ee"
+    }
   },
   "from": {
     "nip_5d": "78efc118278e3ed42201eba9b60530b65835d7ed",

@@ -3,8 +3,9 @@
 This directory freezes M0 compatibility evidence. It does not claim that the
 runtime implementation already passes the scenarios.
 
-- `vendor/` contains byte-for-byte allowlisted source snapshots from the
-  commits in `../compatibility.lock`. It is evidence, not runtime source.
+- `vendor/` contains allowlisted source snapshots from the commits in
+  `../compatibility.lock`, plus the exact-digest reproducible patch layer named
+  there. It is evidence, not runtime source.
 - `envelopes/inventory.json` inventories every pinned conformance envelope and
   the registry-only NAP-SHELL handshake drift.
 - `napplet-corpus/` indexes reference, Kehto, and published artifact bytes.
@@ -21,10 +22,16 @@ catalog-resolver tests.
 
 Regenerate from exact clean upstream checkouts:
 
+The pinned `napplet/web` snapshot is transformed by the exact-digest local
+patch named in `compatibility.lock`. This keeps compatibility additions
+reproducible without presenting unpublished package changes as upstream source.
+
 ```sh
 python3 conformance/scripts/generate_baseline.py \
   --nip5d /path/to/dskvr-nips \
   --naps /path/to/napplet-naps \
+  --nap-lists /path/to/nap-lists \
+  --nip51 /path/to/nostr-nips \
   --napplet-web /path/to/napplet-web \
   --kehto /path/to/kehto-web
 python3 conformance/scripts/generate_digests.py

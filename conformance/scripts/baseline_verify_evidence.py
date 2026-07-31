@@ -38,8 +38,16 @@ def verify_upgrade_report(
     if report["source_repositories"] != {
         "kehto": lock["kehto"]["repository"],
         "kehto_upstream": lock["kehto"]["upstream_repository"],
+        "napplet_web": lock["napplet_packages"]["repository"],
     }:
         raise error("upgrade report source repository mismatch")
+    if report.get("local_patches") != {
+        "napplet_web": {
+            "path": lock["napplet_packages"]["local_patch"],
+            "sha256": lock["napplet_packages"]["local_patch_sha256"],
+        }
+    }:
+        raise error("upgrade report local patch mismatch")
     expected_decisions = {
         "accepted": [
             "runtime-attested-inc-sender",

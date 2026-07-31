@@ -16,9 +16,13 @@ Corrected and recaptured 2026-07-31. This is a candidate compatibility change fr
 | Kehto corpus | `kehto/web@bb3929b3523b75356fd65f658f9bd14c7ff697e4` | `jodobear/kehto-web@62241de0b4526ba4fdc8a7b3c766c2499d3ae24d` | fork branch `fix/napplet-conformance-no-modulepreload` disables module preload so production artifacts contain no forbidden fetch helper; upstream merge is not assumed |
 | NMP | `005dc2a5f12aa414961b313d05ebb021934e385c` | unchanged | no facade or ownership change |
 
-All source-tree IDs, npm tarball SHA-256 values, vendored authority snapshots,
-envelope inventory, and Kehto source-corpus hashes were regenerated from clean
-worktrees at those exact revisions.
+All source-tree IDs, npm tarball SHA-256 values, authority snapshots, envelope
+inventory, and Kehto source-corpus hashes were regenerated from clean worktrees
+at those exact revisions. Compatibility additions that are not yet in
+`napplet/web@60889f1c` are an explicit patch layer, not claimed upstream bytes:
+`conformance/patches/napplet-web/compat-v2.patch` is SHA-256-bound in
+`compatibility.lock`, applied during regeneration, and covered by the final
+conformance digest manifest.
 
 ## Newly accepted package behavior
 

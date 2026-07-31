@@ -15,6 +15,7 @@ import tomllib
 from pathlib import Path
 
 from baseline_generate_sources import (
+    apply_exact_patch,
     copy_exact,
     envelope_inventory,
     kehto_corpus,
@@ -60,6 +61,9 @@ def main() -> int:
     nip51_destination = vendor / "nip-51"
     web_destination = vendor / "napplet-web"
 
+    if web_destination.exists():
+        shutil.rmtree(web_destination)
+
     copy_exact(arguments.nip5d, "5D.md", nip_destination)
     for relative in (
         "README.md",
@@ -85,16 +89,27 @@ def main() -> int:
     for relative in (
         "packages/core/src/envelope.ts",
         "packages/core/src/types/lists.ts",
+        "packages/nap/src/lists/shim.test.ts",
         "packages/nap/src/lists/shim.ts",
         "packages/nap/src/lists/types.ts",
         "packages/shim/src/prelude.ts",
         "packages/conformance/src/validators/envelope.ts",
+        "packages/conformance/src/validators/envelope.test.ts",
         "packages/conformance/src/validators/manifest.ts",
         "packages/conformance/src/checks/catalog.ts",
+        "packages/conformance/src/shell/reference-shell.test.ts",
         "packages/conformance/src/shell/reference-shell.ts",
+        "packages/conformance/src/run/boot.test.ts",
         "packages/conformance/src/run/boot.ts",
     ):
         copy_exact(arguments.napplet_web, relative, web_destination)
+
+    apply_exact_patch(
+        ROOT,
+        web_destination,
+        ROOT / lock["napplet_packages"]["local_patch"],
+        lock["napplet_packages"]["local_patch_sha256"],
+    )
 
     inventory = envelope_inventory(
         arguments.napplet_web, lock["napplet_packages"]["commit"]

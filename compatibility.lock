@@ -29,6 +29,8 @@ shim = "0.27.0"
 sdk = "0.25.0"
 nap = "0.29.0"
 conformance = "0.14.0"
+local_patch = "conformance/patches/napplet-web/compat-v2.patch"
+local_patch_sha256 = "3748d91858fb3828237d8fd3a11ac6f8d7c635706bb49eaed1639360d54360ee"
 
 [napplet_packages.source_trees]
 core = "1f9904103ce7684a302efdb0491c3315a92fb04a"

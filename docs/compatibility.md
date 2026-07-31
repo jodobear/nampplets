@@ -15,7 +15,7 @@ must not be described as accepted until the three blank signoffs are real.
 | --- | --- |
 | NIP-5D | `nostr-protocol/nips#2303` head `eb45dfd7335b7f88cb53781984c553581d2b4c34` |
 | NAP registry | `napplet/naps@5ac0490461ca6fec2f0d2e45b4835cf9bc08de24` |
-| napplet packages | `napplet/web@60889f1c2476e063500c7ab6624af6abe0dbcbe5` |
+| napplet packages | `napplet/web@60889f1c2476e063500c7ab6624af6abe0dbcbe5` plus lock-bound local compatibility patch |
 | Kehto corpus | candidate `jodobear/kehto-web@62241de0b4526ba4fdc8a7b3c766c2499d3ae24d`, proposed to `kehto/web` |
 | NMP | `pablof7z/nmp@005dc2a5f12aa414961b313d05ebb021934e385c` |
 
@@ -24,6 +24,11 @@ Package versions are `@napplet/core` 0.29.0, `@napplet/shim` 0.27.0,
 `@napplet/conformance` 0.14.0. The lock records both npm tarball SHA-256 values
 and source-tree object IDs so published bytes and repository bytes are
 independently pinned.
+
+The local package changes are not represented as released or upstream bytes.
+`compatibility.lock` binds `conformance/patches/napplet-web/compat-v2.patch` by
+SHA-256, and baseline regeneration applies it to the clean exact commit before
+verifying the resulting vendored evidence.
 
 The clean remote NMP commit above remains the authority. Its Rust facade and
 UniFFI component snapshots are separately hashed in the lock; no NMP API or

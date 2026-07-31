@@ -47,6 +47,35 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def apply_exact_patch(
+    repository_root: Path,
+    destination_root: Path,
+    patch: Path,
+    expected_sha256: str,
+) -> None:
+    if not patch.is_file():
+        fail(f"missing compatibility patch: {patch}")
+    actual_sha256 = sha256_bytes(patch.read_bytes())
+    if actual_sha256 != expected_sha256:
+        fail(
+            "compatibility patch digest mismatch: "
+            f"expected {expected_sha256}, found {actual_sha256}"
+        )
+    destination = destination_root.relative_to(repository_root).as_posix()
+    command = [
+        "git",
+        "-C",
+        str(repository_root),
+        "apply",
+        "--directory",
+        destination,
+        str(patch),
+    ]
+    check = [*command[:4], "--check", *command[4:]]
+    subprocess.run(check, check=True)
+    subprocess.run(command, check=True)
+
+
 def canonical_digest(value: Any) -> str:
     encoded = json.dumps(
         value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
