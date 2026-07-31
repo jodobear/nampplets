@@ -123,7 +123,6 @@ impl RuntimeApp {
             self.refuse_store(state, Some(principal), None, error, now);
             return;
         }
-        self.bridge.revoke(&principal, &capability);
         let operations = state
             .operations
             .iter()
@@ -134,9 +133,10 @@ impl RuntimeApp {
             .collect::<Vec<_>>();
         for (id, _) in operations {
             if let Some(operation) = state.operations.remove(&id) {
-                operation.cancel(Arc::from("session ended"));
+                self.cancel_provider_operation(state, operation, Arc::from("permission revoked"));
             }
         }
+        self.bridge.revoke(&principal, &capability);
         self.record_activity(
             state,
             &principal,

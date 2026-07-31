@@ -76,14 +76,20 @@ impl ProviderWriteCompletion for ListsWriteCompletion {
         Arc::new((*self).into_sink())
     }
 
-    fn refused(self: Box<Self>, refusal: ProviderWriteRefusal) {
-        let (error, reason) = match refusal {
-            ProviderWriteRefusal::UserDenied(reason) => ("user-denied", reason),
-            ProviderWriteRefusal::SystemUnavailable(reason) => ("list-unavailable", reason),
-        };
-        (*self)
-            .into_sink()
-            .deliver(false, None, Some(error), Some(reason.to_string()));
+    fn refused(self: Box<Self>, refusal: ProviderWriteRefusal) -> Option<BoundedJson> {
+        let sink = (*self).into_sink();
+        match refusal {
+            ProviderWriteRefusal::UserDenied(reason) => {
+                sink.deliver(false, None, Some("user-denied"), Some(reason.to_string()));
+                None
+            }
+            ProviderWriteRefusal::SystemUnavailable(reason) => sink.message(
+                false,
+                None,
+                Some("list-unavailable"),
+                Some(reason.to_string()),
+            ),
+        }
     }
 }
 
@@ -121,6 +127,21 @@ impl ListsReceiptSink {
         if self.delivered.swap(true, Ordering::AcqRel) {
             return;
         }
+        let Some(message) = self.message(ok, event_id, error, reason) else {
+            return;
+        };
+        let _ = self
+            .outbound
+            .push_envelope(&message, Some(self.action.result_type()));
+    }
+
+    fn message(
+        &self,
+        ok: bool,
+        event_id: Option<&str>,
+        error: Option<&str>,
+        reason: Option<String>,
+    ) -> Option<BoundedJson> {
         let mut envelope = Map::new();
         envelope.insert("type".to_owned(), Value::from(self.action.result_type()));
         envelope.insert("id".to_owned(), Value::from(self.id.as_ref()));
@@ -142,14 +163,7 @@ impl ListsReceiptSink {
         if let Some(reason) = reason {
             envelope.insert("reason".to_owned(), Value::from(reason));
         }
-        let Ok(message) =
-            BoundedJson::from_value(&Value::Object(envelope), self.maximum_response_bytes)
-        else {
-            return;
-        };
-        let _ = self
-            .outbound
-            .push_envelope(&message, Some(self.action.result_type()));
+        BoundedJson::from_value(&Value::Object(envelope), self.maximum_response_bytes).ok()
     }
 }
 

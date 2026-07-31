@@ -16,6 +16,7 @@ mod push;
 mod revisions;
 mod session;
 mod terminal;
+mod write_refusal;
 
 pub use diagnostic::NappletDiagnosticLevel;
 mod workspace;
@@ -32,8 +33,8 @@ use nmp_native_nap_bridge::{
 };
 use nmp_native_providers::ShellProvider;
 use nmp_native_runtime_core::{
-    BindingRequest, Capability, GrantLedger, HostDataPlane, Principal, ResourceTracker, Session,
-    SessionId, SessionState, WorkLease, WriteReceiptId,
+    BindingRequest, BoundedJson, Capability, GrantLedger, HostDataPlane, Principal,
+    ResourceTracker, Session, SessionId, SessionState, WorkLease, WriteReceiptId,
 };
 use nmp_native_runtime_store::{
     InstalledBuild, PermissionDefaultPreference, RuntimeStore, WorkspaceRecord,
@@ -157,13 +158,14 @@ pub(crate) struct ActiveOperation {
 }
 
 impl ActiveOperation {
-    fn cancel(self, reason: Arc<str>) {
-        if let Some(proposal) = self.proposal {
-            proposal.refuse_system(reason);
-        }
+    fn cancel(self, reason: Arc<str>) -> Option<BoundedJson> {
+        let response = self
+            .proposal
+            .and_then(|proposal| proposal.refuse_system(reason));
         if let Some(handle) = self.handle {
             handle.cancel();
         }
+        response
     }
 
     fn complete(self) {

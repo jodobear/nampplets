@@ -62,7 +62,7 @@ impl RuntimeApp {
         state.terminal_reason = Some(reason.clone());
 
         for (_, operation) in std::mem::take(&mut state.operations) {
-            operation.cancel(Arc::from("runtime section revision exhausted"));
+            let _ = operation.cancel(Arc::from("runtime section revision exhausted"));
         }
         for (session_id, mut entry) in std::mem::take(&mut state.sessions) {
             self.shell_provider.close_session(session_id);

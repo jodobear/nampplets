@@ -102,10 +102,13 @@ fn a_refused_write_still_answers_the_napplet() {
         "add",
         json!({"list": follows(), "items": [p(&pubkey("b"))]}),
     );
-    result
-        .take_write_proposal()
-        .unwrap()
-        .refuse_user(Arc::from("the user declined"));
+    assert!(
+        result
+            .take_write_proposal()
+            .unwrap()
+            .refuse_user(Arc::from("the user declined"))
+            .is_none()
+    );
 
     let pushed = drain(&observer);
     assert_eq!(pushed.len(), 1);
@@ -124,16 +127,19 @@ fn a_system_refusal_is_not_reported_as_user_denial() {
         "add",
         json!({"list": follows(), "items": [p(&pubkey("b"))]}),
     );
-    result
+    let response = result
         .take_write_proposal()
         .unwrap()
-        .refuse_system(Arc::from("provider operation capacity is full"));
+        .refuse_system(Arc::from("provider operation capacity is full"))
+        .expect("system refusal must cross as host-owned terminal output")
+        .decode()
+        .unwrap();
 
     let pushed = drain(&observer);
-    assert_eq!(pushed.len(), 1);
-    assert_eq!(pushed[0]["ok"], false);
-    assert_eq!(pushed[0]["error"], "list-unavailable");
-    assert_eq!(pushed[0]["reason"], "provider operation capacity is full");
+    assert!(pushed.is_empty());
+    assert_eq!(response["ok"], false);
+    assert_eq!(response["error"], "list-unavailable");
+    assert_eq!(response["reason"], "provider operation capacity is full");
 }
 
 #[test]

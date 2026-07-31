@@ -287,6 +287,22 @@ pub fn open_app(
     )
 }
 
+pub fn open_app_with_provider(
+    store: Arc<RuntimeStore>,
+    host: Arc<FakeHostDataPlane>,
+    provider: Arc<dyn Provider>,
+) -> (Arc<RuntimeApp>, Arc<ShellProvider>) {
+    open_app_with_shell_source_and_limits(
+        store,
+        host,
+        provider,
+        Arc::new(FixedShellEnvironment {
+            override_domains: None,
+        }),
+        AppLimits::default(),
+    )
+}
+
 pub fn open_app_with_shell_domains(
     store: Arc<RuntimeStore>,
     host: Arc<FakeHostDataPlane>,
@@ -338,12 +354,11 @@ pub fn open_app_with_shell_source(
 pub fn open_app_with_shell_source_and_limits(
     store: Arc<RuntimeStore>,
     host: Arc<FakeHostDataPlane>,
-    provider: Arc<CapturingProvider>,
+    provider: Arc<dyn Provider>,
     shell_environment: Arc<dyn ShellEnvironmentSource>,
     limits: AppLimits,
 ) -> (Arc<RuntimeApp>, Arc<ShellProvider>) {
     let data_plane: Arc<dyn nmp_native_runtime_core::HostDataPlane> = host;
-    let provider: Arc<dyn Provider> = provider;
     let shell_provider =
         Arc::new(ShellProvider::new(shell_environment, ShellProviderLimits::default()).unwrap());
     let app = RuntimeApp::open(RuntimeAppConfig {

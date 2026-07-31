@@ -52,8 +52,6 @@ impl RuntimeApp {
         for decision in &validated.decisions {
             let prior = validated.previous[&decision.capability];
             if prior.allows_without_prompt() && !decision.decision.allows_without_prompt() {
-                self.bridge
-                    .cancel_capability_work(&principal, &decision.capability);
                 let operations = state
                     .operations
                     .iter()
@@ -65,9 +63,15 @@ impl RuntimeApp {
                     .collect::<Vec<_>>();
                 for id in operations {
                     if let Some(operation) = state.operations.remove(&id) {
-                        operation.cancel(Arc::from("permission revoked"));
+                        self.cancel_provider_operation(
+                            state,
+                            operation,
+                            Arc::from("permission revoked"),
+                        );
                     }
                 }
+                self.bridge
+                    .cancel_capability_work(&principal, &decision.capability);
             }
             self.record_activity(
                 state,

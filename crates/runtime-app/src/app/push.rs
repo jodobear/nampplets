@@ -12,10 +12,7 @@ use nmp_native_nap_bridge::{
 use nmp_native_runtime_core::{ResourceClass, SessionId, SessionState, WorkLease};
 
 use super::{AppState, ProviderPushDelivery, RuntimeApp};
-use crate::{
-    commands::{PlatformEvent, ProviderOperationId},
-    views::AppErrorCode,
-};
+use crate::{commands::PlatformEvent, views::AppErrorCode};
 
 impl RuntimeApp {
     pub(super) fn activate_push_delivery(
@@ -251,44 +248,6 @@ impl RuntimeApp {
                 provider_sequence: push.sequence,
                 domain: push.domain,
                 envelope: push.envelope,
-            },
-        );
-    }
-
-    pub(super) fn complete_operation(
-        &self,
-        state: &mut AppState,
-        operation_id: ProviderOperationId,
-        now: u64,
-    ) {
-        let Some(operation) = state.operations.remove(&operation_id) else {
-            self.refuse(
-                state,
-                AppErrorCode::Bridge,
-                None,
-                None,
-                "unknown provider operation",
-                now,
-            );
-            return;
-        };
-        if operation.proposal.is_some() {
-            operation.cancel(Arc::from("pending write requires an approval decision"));
-            self.refuse(
-                state,
-                AppErrorCode::Bridge,
-                None,
-                None,
-                "a pending provider write cannot be completed without approval",
-                now,
-            );
-            return;
-        }
-        operation.complete();
-        self.push_event(
-            state,
-            PlatformEvent::ProviderOperationFinished {
-                operation: operation_id,
             },
         );
     }

@@ -2073,9 +2073,9 @@ impl ProviderWriteCompletion for NapPublishCompletion {
         })
     }
 
-    fn refused(self: Box<Self>, refusal: ProviderWriteRefusal) {
-        let sink = self.into_receipt_sink();
-        sink.close(Some(refusal.into_reason()));
+    fn refused(self: Box<Self>, refusal: ProviderWriteRefusal) -> Option<BoundedJson> {
+        self.into_receipt_sink().close(Some(refusal.into_reason()));
+        None
     }
 }
 
@@ -3240,7 +3240,7 @@ mod tests {
             ReceiptReattachment::NotFound
         ));
 
-        proposal.refuse_user(Arc::from("native approval refused"));
+        let _ = proposal.refuse_user(Arc::from("native approval refused"));
         let batch = tokio::time::timeout(Duration::from_secs(1), rig.observer.changed(1))
             .await
             .expect("refusal result must remain bounded")
