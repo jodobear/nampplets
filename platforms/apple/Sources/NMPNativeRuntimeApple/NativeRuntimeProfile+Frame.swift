@@ -11,7 +11,14 @@ extension NativeRuntimeProfile {
             return
         }
         sessions = sessions.filter { $0.value.value != nil }
-        let activeSessions = sessions.values.compactMap(\.value)
+        let stoppingSessionsAtFrameStart = stoppingSessions
+        var activeSessionsByID = stoppingSessions.mapValues(\.session)
+        for (sessionID, session) in sessions {
+            if let value = session.value {
+                activeSessionsByID[sessionID] = value
+            }
+        }
+        let activeSessions = Array(activeSessionsByID.values)
         let previousActivityRevision = lastActivityRevision
         let previousLibraryRevision = lastLibraryRevision
         let previousCatalogRevision = lastCatalogSnapshot.revision
@@ -214,6 +221,28 @@ extension NativeRuntimeProfile {
         }
         for session in activeSessions {
             session.deliver(frame: frame)
+        }
+        if let snapshot {
+            let retainedSessionIDs = Set(snapshot.sessions.map(\.id))
+            let completedStops = activeSessions.filter { session in
+                stoppingSessionsAtFrameStart[session.sessionID]
+                    .map { snapshot.revision >= $0.minimumTerminalRevision }
+                    == true
+                    && !retainedSessionIDs.contains(session.sessionID)
+                    && session.completeStopAfterTerminalDelivery()
+            }
+            if !completedStops.isEmpty {
+                lock.lock()
+                for session in completedStops {
+                    if sessions[session.sessionID]?.value === session {
+                        sessions.removeValue(forKey: session.sessionID)
+                    }
+                    if stoppingSessions[session.sessionID]?.session === session {
+                        stoppingSessions.removeValue(forKey: session.sessionID)
+                    }
+                }
+                lock.unlock()
+            }
         }
         if let snapshot,
            snapshot.revision > previousActivityRevision

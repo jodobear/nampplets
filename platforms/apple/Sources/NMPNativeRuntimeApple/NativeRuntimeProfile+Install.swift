@@ -194,9 +194,36 @@ extension NativeRuntimeProfile {
         controller.mappedEnvelope(sessionId: sessionID, bytes: bytes)
     }
 
-    func stopSession(_ sessionID: UInt64) {
+    func stopSession(_ session: RustRuntimeNappletSession) {
+        let sessionID = session.sessionID
+        lock.lock()
+        let shouldStop = !isClosed && sessions[sessionID]?.value === session
+        if shouldStop {
+            // Rust dispatch and observation are asynchronous. Retain the
+            // borrowed session until update(frame:) hands off the terminal
+            // refusal emitted by Stop.
+            stoppingSessions[sessionID] = StoppingSession(
+                session: session,
+                minimumTerminalRevision: lastAcceptedSnapshot.revision == UInt64.max
+                    ? UInt64.max
+                    : lastAcceptedSnapshot.revision + 1
+            )
+        }
+        lock.unlock()
+        if shouldStop {
+            controller.stop(sessionId: sessionID)
+        } else {
+            session.profileDidClose()
+        }
+    }
+
+    /// A borrowed wrapper was released without an explicit Stop consumer.
+    /// No sink remains to receive terminal output, so do not resurrect the
+    /// wrapper from deinit; just close the Rust session and weak registry row.
+    func abandonSession(_ sessionID: UInt64) {
         lock.lock()
         let shouldStop = !isClosed && sessions.removeValue(forKey: sessionID) != nil
+        stoppingSessions.removeValue(forKey: sessionID)
         lock.unlock()
         if shouldStop {
             controller.stop(sessionId: sessionID)

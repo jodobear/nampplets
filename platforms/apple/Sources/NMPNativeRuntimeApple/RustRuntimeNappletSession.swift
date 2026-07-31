@@ -34,6 +34,7 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
     private var responseSink:
         (owner: UUID, receive: @Sendable (Data) -> Void)?
     private var diagnosticSink: (@Sendable (String, String) -> Void)?
+    private var isStopping = false
     private var isStopped = false
 
     init(
@@ -47,8 +48,11 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
     }
 
     func readSealed(logicalPath: String) throws -> SealedArtifactBytes? {
-        guard let profile else { return nil }
-        switch profile.readVerified(
+        lock.lock()
+        let activeProfile = isStopped || isStopping ? nil : profile
+        lock.unlock()
+        guard let activeProfile else { return nil }
+        switch activeProfile.readVerified(
             sessionID: sessionID,
             logicalPath: logicalPath,
             maximumBytes: maximumReadBytes
@@ -66,6 +70,10 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
 
     func setResponseSink(_ sink: (@Sendable (Data) -> Void)?) {
         lock.lock()
+        guard !isStopped && !isStopping else {
+            lock.unlock()
+            return
+        }
         responseSink = sink.map { (UUID(), $0) }
         lock.unlock()
     }
@@ -75,7 +83,7 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
         _ sink: @escaping @Sendable (Data) -> Void
     ) {
         lock.lock()
-        guard !isStopped else {
+        guard !isStopped && !isStopping else {
             lock.unlock()
             return
         }
@@ -85,7 +93,7 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
 
     func clearResponseSink(owner: UUID) {
         lock.lock()
-        if responseSink?.owner == owner {
+        if !isStopping, responseSink?.owner == owner {
             responseSink = nil
         }
         lock.unlock()
@@ -99,7 +107,7 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
 
     func mappedEnvelope(_ bytes: Data) {
         lock.lock()
-        let stopped = isStopped
+        let stopped = isStopped || isStopping
         lock.unlock()
         guard !stopped else { return }
         profile?.mappedEnvelope(sessionID: sessionID, bytes: bytes)
@@ -139,23 +147,24 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
 
     func stop() {
         lock.lock()
-        guard !isStopped else {
+        guard !isStopped && !isStopping else {
             lock.unlock()
             return
         }
-        isStopped = true
-        responseSink = nil
-        diagnosticSink = nil
+        isStopping = true
         let profile = profile
-        self.profile = nil
         lock.unlock()
 
-        profile?.stopSession(sessionID)
+        if let profile {
+            profile.stopSession(self)
+        } else {
+            profileDidClose()
+        }
     }
 
     func crash(reason: String) {
         lock.lock()
-        let stopped = isStopped
+        let stopped = isStopped || isStopping
         lock.unlock()
         guard !stopped else { return }
         profile?.crashSession(sessionID, reason: reason)
@@ -163,13 +172,32 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
 
     func profileDidClose() {
         lock.lock()
+        isStopping = false
         isStopped = true
         responseSink = nil
+        diagnosticSink = nil
         profile = nil
         lock.unlock()
     }
 
+    /// Called only after an accepted frame no longer contains this session and
+    /// all session-scoped events in that same frame have been handed to sinks.
+    func completeStopAfterTerminalDelivery() -> Bool {
+        lock.lock()
+        guard isStopping && !isStopped else {
+            lock.unlock()
+            return false
+        }
+        isStopping = false
+        isStopped = true
+        responseSink = nil
+        diagnosticSink = nil
+        profile = nil
+        lock.unlock()
+        return true
+    }
+
     deinit {
-        stop()
+        profile?.abandonSession(sessionID)
     }
 }

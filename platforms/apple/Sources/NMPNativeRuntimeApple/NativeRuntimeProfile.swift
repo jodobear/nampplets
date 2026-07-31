@@ -69,6 +69,11 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         }
     }
 
+    struct StoppingSession {
+        let session: RustRuntimeNappletSession
+        let minimumTerminalRevision: UInt64
+    }
+
     static let maximumReadBytes: UInt64 = 8 * 1_024 * 1_024
     static let maximumApplicationActivityObservers = 8
     static let maximumApplicationLibraryObservers = 8
@@ -89,6 +94,9 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     let accountLock = NSLock()
     var observation: RuntimeObservation?
     var sessions: [UInt64: WeakSession] = [:]
+    /// Strongly retains only sessions whose Rust Stop terminal frame has not
+    /// yet been handed to their response sink. This is bounded by `sessions`.
+    var stoppingSessions: [UInt64: StoppingSession] = [:]
     var activityObservers: [UUID: ActivityObserverEntry] = [:]
     var libraryObservers: [UUID: LibraryObserverEntry] = [:]
     var catalogObservers: [UUID: CatalogObserverEntry] = [:]
@@ -260,8 +268,15 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         isClosed = true
         let observation = observation
         self.observation = nil
-        let activeSessions = sessions.values.compactMap(\.value)
+        var activeSessionsByID = stoppingSessions.mapValues(\.session)
+        for (sessionID, session) in sessions {
+            if let value = session.value {
+                activeSessionsByID[sessionID] = value
+            }
+        }
+        let activeSessions = Array(activeSessionsByID.values)
         sessions.removeAll()
+        stoppingSessions.removeAll()
         activityObservers.removeAll()
         libraryObservers.removeAll()
         catalogObservers.removeAll()
