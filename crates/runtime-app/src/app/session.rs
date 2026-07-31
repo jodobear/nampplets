@@ -271,6 +271,7 @@ impl RuntimeApp {
                     state,
                     operation,
                     Arc::from("provider operation cancelled"),
+                    now,
                 );
             }
         }

@@ -10,10 +10,7 @@ use std::{
     fmt,
     num::NonZeroUsize,
     str::FromStr,
-    sync::{
-        Arc, Weak,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Weak},
     thread,
     time::{Duration, Instant},
 };
@@ -26,16 +23,21 @@ use nmp::{
 use nmp_native_nap_bridge::{
     Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderPlatformAvailability,
     ProviderPushSender, ProviderRequest, ProviderSession, ProviderSessionContext,
-    ProviderSessionEnd, ProviderWriteCompletion, ProviderWriteRefusal,
+    ProviderSessionEnd,
 };
 use nmp_native_runtime_core::{
     AccountRef, ApprovedWrite, BoundedJson, Capability, Principal, PublicIdentityDataPlane,
-    ReceiptEventSink, ReceiptSinkError, ReceiptSnapshot, SessionId,
+    SessionId,
 };
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 
 use super::NmpDataPlane;
+
+mod publish_completion;
+use publish_completion::NapPublishCompletion;
+#[cfg(test)]
+use publish_completion::NapPublishReceiptSink;
 
 pub const OUTBOX_DOMAIN: &str = "outbox";
 pub const RELAY_DOMAIN: &str = "relay";
@@ -585,16 +587,14 @@ impl NapNostrProvider {
             account,
             draft,
         };
-        let completion = Box::new(NapPublishCompletion {
-            domain: self.domain,
+        let completion = Box::new(NapPublishCompletion::new(
+            self.domain,
             id,
             outbound,
-            engine: Arc::clone(&self.plane.engine),
-            maximum_response_bytes: self.limits.maximum_response_bytes,
-            receipt_event_lookup_timeout: Duration::from_millis(
-                self.limits.receipt_event_lookup_timeout_millis,
-            ),
-        });
+            Arc::clone(&self.plane.engine),
+            self.limits.maximum_response_bytes,
+            Duration::from_millis(self.limits.receipt_event_lookup_timeout_millis),
+        ));
         Ok(ProviderCall::proposed_write(
             None,
             write,
@@ -2041,188 +2041,6 @@ fn validate_publish_options(
     Ok(())
 }
 
-struct NapPublishCompletion {
-    domain: NapDomain,
-    id: Arc<str>,
-    outbound: ProviderPushSender,
-    engine: Arc<Engine>,
-    maximum_response_bytes: usize,
-    receipt_event_lookup_timeout: Duration,
-}
-
-impl fmt::Debug for NapPublishCompletion {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("NapPublishCompletion")
-            .field("domain", &self.domain)
-            .field("id", &self.id)
-            .finish_non_exhaustive()
-    }
-}
-
-impl ProviderWriteCompletion for NapPublishCompletion {
-    fn into_receipt_sink(self: Box<Self>) -> Arc<dyn ReceiptEventSink> {
-        Arc::new(NapPublishReceiptSink {
-            domain: self.domain,
-            id: self.id,
-            outbound: self.outbound,
-            engine: self.engine,
-            maximum_response_bytes: self.maximum_response_bytes,
-            receipt_event_lookup_timeout: self.receipt_event_lookup_timeout,
-            delivered: AtomicBool::new(false),
-        })
-    }
-
-    fn refused(self: Box<Self>, refusal: ProviderWriteRefusal) -> Option<BoundedJson> {
-        self.into_receipt_sink().close(Some(refusal.into_reason()));
-        None
-    }
-}
-
-struct NapPublishReceiptSink {
-    domain: NapDomain,
-    id: Arc<str>,
-    outbound: ProviderPushSender,
-    engine: Arc<Engine>,
-    maximum_response_bytes: usize,
-    receipt_event_lookup_timeout: Duration,
-    delivered: AtomicBool,
-}
-
-impl fmt::Debug for NapPublishReceiptSink {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("NapPublishReceiptSink")
-            .field("domain", &self.domain)
-            .field("id", &self.id)
-            .field("delivered", &self.delivered.load(Ordering::Acquire))
-            .finish_non_exhaustive()
-    }
-}
-
-impl ReceiptEventSink for NapPublishReceiptSink {
-    fn push_latest(&self, snapshot: ReceiptSnapshot) -> Result<(), ReceiptSinkError> {
-        if self.delivered.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        let value = snapshot
-            .state
-            .decode()
-            .map_err(|_| ReceiptSinkError::FrameTooLarge)?;
-        let state = value
-            .get("state")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let terminal = matches!(
-            state,
-            "delivered"
-                | "partial_delivery"
-                | "exhausted"
-                | "failed"
-                | "cancelled"
-                | "replaceable_conflict"
-        );
-        if !terminal {
-            return Ok(());
-        }
-        if self.delivered.swap(true, Ordering::AcqRel) {
-            return Ok(());
-        }
-        let event_id = value
-            .get("eventId")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned);
-        let relays = value
-            .get("relays")
-            .and_then(Value::as_object)
-            .map(|relays| {
-                relays
-                    .iter()
-                    .map(|(relay, result)| {
-                        (
-                            relay.clone(),
-                            Value::Bool(
-                                result.get("state").and_then(Value::as_str) == Some("acked"),
-                            ),
-                        )
-                    })
-                    .collect::<Map<_, _>>()
-            })
-            .unwrap_or_default();
-        let mut ok = relays.values().any(|value| value == &Value::Bool(true));
-        let mut response = json!({
-            "type": format!("{}.publish.result", self.domain.name()),
-            "id": self.id,
-            "receiptId": snapshot.receipt_id.0,
-            "ok": ok,
-            "relays": relays,
-        });
-        if let Some(event_id) = &event_id {
-            response["eventId"] = Value::String(event_id.clone());
-            match cached_event_by_id(&self.engine, event_id, self.receipt_event_lookup_timeout) {
-                CachedEventLookup::Found(event) => {
-                    response["event"] = serde_json::to_value(event).unwrap_or(Value::Null);
-                }
-                CachedEventLookup::NotFound if self.domain == NapDomain::Relay && ok => {
-                    // The cache read completed and genuinely returned no
-                    // matching row: this is a confirmed absence, not a
-                    // transport hiccup, so the publish is reported as
-                    // failed.
-                    ok = false;
-                    response["ok"] = Value::Bool(false);
-                    response["error"] = Value::String(
-                        "signed event was not readable from NMP canonical state".to_owned(),
-                    );
-                }
-                CachedEventLookup::Unavailable if self.domain == NapDomain::Relay && ok => {
-                    // The relay acknowledged the write; the cache read
-                    // simply did not resolve in time (or the observation
-                    // could not be established). That is not evidence the
-                    // publish failed, so `ok` stays true and the caller is
-                    // told the read was inconclusive rather than being
-                    // handed a fabricated failure.
-                    response["eventCacheReadTimedOut"] = Value::Bool(true);
-                }
-                CachedEventLookup::NotFound | CachedEventLookup::Unavailable => {}
-            }
-        }
-        if !ok && response.get("error").is_none() {
-            response["error"] = Value::String(
-                value
-                    .get("failure")
-                    .and_then(Value::as_str)
-                    .unwrap_or("NMP delivery did not receive a relay acknowledgement")
-                    .to_owned(),
-            );
-        }
-        push_value(
-            &self.outbound,
-            response,
-            self.maximum_response_bytes,
-            Some(&self.id),
-        )
-        .map(|_| ())
-        .map_err(|_| ReceiptSinkError::Closed)
-    }
-
-    fn close(&self, reason: Option<Arc<str>>) {
-        if self.delivered.swap(true, Ordering::AcqRel) {
-            return;
-        }
-        let _ = push_value(
-            &self.outbound,
-            json!({
-                "type": format!("{}.publish.result", self.domain.name()),
-                "id": self.id,
-                "ok": false,
-                "error": reason.as_deref().unwrap_or("NMP receipt observation closed"),
-            }),
-            self.maximum_response_bytes,
-            Some(&self.id),
-        );
-    }
-}
-
 /// Outcome of a best-effort cache read for a just-published event.
 ///
 /// `NotFound` and `Unavailable` are deliberately distinct: only `NotFound`
@@ -2323,8 +2141,8 @@ mod tests {
         ProviderRegistry, SessionContext, SourceWindowId,
     };
     use nmp_native_runtime_core::{
-        ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, HostDataPlane, ResourceLimits,
-        ResourceTracker, Sensitivity, WriteReceiptId,
+        ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, HostDataPlane, ReceiptEventSink,
+        ReceiptSnapshot, ResourceLimits, ResourceTracker, Sensitivity, WriteReceiptId,
     };
 
     use super::*;
@@ -2816,17 +2634,16 @@ mod tests {
             .unwrap()
             .outbound
             .clone();
-        let sink = NapPublishReceiptSink {
-            domain: NapDomain::Outbox,
-            id: Arc::from("publish-mixed-1"),
+        let sink = NapPublishReceiptSink::new(
+            NapDomain::Outbox,
+            Arc::from("publish-mixed-1"),
             outbound,
-            engine: Arc::clone(&rig.plane.engine),
-            maximum_response_bytes: NapNostrProviderLimits::default().maximum_response_bytes,
-            receipt_event_lookup_timeout: Duration::from_millis(
+            Arc::clone(&rig.plane.engine),
+            NapNostrProviderLimits::default().maximum_response_bytes,
+            Duration::from_millis(
                 NapNostrProviderLimits::default().receipt_event_lookup_timeout_millis,
             ),
-            delivered: AtomicBool::new(false),
-        };
+        );
         sink.push_latest(ReceiptSnapshot {
             receipt_id: WriteReceiptId(Arc::from("receipt-mixed-1")),
             state: BoundedJson::from_value(
@@ -3024,17 +2841,16 @@ mod tests {
             .unwrap()
             .outbound
             .clone();
-        let sink = NapPublishReceiptSink {
-            domain: NapDomain::Relay,
-            id: Arc::from("relay-publish-1"),
+        let sink = NapPublishReceiptSink::new(
+            NapDomain::Relay,
+            Arc::from("relay-publish-1"),
             outbound,
-            engine: Arc::clone(&rig.plane.engine),
-            maximum_response_bytes: NapNostrProviderLimits::default().maximum_response_bytes,
-            receipt_event_lookup_timeout: Duration::from_millis(
+            Arc::clone(&rig.plane.engine),
+            NapNostrProviderLimits::default().maximum_response_bytes,
+            Duration::from_millis(
                 NapNostrProviderLimits::default().receipt_event_lookup_timeout_millis,
             ),
-            delivered: AtomicBool::new(false),
-        };
+        );
         sink.push_latest(ReceiptSnapshot {
             receipt_id: WriteReceiptId(Arc::from("receipt-relay-1")),
             state: BoundedJson::from_value(
@@ -3084,17 +2900,16 @@ mod tests {
             .unwrap()
             .outbound
             .clone();
-        let sink = NapPublishReceiptSink {
-            domain: NapDomain::Relay,
-            id: Arc::from("relay-publish-missing"),
+        let sink = NapPublishReceiptSink::new(
+            NapDomain::Relay,
+            Arc::from("relay-publish-missing"),
             outbound,
-            engine: Arc::clone(&rig.plane.engine),
-            maximum_response_bytes: NapNostrProviderLimits::default().maximum_response_bytes,
-            receipt_event_lookup_timeout: Duration::from_millis(
+            Arc::clone(&rig.plane.engine),
+            NapNostrProviderLimits::default().maximum_response_bytes,
+            Duration::from_millis(
                 NapNostrProviderLimits::default().receipt_event_lookup_timeout_millis,
             ),
-            delivered: AtomicBool::new(false),
-        };
+        );
         sink.push_latest(ReceiptSnapshot {
             receipt_id: WriteReceiptId(Arc::from("receipt-relay-missing")),
             state: BoundedJson::from_value(
@@ -3168,17 +2983,16 @@ mod tests {
         // `cached_event_by_id` observes `Unavailable` deterministically,
         // without depending on real network/scheduling timing.
         rig.plane.close();
-        let sink = NapPublishReceiptSink {
-            domain: NapDomain::Relay,
-            id: Arc::from("relay-publish-unavailable-cache"),
+        let sink = NapPublishReceiptSink::new(
+            NapDomain::Relay,
+            Arc::from("relay-publish-unavailable-cache"),
             outbound,
-            engine: Arc::clone(&rig.plane.engine),
-            maximum_response_bytes: NapNostrProviderLimits::default().maximum_response_bytes,
-            receipt_event_lookup_timeout: Duration::from_millis(
+            Arc::clone(&rig.plane.engine),
+            NapNostrProviderLimits::default().maximum_response_bytes,
+            Duration::from_millis(
                 NapNostrProviderLimits::default().receipt_event_lookup_timeout_millis,
             ),
-            delivered: AtomicBool::new(false),
-        };
+        );
         sink.push_latest(ReceiptSnapshot {
             receipt_id: WriteReceiptId(Arc::from("receipt-relay-unavailable-cache")),
             state: BoundedJson::from_value(

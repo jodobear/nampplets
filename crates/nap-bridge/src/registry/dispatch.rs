@@ -72,11 +72,13 @@ impl ProviderRegistry {
         let action = Arc::clone(&request.action);
         match provider.call(request) {
             Ok(call) => {
-                if call.response.as_ref().is_some_and(|response| {
-                    response.byte_len() > self.limits.maximum_response_bytes
-                }) {
+                if let Some(error) = call
+                    .response
+                    .as_ref()
+                    .and_then(|response| self.validate_response(response).err())
+                {
                     self.record_refusal(context, &domain, action);
-                    return Err(BridgeError::ResponseTooLarge);
+                    return Err(error);
                 }
                 let outcome = if call.is_active() {
                     ActivityOutcome::Active

@@ -133,7 +133,12 @@ impl RuntimeApp {
             .collect::<Vec<_>>();
         for (id, _) in operations {
             if let Some(operation) = state.operations.remove(&id) {
-                self.cancel_provider_operation(state, operation, Arc::from("permission revoked"));
+                self.cancel_provider_operation(
+                    state,
+                    operation,
+                    Arc::from("permission revoked"),
+                    now,
+                );
             }
         }
         self.bridge.revoke(&principal, &capability);

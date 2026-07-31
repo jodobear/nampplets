@@ -67,6 +67,7 @@ impl RuntimeApp {
                             state,
                             operation,
                             Arc::from("permission revoked"),
+                            now,
                         );
                     }
                 }

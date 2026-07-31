@@ -247,7 +247,13 @@ impl RuntimeApp {
                         let response = proposal.refuse_system(Arc::from(
                             "provider returned both a streaming operation and a write proposal",
                         ));
-                        self.project_write_refusal(state, session_id, response);
+                        self.project_write_refusal(
+                            state,
+                            principal.clone(),
+                            session_id,
+                            response,
+                            now,
+                        );
                     }
                     if let Some(handle) = handle.take() {
                         handle.cancel();
@@ -267,7 +273,13 @@ impl RuntimeApp {
                         if let Some(proposal) = proposal.take() {
                             let response = proposal
                                 .refuse_system(Arc::from("provider operation capacity is full"));
-                            self.project_write_refusal(state, session_id, response);
+                            self.project_write_refusal(
+                                state,
+                                principal.clone(),
+                                session_id,
+                                response,
+                                now,
+                            );
                         }
                         if let Some(handle) = handle.take() {
                             handle.cancel();
@@ -287,7 +299,13 @@ impl RuntimeApp {
                             let response = proposal.refuse_system(Arc::from(
                                 "provider operation identifier space is exhausted",
                             ));
-                            self.project_write_refusal(state, session_id, response);
+                            self.project_write_refusal(
+                                state,
+                                principal.clone(),
+                                session_id,
+                                response,
+                                now,
+                            );
                         }
                         if let Some(handle) = handle.take() {
                             handle.cancel();

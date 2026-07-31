@@ -8,7 +8,7 @@ use std::{
 };
 
 use nmp_native_runtime_core::{
-    Capability, ExecutionProfile, GrantLedger, Principal, ResourceTracker, SessionId,
+    BoundedJson, Capability, ExecutionProfile, GrantLedger, Principal, ResourceTracker, SessionId,
 };
 use parking_lot::Mutex;
 
@@ -106,6 +106,15 @@ impl ProviderRegistry {
             activity,
             state: Mutex::new(BridgeState::default()),
         })
+    }
+
+    /// Applies the bridge-owned response bound to output produced after the
+    /// initial provider call, including host-delivered write refusals.
+    pub fn validate_response(&self, response: &BoundedJson) -> Result<(), BridgeError> {
+        if response.byte_len() > self.limits.maximum_response_bytes {
+            return Err(BridgeError::ResponseTooLarge);
+        }
+        Ok(())
     }
 
     /// Registration is the advertisement boundary. An unavailable or

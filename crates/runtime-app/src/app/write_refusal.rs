@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use nmp_native_runtime_core::{BoundedJson, SessionId};
+use nmp_native_runtime_core::{BoundedJson, Principal, SessionId};
 
 use super::{ActiveOperation, AppState, RuntimeApp};
 use crate::{
@@ -16,10 +16,23 @@ impl RuntimeApp {
     pub(super) fn project_write_refusal(
         &self,
         state: &mut AppState,
+        principal: Principal,
         session: SessionId,
         response: Option<BoundedJson>,
+        now: u64,
     ) {
         if let Some(response) = response {
+            if let Err(error) = self.bridge.validate_response(&response) {
+                self.refuse(
+                    state,
+                    AppErrorCode::Bridge,
+                    Some(principal),
+                    Some(session),
+                    error.to_string(),
+                    now,
+                );
+                return;
+            }
             self.push_event(
                 state,
                 PlatformEvent::EnvelopeHandled {
@@ -36,10 +49,12 @@ impl RuntimeApp {
         state: &mut AppState,
         operation: ActiveOperation,
         reason: Arc<str>,
+        now: u64,
     ) {
+        let principal = operation.principal.clone();
         let session = operation.session;
         let response = operation.cancel(reason);
-        self.project_write_refusal(state, session, response);
+        self.project_write_refusal(state, principal, session, response, now);
     }
 
     pub(super) fn complete_operation(
@@ -64,6 +79,7 @@ impl RuntimeApp {
                 state,
                 operation,
                 Arc::from("pending write requires an approval decision"),
+                now,
             );
             self.refuse(
                 state,
