@@ -91,15 +91,14 @@ private func searchPage(
         query: "resource"
     )
 
-    // #223 removed the hardcoded "Good Morning Protocol" from
-    // `publishedRecord` and derives every catalog title from the fixture's own
-    // name via `displayCatalogTitle`, exactly as the neighbouring
-    // "Resource Demo" entry already was. So "good-morning" reads as
-    // "Good Morning"; the product is right and this assertion was stale.
-    #expect(page.entries.map(\.title) == ["Good Morning", "Resource Demo"])
+    // Good Morning and three Kehto entries declare or require resource.
+    #expect(page.entries.map(\.title) == [
+        "Good Morning", "Feed", "Profile Viewer", "Resource Demo",
+    ])
     #expect(page.evidence.scope == .offlineFixture)
     #expect(page.evidence.queryWasLocalFilter)
-    #expect(page.evidence.locallyFilteredRows == 18)
+    #expect(page.evidence.projectedRows == 4)
+    #expect(page.evidence.locallyFilteredRows == 16)
     let demo = try #require(
         page.entries.first(where: { $0.title == "Resource Demo" })
     )
