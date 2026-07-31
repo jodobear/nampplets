@@ -1525,10 +1525,10 @@ index 570d2106005014fb9d20cc02571a7a4770ce14a2..339520b3c367c8914e4c0319fb32dd17
   *
 diff --git a/packages/conformance/src/validators/intent-request.test.ts b/packages/conformance/src/validators/intent-request.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..4c64fa62bbb4e2aff61d03b47989572bb53ff21f
+index 0000000000000000000000000000000000000000..89bfdb0b5df98ddaeee521e3b3288fff3c4a7326
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.test.ts
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,117 @@
 +import { describe, expect, it } from 'vitest';
 +
 +import { validateEnvelope } from './envelope.js';
@@ -1600,6 +1600,17 @@ index 0000000000000000000000000000000000000000..4c64fa62bbb4e2aff61d03b47989572b
 +    }
 +  });
 +
++  it('rejects archetypes outside the runtime lowercase slug boundary', () => {
++    for (const archetype of ['', 'Note', 'note\nopen', 'nöt', 'a'.repeat(257)]) {
++      expect(validateEnvelope(intentInvoke({ archetype })).errors).toContainEqual(
++        expect.objectContaining({
++          code: 'invalid-intent-request',
++          field: 'request.archetype',
++        }),
++      );
++    }
++  });
++
 +  it('rejects unstable convention URI carriers without imposing routing identity', () => {
 +    for (const convention of [
 +      'napplet:note/open?draft=true',
@@ -1637,13 +1648,14 @@ index 0000000000000000000000000000000000000000..4c64fa62bbb4e2aff61d03b47989572b
 +});
 diff --git a/packages/conformance/src/validators/intent-request.ts b/packages/conformance/src/validators/intent-request.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..7de78d6349e23ccc23be294de1a585f32623d032
+index 0000000000000000000000000000000000000000..7d6ac8a4f8d5144868b00e9a07cffa15c21aab7e
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.ts
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,83 @@
 +import type { EnvelopeError } from './envelope.js';
 +
 +const STABLE_CONVENTION = /^napplet:[^/?#\s]+\/[^/?#\s]+$/;
++const INTENT_SLUG = /^[a-z0-9._-]{1,256}$/;
 +
 +function optionalString(
 +  request: Record<string, unknown>,
@@ -1678,6 +1690,12 @@ index 0000000000000000000000000000000000000000..7de78d6349e23ccc23be294de1a585f3
 +    errors.push({
 +      code: 'wrong-type',
 +      message: 'Intent request field "archetype" must be a string',
++      field: 'request.archetype',
++    });
++  } else if (!INTENT_SLUG.test(normalized.archetype)) {
++    errors.push({
++      code: 'invalid-intent-request',
++      message: 'Intent request field "archetype" must be a lowercase role slug',
 +      field: 'request.archetype',
 +    });
 +  }

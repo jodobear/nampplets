@@ -1,6 +1,7 @@
 import type { EnvelopeError } from './envelope.js';
 
 const STABLE_CONVENTION = /^napplet:[^/?#\s]+\/[^/?#\s]+$/;
+const INTENT_SLUG = /^[a-z0-9._-]{1,256}$/;
 
 function optionalString(
   request: Record<string, unknown>,
@@ -35,6 +36,12 @@ export function validateIntentInvokeRequest(
     errors.push({
       code: 'wrong-type',
       message: 'Intent request field "archetype" must be a string',
+      field: 'request.archetype',
+    });
+  } else if (!INTENT_SLUG.test(normalized.archetype)) {
+    errors.push({
+      code: 'invalid-intent-request',
+      message: 'Intent request field "archetype" must be a lowercase role slug',
       field: 'request.archetype',
     });
   }

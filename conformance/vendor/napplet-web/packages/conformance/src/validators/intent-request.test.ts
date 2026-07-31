@@ -69,6 +69,17 @@ describe('intent.invoke request validation', () => {
     }
   });
 
+  it('rejects archetypes outside the runtime lowercase slug boundary', () => {
+    for (const archetype of ['', 'Note', 'note\nopen', 'nöt', 'a'.repeat(257)]) {
+      expect(validateEnvelope(intentInvoke({ archetype })).errors).toContainEqual(
+        expect.objectContaining({
+          code: 'invalid-intent-request',
+          field: 'request.archetype',
+        }),
+      );
+    }
+  });
+
   it('rejects unstable convention URI carriers without imposing routing identity', () => {
     for (const convention of [
       'napplet:note/open?draft=true',
