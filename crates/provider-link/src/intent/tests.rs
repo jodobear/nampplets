@@ -277,6 +277,53 @@ fn protocol_field_is_accepted_as_a_convention_alias() {
 }
 
 #[test]
+fn explicit_alternate_convention_routes_by_handler_declaration() {
+    let rig = Rig::new(Arc::new(CancelIntentChoice));
+    let legacy = principal("note-viewer", 'c');
+    let alternate = principal("article-reader", 'd');
+    rig.provider
+        .register_handler(legacy.clone(), vec![note_declaration()])
+        .unwrap();
+    rig.provider
+        .register_handler(
+            alternate.clone(),
+            vec![IntentHandlerDeclaration {
+                archetype: Arc::from("note"),
+                title: Some(Arc::from("Article Reader")),
+                actions: BTreeSet::from([Arc::from("open")]),
+                conventions: BTreeSet::from([Arc::from("napplet:article/read")]),
+            }],
+        )
+        .unwrap();
+    rig.provider.set_default("note", Some(legacy)).unwrap();
+    let _ = rig.observer.drain(16).unwrap();
+
+    assert_eq!(
+        rig.dispatch(json!({
+            "type":"intent.invoke",
+            "id":"invoke-alternate-1",
+            "request":{
+                "archetype":"note",
+                "action":"open",
+                "convention":"napplet:article/read",
+                "payload":{"target":"abc"}
+            }
+        }))
+        .unwrap(),
+        None
+    );
+    let requests = rig.dispatcher.requests.lock();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].handler, alternate);
+    assert_eq!(requests[0].archetype.as_ref(), "note");
+    assert_eq!(requests[0].action.as_ref(), "open");
+    assert_eq!(
+        requests[0].convention.as_deref(),
+        Some("napplet:article/read")
+    );
+}
+
+#[test]
 fn undeclared_choice_and_specific_target_execute_nothing() {
     let rig = Rig::new(Arc::new(FixedChoice(Arc::from("spoofed"))));
     rig.provider
@@ -360,8 +407,8 @@ fn malformed_convention_and_behavior_are_rejected_before_dispatch() {
     let rig = Rig::new(Arc::new(CancelIntentChoice));
     for request in [
         json!({"archetype":"note","convention":"https://example.com"}),
-        json!({"archetype":"note","action":"open","convention":"napplet:note/edit"}),
-        json!({"archetype":"note","action":"open","protocol":"napplet:profile/open"}),
+        json!({"archetype":"note","convention":"napplet:note"}),
+        json!({"archetype":"note","convention":"napplet:note/open/extra"}),
         json!({
             "archetype":"note",
             "action":"open",
@@ -369,6 +416,7 @@ fn malformed_convention_and_behavior_are_rejected_before_dispatch() {
             "protocol":"napplet:note/edit"
         }),
         json!({"archetype":"note","convention":"napplet:note/open?draft=true"}),
+        json!({"archetype":"note","convention":"napplet:note/open#fragment"}),
         json!({"archetype":"Note"}),
         json!({"archetype":"note","behavior":{"focus":"yes"}}),
         json!({"archetype":"note","unknown":true}),

@@ -65,10 +65,12 @@ pub(super) fn validate_invocation(
     let convention = named_convention
         .or(protocol_alias)
         .unwrap_or_else(|| Arc::from(expected_convention.as_str()));
-    if convention.as_ref() != expected_convention.as_str() {
+    // In 0.28 an explicit convention is independent handler routing identity,
+    // not a value derived from the request's archetype/action pair.
+    if !valid_queryless_convention(&convention, limits.maximum_text_bytes) {
         return Err(invalid(
             request,
-            "intent convention must exactly match its archetype and action",
+            "intent convention must be a stable queryless napplet convention",
         ));
     }
     let handler_request = match object.get("handler").and_then(Value::as_str) {
@@ -162,8 +164,27 @@ pub(super) fn valid_declaration(
         && declaration.actions.len() <= limits.maximum_actions_per_handler
         && declaration.actions.iter().all(|action| valid_slug(action))
         && declaration.conventions.len() <= limits.maximum_conventions_per_handler
-        && declaration.conventions.iter().all(|convention| {
-            valid_text(convention, limits.maximum_text_bytes) && convention.starts_with("napplet:")
+        && declaration
+            .conventions
+            .iter()
+            .all(|convention| valid_queryless_convention(convention, limits.maximum_text_bytes))
+}
+
+fn valid_queryless_convention(value: &str, maximum_bytes: usize) -> bool {
+    let Some(path) = value.strip_prefix("napplet:") else {
+        return false;
+    };
+    let Some((subject, action)) = path.split_once('/') else {
+        return false;
+    };
+    valid_text(value, maximum_bytes)
+        && !subject.is_empty()
+        && !action.is_empty()
+        && !action.contains('/')
+        && [subject, action].into_iter().all(|component| {
+            !component
+                .chars()
+                .any(|character| character.is_whitespace() || matches!(character, '?' | '#'))
         })
 }
 
