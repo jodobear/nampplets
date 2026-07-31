@@ -6,6 +6,63 @@ import XCTest
 // MARK: - Stop terminal-response handoff
 
 final class RuntimeSessionStopDeliveryTests: RuntimeNappletSessionTestCase {
+    func testLaunchOccupancyUnionsActiveStoppingAndReservations() {
+        XCTAssertEqual(
+            NativeRuntimeProfile.sessionLaunchOccupancy(
+                activeSessionIDs: Set((1 ... 10).map(UInt64.init)),
+                stoppingSessionIDs: Set((8 ... 15).map(UInt64.init)),
+                reservations: 1
+            ),
+            NativeRuntimeLibraryLimits.maximumSessions
+        )
+    }
+
+    func testLaunchReservationCapacityIsFiniteAndObservable() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "runtime-apple-launch-admission-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profile = try NativeRuntimeProfile.open(
+            configuration: NativeRuntimeProfileConfiguration(storageRoot: root)
+        )
+        defer { profile.close() }
+        let fixture = repositoryRoot().appendingPathComponent(
+            "conformance/napplet-corpus/published/good-morning",
+            isDirectory: true
+        )
+        let installed = try profile.installSignedNamed(
+            title: "Launch Capacity Probe",
+            eventJSON: Data(contentsOf: fixture.appendingPathComponent("event.json")),
+            author: author,
+            dTag: "good-morning",
+            blobsBySHA256: [
+                indexDigest: Data(contentsOf: fixture.appendingPathComponent("index.html")),
+            ]
+        )
+
+        for _ in 0 ..< NativeRuntimeLibraryLimits.maximumSessions {
+            XCTAssertEqual(profile.reserveSessionLaunch(), .admitted)
+        }
+        XCTAssertEqual(
+            profile.reserveSessionLaunch(),
+            .capacity(maximum: NativeRuntimeLibraryLimits.maximumSessions)
+        )
+        XCTAssertThrowsError(try profile.launchInstalled(installed)) { error in
+            XCTAssertEqual(
+                error as? RuntimeNappletOpenError,
+                .launchRefused(
+                    detail: "Native terminal-response session capacity "
+                        + "\(NativeRuntimeLibraryLimits.maximumSessions) is full"
+                )
+            )
+        }
+        for _ in 0 ..< NativeRuntimeLibraryLimits.maximumSessions {
+            profile.releaseSessionLaunch()
+        }
+    }
+
     @MainActor
     func testStopDeliversPendingPublishRefusalBeforeInvalidatingSink() async throws {
         let root = FileManager.default.temporaryDirectory

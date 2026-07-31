@@ -74,6 +74,12 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         let minimumTerminalRevision: UInt64
     }
 
+    enum SessionLaunchAdmission: Equatable {
+        case admitted
+        case profileClosed
+        case capacity(maximum: Int)
+    }
+
     static let maximumReadBytes: UInt64 = 8 * 1_024 * 1_024
     static let maximumApplicationActivityObservers = 8
     static let maximumApplicationLibraryObservers = 8
@@ -95,8 +101,10 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     var observation: RuntimeObservation?
     var sessions: [UInt64: WeakSession] = [:]
     /// Strongly retains only sessions whose Rust Stop terminal frame has not
-    /// yet been handed to their response sink. This is bounded by `sessions`.
+    /// yet been handed to their response sink. Launch admission bounds the
+    /// active/stopping union plus in-flight reservations.
     var stoppingSessions: [UInt64: StoppingSession] = [:]
+    var sessionLaunchReservations = 0
     var activityObservers: [UUID: ActivityObserverEntry] = [:]
     var libraryObservers: [UUID: LibraryObserverEntry] = [:]
     var catalogObservers: [UUID: CatalogObserverEntry] = [:]
