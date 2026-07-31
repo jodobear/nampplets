@@ -17,6 +17,7 @@
  */
 
 import { NAP_DOMAINS } from '@napplet/core';
+import { validateIntentInvokeRequest } from './intent-request.js';
 
 /** Direction of an envelope relative to the napplet. */
 export type EnvelopeDirection = 'out' | 'in';
@@ -344,62 +345,6 @@ function kindOf(value: unknown): FieldKind | 'undefined' | 'null' {
 function matchesKind(value: unknown, kind: FieldKind): boolean {
   if (kind === 'present') return value !== undefined && value !== null;
   return kindOf(value) === kind;
-}
-
-/** Validate the adopted normalized wire identity for an outbound intent invoke. */
-function validateIntentInvokeRequest(request: unknown, errors: EnvelopeError[]): void {
-  if (typeof request !== 'object' || request === null || Array.isArray(request)) return;
-
-  const normalized = request as Record<string, unknown>;
-  for (const field of ['archetype'] as const) {
-    const value = normalized[field];
-    if (value === undefined) {
-      errors.push({
-        code: 'missing-field',
-        message: `Intent request requires a string "${field}" field`,
-        field: `request.${field}`,
-      });
-    } else if (typeof value !== 'string') {
-      errors.push({
-        code: 'wrong-type',
-        message: `Intent request field "${field}" must be a string`,
-        field: `request.${field}`,
-      });
-    }
-  }
-
-  for (const field of ['action', 'convention'] as const) {
-    const value = normalized[field];
-    if (value !== undefined && typeof value !== 'string') {
-      errors.push({
-        code: 'wrong-type',
-        message: `Intent request field "${field}" must be a string`,
-        field: `request.${field}`,
-      });
-    }
-  }
-
-  if ('sender' in normalized) {
-    errors.push({
-      code: 'forbidden-field',
-      message: 'Intent request sender is runtime-derived and cannot be emitted by a napplet',
-      field: 'request.sender',
-    });
-  }
-
-  const { archetype, convention } = normalized;
-  const action = normalized.action ?? 'open';
-  if (typeof archetype !== 'string' || typeof action !== 'string' || convention === undefined) return;
-  if (typeof convention !== 'string') return;
-
-  const parsed = /^napplet:([^/?#\s]+)\/([^/?#\s]+)$/.exec(convention);
-  if (!parsed || parsed[1] !== archetype || parsed[2] !== action) {
-    errors.push({
-      code: 'invalid-intent-request',
-      message: 'Intent convention must be queryless and match request archetype and action',
-      field: 'request.convention',
-    });
-  }
 }
 
 /**

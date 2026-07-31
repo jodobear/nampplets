@@ -142,7 +142,7 @@ index a41dc5920c486e83aac6eb4615d0cfd44efae409..6a9b9388e26e3d382e4b04b646963619
  }
 diff --git a/packages/conformance/src/shell/reference-delivery.test.ts b/packages/conformance/src/shell/reference-delivery.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..82eb31b33bad1111316ab97c1b6cccd8fa3a1b94
+index 0000000000000000000000000000000000000000..7388ec9406068f334ef798e706199214733dc100
 --- /dev/null
 +++ b/packages/conformance/src/shell/reference-delivery.test.ts
 @@ -0,0 +1,149 @@
@@ -220,7 +220,7 @@ index 0000000000000000000000000000000000000000..82eb31b33bad1111316ab97c1b6cccd8
 +        handled: false,
 +        archetype: 'profile',
 +        action: 'open',
-+        error: 'no reference handler for convention',
++        error: 'no reference handler for archetype and action',
 +      },
 +    }]);
 +  });
@@ -368,18 +368,121 @@ index 0000000000000000000000000000000000000000..b23cea50ce5a1b3f6fa5fe17fe166618
 +    },
 +  };
 +}
+diff --git a/packages/conformance/src/shell/reference-intent.test.ts b/packages/conformance/src/shell/reference-intent.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5b8f49d0d8d3527d0d45c5aa89b4d90941344b87
+--- /dev/null
++++ b/packages/conformance/src/shell/reference-intent.test.ts
+@@ -0,0 +1,92 @@
++import { describe, expect, it } from 'vitest';
++
++import { createReferenceShell } from './reference-shell.js';
++
++const authenticatedSource = { dTag: 'authenticated-source' };
++
++describe('reference intent resolution', () => {
++  it('routes a registered alternate convention independently of archetype and action', () => {
++    const shell = createReferenceShell();
++
++    expect(shell.handleFrom(authenticatedSource, {
++      type: 'intent.invoke',
++      id: 'intent-alternate-convention',
++      request: {
++        archetype: 'note',
++        action: 'open',
++        convention: 'napplet:article/read',
++        handler: 'reference-handler',
++        payload: { event: 'abc123' },
++      },
++    })).toEqual([{
++      type: 'intent.invoke.result',
++      id: 'intent-alternate-convention',
++      result: {
++        ok: true,
++        handled: true,
++        archetype: 'note',
++        action: 'open',
++        convention: 'napplet:article/read',
++        handler: 'reference-handler',
++      },
++    }]);
++    expect(shell.takeDeliveries('reference-handler')).toEqual([{
++      type: 'intent.deliver',
++      delivery: {
++        sender: 'authenticated-source',
++        archetype: 'note',
++        action: 'open',
++        convention: 'napplet:article/read',
++        payload: { event: 'abc123' },
++      },
++    }]);
++  });
++
++  it('refuses an unavailable explicit handler without accepting or queuing delivery', () => {
++    const shell = createReferenceShell();
++
++    expect(shell.handleFrom(authenticatedSource, {
++      type: 'intent.invoke',
++      id: 'intent-unavailable-handler',
++      request: {
++        archetype: 'note',
++        action: 'open',
++        convention: 'napplet:note/open',
++        handler: 'missing-handler',
++      },
++    })).toEqual([{
++      type: 'intent.invoke.result',
++      id: 'intent-unavailable-handler',
++      result: {
++        ok: false,
++        handled: false,
++        archetype: 'note',
++        action: 'open',
++        error: 'requested intent handler is unavailable',
++      },
++    }]);
++    expect(shell.takeDeliveries('reference-handler')).toEqual([]);
++    expect(shell.takeDeliveries('missing-handler')).toEqual([]);
++  });
++
++  it('defaults convention only after resolving the supported archetype and action', () => {
++    const shell = createReferenceShell();
++
++    expect(shell.handle({
++      type: 'intent.invoke',
++      id: 'intent-unsupported-action',
++      request: { archetype: 'note', action: 'edit' },
++    })).toEqual([{
++      type: 'intent.invoke.result',
++      id: 'intent-unsupported-action',
++      result: {
++        ok: false,
++        handled: false,
++        archetype: 'note',
++        action: 'edit',
++        error: 'no reference handler for archetype and action',
++      },
++    }]);
++    expect(shell.takeDeliveries('reference-handler')).toEqual([]);
++  });
++});
 diff --git a/packages/conformance/src/shell/reference-intent.ts b/packages/conformance/src/shell/reference-intent.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..873550a303e4277dde442854cb7b7351a7d73d96
+index 0000000000000000000000000000000000000000..51a25024596eda50bee425e64a968cff48406173
 --- /dev/null
 +++ b/packages/conformance/src/shell/reference-intent.ts
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,136 @@
 +import type { ReferenceDeliveryQueue } from './reference-delivery.js';
 +
 +const REFERENCE_HANDLER = 'reference-handler';
 +const REFERENCE_SUBSCRIBER = 'reference-subscriber';
 +const REFERENCE_CONVENTION = 'napplet:note/open';
-+const REFERENCE_CONTRACT = { convention: REFERENCE_CONVENTION, eventKinds: [1, 30023] };
++const REFERENCE_ALTERNATE_CONVENTION = 'napplet:article/read';
++const REFERENCE_CONVENTIONS = [REFERENCE_CONVENTION, REFERENCE_ALTERNATE_CONVENTION] as const;
++const REFERENCE_CONTRACTS = [
++  { convention: REFERENCE_CONVENTION, eventKinds: [1, 30023] },
++  { convention: REFERENCE_ALTERNATE_CONVENTION, eventKinds: [30023] },
++];
 +
 +export interface ReferenceIntentEndpoint {
 +  readonly dTag: string;
@@ -429,15 +532,27 @@ index 0000000000000000000000000000000000000000..873550a303e4277dde442854cb7b7351
 +    );
 +  }
 +
-+  const convention = normalized.convention ?? `napplet:${archetype}/${action}`;
++  if (archetype !== 'note' || action !== 'open') {
++    return unavailableIntent(env.id, archetype, action, 'no reference handler for archetype and action');
++  }
++
++  const requestedHandler = normalized.handler ?? 'default';
++  if (typeof requestedHandler !== 'string') {
++    return unavailableIntent(env.id, archetype, action, 'intent handler must be a string');
++  }
++  if (
++    requestedHandler !== 'default'
++    && requestedHandler !== 'choose'
++    && requestedHandler !== REFERENCE_HANDLER
++  ) {
++    return unavailableIntent(env.id, archetype, action, 'requested intent handler is unavailable');
++  }
++
++  const convention = normalized.convention ?? REFERENCE_CONVENTION;
 +  if (typeof convention !== 'string') {
 +    return unavailableIntent(env.id, archetype, action, 'intent convention must be a string');
 +  }
-+  const parsed = /^napplet:([^/?#\s]+)\/([^/?#\s]+)$/.exec(convention);
-+  if (!parsed || parsed[1] !== archetype || parsed[2] !== action) {
-+    return unavailableIntent(env.id, archetype, action, 'intent request conflicts with its convention');
-+  }
-+  if (convention !== REFERENCE_CONVENTION) {
++  if (!(REFERENCE_CONVENTIONS as readonly string[]).includes(convention)) {
 +    return unavailableIntent(env.id, archetype, action, 'no reference handler for convention');
 +  }
 +
@@ -470,8 +585,8 @@ index 0000000000000000000000000000000000000000..873550a303e4277dde442854cb7b7351
 +    candidates: [{
 +      dTag: REFERENCE_HANDLER,
 +      actions: ['open'],
-+      conventions: [REFERENCE_CONVENTION],
-+      contracts: [REFERENCE_CONTRACT],
++      conventions: [...REFERENCE_CONVENTIONS],
++      contracts: REFERENCE_CONTRACTS,
 +      isDefault: true,
 +    }],
 +    hasDefault: true,
@@ -723,10 +838,24 @@ index 0000000000000000000000000000000000000000..de2d47212a168364f3cea10ec63f5c32
 +  'serial.close': (e) => ok({ type: 'serial.close.result', id: e.id }),
 +};
 diff --git a/packages/conformance/src/shell/reference-shell.test.ts b/packages/conformance/src/shell/reference-shell.test.ts
-index c37183d3d5ba9512577d31352c607fe68720bb2f..d6107b16fb1510fc4cc227c2b5da9858392aab50 100644
+index c37183d3d5ba9512577d31352c607fe68720bb2f..f325db353b82bfb89231c1df509d972f92e2e5e5 100644
 --- a/packages/conformance/src/shell/reference-shell.test.ts
 +++ b/packages/conformance/src/shell/reference-shell.test.ts
-@@ -84,6 +84,7 @@ describe('createReferenceShell — record + respond', () => {
+@@ -54,8 +54,11 @@ describe('createReferenceShell — record + respond', () => {
+             {
+               dTag: 'reference-handler',
+               actions: ['open'],
+-              conventions: ['napplet:note/open'],
+-              contracts: [{ convention: 'napplet:note/open', eventKinds: [1, 30023] }],
++              conventions: ['napplet:note/open', 'napplet:article/read'],
++              contracts: [
++                { convention: 'napplet:note/open', eventKinds: [1, 30023] },
++                { convention: 'napplet:article/read', eventKinds: [30023] },
++              ],
+               isDefault: true,
+             },
+           ],
+@@ -84,6 +87,7 @@ describe('createReferenceShell — record + respond', () => {
          id: 'intent-1',
          result: {
            ok: true,
@@ -1217,23 +1346,139 @@ index 05a3145501642fc3772da749b2f76e3f91056559..d5e314c2d217f60ee94dc1cfbac17ca8
    const listener = (event: MessageEvent): void => {
      if (options.expectedSource !== undefined && event.source !== options.expectedSource) return;
 diff --git a/packages/conformance/src/validators/envelope.test.ts b/packages/conformance/src/validators/envelope.test.ts
-index 49d00e9e30c9125bf66efab9492b22f986df511b..46370cf5df73a544993310cd4b1c29d25b1ce58c 100644
+index 49d00e9e30c9125bf66efab9492b22f986df511b..d86d65cfb19a6216682cffdb80074fa819340041 100644
 --- a/packages/conformance/src/validators/envelope.test.ts
 +++ b/packages/conformance/src/validators/envelope.test.ts
-@@ -230,3 +230,65 @@ describe('ENVELOPE_SPECS invariants', () => {
-     });
+@@ -76,45 +76,6 @@ describe('validateEnvelope — outbound field checks', () => {
+     }));
    });
- });
+ 
+-  it('accepts a normalized intent request while leaving convention and payload values opaque', () => {
+-    const v = validateEnvelope({
+-      type: 'intent.invoke',
+-      id: 'intent-1',
+-      request: {
+-        archetype: 'note',
+-        action: 'open',
+-        convention: 'napplet:note/open',
+-        payload: { nested: ['opaque', { values: true }] },
+-      },
+-    });
+-    expect(v.ok).toBe(true);
+-
+-    const malformed = validateEnvelope({ type: 'intent.invoke', id: 'intent-2', request: [] });
+-    expect(malformed.ok).toBe(false);
+-    expect(malformed.errors).toContainEqual(expect.objectContaining({
+-      code: 'wrong-type',
+-      field: 'request',
+-    }));
+-  });
+-
+-  it('rejects malformed or forged normalized intent identities', () => {
+-    const base = {
+-      type: 'intent.invoke',
+-      id: 'intent-3',
+-      request: { archetype: 'note', action: 'open', convention: 'napplet:note/open' },
+-    };
+-    const invalidRequests = [
+-      { ...base.request, convention: 'napplet:note/open?event=abc' },
+-      { ...base.request, convention: 'napplet:note/open#preview' },
+-      { ...base.request, action: 'edit' },
+-      { ...base.request, sender: 'forged-source' },
+-    ];
+-
+-    for (const request of invalidRequests) {
+-      expect(validateEnvelope({ ...base, request }).ok).toBe(false);
+-    }
+-  });
+-
+   it('records adopted inbound INC and intent delivery carriers without correlation identifiers', () => {
+     const delivered = validateEnvelope({
+       type: 'intent.deliver',
+diff --git a/packages/conformance/src/validators/envelope.ts b/packages/conformance/src/validators/envelope.ts
+index 570d2106005014fb9d20cc02571a7a4770ce14a2..339520b3c367c8914e4c0319fb32dd1714458269 100644
+--- a/packages/conformance/src/validators/envelope.ts
++++ b/packages/conformance/src/validators/envelope.ts
+@@ -17,6 +17,7 @@
+  */
+ 
+ import { NAP_DOMAINS } from '@napplet/core';
++import { validateIntentInvokeRequest } from './intent-request.js';
+ 
+ /** Direction of an envelope relative to the napplet. */
+ export type EnvelopeDirection = 'out' | 'in';
+@@ -346,49 +347,6 @@ function matchesKind(value: unknown, kind: FieldKind): boolean {
+   return kindOf(value) === kind;
+ }
+ 
+-/** Validate the adopted normalized wire identity for an outbound intent invoke. */
+-function validateIntentInvokeRequest(request: unknown, errors: EnvelopeError[]): void {
+-  if (typeof request !== 'object' || request === null || Array.isArray(request)) return;
+-
+-  const normalized = request as Record<string, unknown>;
+-  for (const field of ['archetype', 'action', 'convention'] as const) {
+-    const value = normalized[field];
+-    if (value === undefined) {
+-      errors.push({
+-        code: 'missing-field',
+-        message: `Intent request requires a string "${field}" field`,
+-        field: `request.${field}`,
+-      });
+-    } else if (typeof value !== 'string') {
+-      errors.push({
+-        code: 'wrong-type',
+-        message: `Intent request field "${field}" must be a string`,
+-        field: `request.${field}`,
+-      });
+-    }
+-  }
+-
+-  if ('sender' in normalized) {
+-    errors.push({
+-      code: 'forbidden-field',
+-      message: 'Intent request sender is runtime-derived and cannot be emitted by a napplet',
+-      field: 'request.sender',
+-    });
+-  }
+-
+-  const { archetype, action, convention } = normalized;
+-  if (typeof archetype !== 'string' || typeof action !== 'string' || typeof convention !== 'string') return;
+-
+-  const parsed = /^napplet:([^/?#\s]+)\/([^/?#\s]+)$/.exec(convention);
+-  if (!parsed || parsed[1] !== archetype || parsed[2] !== action) {
+-    errors.push({
+-      code: 'invalid-intent-request',
+-      message: 'Intent convention must be queryless and match request archetype and action',
+-      field: 'request.convention',
+-    });
+-  }
+-}
+-
+ /**
+  * Validate a single postMessage envelope as if emitted by a napplet.
+  *
+diff --git a/packages/conformance/src/validators/intent-request.test.ts b/packages/conformance/src/validators/intent-request.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..6d1aba3ad2c525b15bd274b17d479f09223685b7
+--- /dev/null
++++ b/packages/conformance/src/validators/intent-request.test.ts
+@@ -0,0 +1,71 @@
++import { describe, expect, it } from 'vitest';
 +
-+const intentInvoke = (request: Record<string, unknown>) => ({
++import { validateEnvelope } from './envelope.js';
++
++const intentInvoke = (request: unknown) => ({
 +  type: 'intent.invoke',
 +  id: 'intent-regression',
 +  request,
 +});
 +
-+describe('intent.invoke optional identity fields', () => {
-+  it('accepts the archetype-only contract', () => {
-+    expect(validateEnvelope(intentInvoke({ archetype: 'note' }))).toMatchObject({
++describe('intent.invoke request validation', () => {
++  it('accepts omitted optional identity fields and opaque payloads', () => {
++    expect(validateEnvelope(intentInvoke({
++      archetype: 'note',
++      payload: { nested: ['opaque', { values: true }] },
++    }))).toMatchObject({
 +      ok: true,
 +      type: 'intent.invoke',
 +      direction: 'out',
@@ -1241,95 +1486,124 @@ index 49d00e9e30c9125bf66efab9492b22f986df511b..46370cf5df73a544993310cd4b1c29d2
 +    });
 +  });
 +
-+  it('accepts optional action and convention independently when valid', () => {
-+    expect(validateEnvelope(intentInvoke({ archetype: 'note', action: 'edit' })).ok).toBe(true);
++  it('keeps stable conventions independent from archetype and action', () => {
 +    expect(validateEnvelope(intentInvoke({
 +      archetype: 'note',
-+      convention: 'napplet:note/open',
++      action: 'open',
++      convention: 'napplet:article/read',
 +    })).ok).toBe(true);
 +    expect(validateEnvelope(intentInvoke({
 +      archetype: 'note',
 +      action: 'edit',
-+      convention: 'napplet:note/edit',
++      convention: 'napplet:profile/view',
 +    })).ok).toBe(true);
 +  });
 +
-+  it('rejects malformed optional fields without making them required', () => {
-+    const wrongAction = validateEnvelope(intentInvoke({ archetype: 'note', action: 1 }));
-+    expect(wrongAction.errors).toContainEqual(expect.objectContaining({
++  it('rejects missing, malformed, and caller-forged fields', () => {
++    const malformedRequest = validateEnvelope(intentInvoke([]));
++    expect(malformedRequest.errors).toContainEqual(expect.objectContaining({
 +      code: 'wrong-type',
-+      field: 'request.action',
++      field: 'request',
 +    }));
 +
-+    const wrongConvention = validateEnvelope(intentInvoke({
-+      archetype: 'note',
-+      convention: false,
-+    }));
-+    expect(wrongConvention.errors).toContainEqual(expect.objectContaining({
-+      code: 'wrong-type',
-+      field: 'request.convention',
-+    }));
-+  });
-+
-+  it('binds an explicit convention to the explicit or defaulted action', () => {
-+    for (const request of [
-+      { archetype: 'note', convention: 'napplet:note/edit' },
-+      { archetype: 'note', action: 'edit', convention: 'napplet:note/open' },
-+      { archetype: 'note', convention: 'napplet:note/open?draft=true' },
-+    ]) {
++    for (const [request, field] of [
++      [{}, 'request.archetype'],
++      [{ archetype: 1 }, 'request.archetype'],
++      [{ archetype: 'note', action: 1 }, 'request.action'],
++      [{ archetype: 'note', convention: false }, 'request.convention'],
++      [{ archetype: 'note', handler: false }, 'request.handler'],
++      [{ archetype: 'note', sender: 'forged-source' }, 'request.sender'],
++    ] as const) {
 +      expect(validateEnvelope(intentInvoke(request)).errors).toContainEqual(
-+        expect.objectContaining({
-+          code: 'invalid-intent-request',
-+          field: 'request.convention',
-+        }),
++        expect.objectContaining({ field }),
 +      );
 +    }
 +  });
-+});
-diff --git a/packages/conformance/src/validators/envelope.ts b/packages/conformance/src/validators/envelope.ts
-index 570d2106005014fb9d20cc02571a7a4770ce14a2..038b92d8d0350a2980ef8f9f8c09bcf8be512945 100644
---- a/packages/conformance/src/validators/envelope.ts
-+++ b/packages/conformance/src/validators/envelope.ts
-@@ -351,7 +351,7 @@ function validateIntentInvokeRequest(request: unknown, errors: EnvelopeError[]):
-   if (typeof request !== 'object' || request === null || Array.isArray(request)) return;
- 
-   const normalized = request as Record<string, unknown>;
--  for (const field of ['archetype', 'action', 'convention'] as const) {
-+  for (const field of ['archetype'] as const) {
-     const value = normalized[field];
-     if (value === undefined) {
-       errors.push({
-@@ -368,6 +368,17 @@ function validateIntentInvokeRequest(request: unknown, errors: EnvelopeError[]):
-     }
-   }
- 
-+  for (const field of ['action', 'convention'] as const) {
-+    const value = normalized[field];
-+    if (value !== undefined && typeof value !== 'string') {
-+      errors.push({
-+        code: 'wrong-type',
-+        message: `Intent request field "${field}" must be a string`,
-+        field: `request.${field}`,
-+      });
++
++  it('rejects unstable convention URI carriers without imposing routing identity', () => {
++    for (const convention of [
++      'napplet:note/open?draft=true',
++      'napplet:note/open#preview',
++      'https://example.com/note/open',
++    ]) {
++      expect(validateEnvelope(intentInvoke({ archetype: 'note', convention })).errors)
++        .toContainEqual(expect.objectContaining({
++          code: 'invalid-intent-request',
++          field: 'request.convention',
++        }));
 +    }
++  });
++});
+diff --git a/packages/conformance/src/validators/intent-request.ts b/packages/conformance/src/validators/intent-request.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..37129b57518fddb06f60f254e570ad26e50e94f2
+--- /dev/null
++++ b/packages/conformance/src/validators/intent-request.ts
+@@ -0,0 +1,64 @@
++import type { EnvelopeError } from './envelope.js';
++
++const STABLE_CONVENTION = /^napplet:[^/?#\s]+\/[^/?#\s]+$/;
++
++function optionalString(
++  request: Record<string, unknown>,
++  field: 'action' | 'convention' | 'handler',
++  errors: EnvelopeError[],
++): void {
++  const value = request[field];
++  if (value !== undefined && typeof value !== 'string') {
++    errors.push({
++      code: 'wrong-type',
++      message: `Intent request field "${field}" must be a string`,
++      field: `request.${field}`,
++    });
++  }
++}
++
++/** Validate one outbound intent request without coupling routing to payload convention. */
++export function validateIntentInvokeRequest(
++  request: unknown,
++  errors: EnvelopeError[],
++): void {
++  if (typeof request !== 'object' || request === null || Array.isArray(request)) return;
++
++  const normalized = request as Record<string, unknown>;
++  if (normalized.archetype === undefined) {
++    errors.push({
++      code: 'missing-field',
++      message: 'Intent request requires a string "archetype" field',
++      field: 'request.archetype',
++    });
++  } else if (typeof normalized.archetype !== 'string') {
++    errors.push({
++      code: 'wrong-type',
++      message: 'Intent request field "archetype" must be a string',
++      field: 'request.archetype',
++    });
 +  }
 +
-   if ('sender' in normalized) {
-     errors.push({
-       code: 'forbidden-field',
-@@ -376,8 +387,10 @@ function validateIntentInvokeRequest(request: unknown, errors: EnvelopeError[]):
-     });
-   }
- 
--  const { archetype, action, convention } = normalized;
--  if (typeof archetype !== 'string' || typeof action !== 'string' || typeof convention !== 'string') return;
-+  const { archetype, convention } = normalized;
-+  const action = normalized.action ?? 'open';
-+  if (typeof archetype !== 'string' || typeof action !== 'string' || convention === undefined) return;
-+  if (typeof convention !== 'string') return;
- 
-   const parsed = /^napplet:([^/?#\s]+)\/([^/?#\s]+)$/.exec(convention);
-   if (!parsed || parsed[1] !== archetype || parsed[2] !== action) {
++  for (const field of ['action', 'convention', 'handler'] as const) {
++    optionalString(normalized, field, errors);
++  }
++
++  if ('sender' in normalized) {
++    errors.push({
++      code: 'forbidden-field',
++      message: 'Intent request sender is runtime-derived and cannot be emitted by a napplet',
++      field: 'request.sender',
++    });
++  }
++
++  if (
++    typeof normalized.convention === 'string'
++    && !STABLE_CONVENTION.test(normalized.convention)
++  ) {
++    errors.push({
++      code: 'invalid-intent-request',
++      message: 'Intent convention must be a stable queryless napplet convention',
++      field: 'request.convention',
++    });
++  }
++}
 diff --git a/packages/nap/src/lists/shim.test.ts b/packages/nap/src/lists/shim.test.ts
 index 5e3ec7713cea7a4a0e0a463d3d09265e547f8527..1922c3df10591fcd9e9fd0e1b5681d95730fd0df 100644
 --- a/packages/nap/src/lists/shim.test.ts

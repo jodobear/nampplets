@@ -76,45 +76,6 @@ describe('validateEnvelope — outbound field checks', () => {
     }));
   });
 
-  it('accepts a normalized intent request while leaving convention and payload values opaque', () => {
-    const v = validateEnvelope({
-      type: 'intent.invoke',
-      id: 'intent-1',
-      request: {
-        archetype: 'note',
-        action: 'open',
-        convention: 'napplet:note/open',
-        payload: { nested: ['opaque', { values: true }] },
-      },
-    });
-    expect(v.ok).toBe(true);
-
-    const malformed = validateEnvelope({ type: 'intent.invoke', id: 'intent-2', request: [] });
-    expect(malformed.ok).toBe(false);
-    expect(malformed.errors).toContainEqual(expect.objectContaining({
-      code: 'wrong-type',
-      field: 'request',
-    }));
-  });
-
-  it('rejects malformed or forged normalized intent identities', () => {
-    const base = {
-      type: 'intent.invoke',
-      id: 'intent-3',
-      request: { archetype: 'note', action: 'open', convention: 'napplet:note/open' },
-    };
-    const invalidRequests = [
-      { ...base.request, convention: 'napplet:note/open?event=abc' },
-      { ...base.request, convention: 'napplet:note/open#preview' },
-      { ...base.request, action: 'edit' },
-      { ...base.request, sender: 'forged-source' },
-    ];
-
-    for (const request of invalidRequests) {
-      expect(validateEnvelope({ ...base, request }).ok).toBe(false);
-    }
-  });
-
   it('records adopted inbound INC and intent delivery carriers without correlation identifiers', () => {
     const delivered = validateEnvelope({
       type: 'intent.deliver',
@@ -228,67 +189,5 @@ describe('ENVELOPE_SPECS invariants', () => {
       dir: 'in',
       fields: { delivery: 'object' },
     });
-  });
-});
-
-const intentInvoke = (request: Record<string, unknown>) => ({
-  type: 'intent.invoke',
-  id: 'intent-regression',
-  request,
-});
-
-describe('intent.invoke optional identity fields', () => {
-  it('accepts the archetype-only contract', () => {
-    expect(validateEnvelope(intentInvoke({ archetype: 'note' }))).toMatchObject({
-      ok: true,
-      type: 'intent.invoke',
-      direction: 'out',
-      errors: [],
-    });
-  });
-
-  it('accepts optional action and convention independently when valid', () => {
-    expect(validateEnvelope(intentInvoke({ archetype: 'note', action: 'edit' })).ok).toBe(true);
-    expect(validateEnvelope(intentInvoke({
-      archetype: 'note',
-      convention: 'napplet:note/open',
-    })).ok).toBe(true);
-    expect(validateEnvelope(intentInvoke({
-      archetype: 'note',
-      action: 'edit',
-      convention: 'napplet:note/edit',
-    })).ok).toBe(true);
-  });
-
-  it('rejects malformed optional fields without making them required', () => {
-    const wrongAction = validateEnvelope(intentInvoke({ archetype: 'note', action: 1 }));
-    expect(wrongAction.errors).toContainEqual(expect.objectContaining({
-      code: 'wrong-type',
-      field: 'request.action',
-    }));
-
-    const wrongConvention = validateEnvelope(intentInvoke({
-      archetype: 'note',
-      convention: false,
-    }));
-    expect(wrongConvention.errors).toContainEqual(expect.objectContaining({
-      code: 'wrong-type',
-      field: 'request.convention',
-    }));
-  });
-
-  it('binds an explicit convention to the explicit or defaulted action', () => {
-    for (const request of [
-      { archetype: 'note', convention: 'napplet:note/edit' },
-      { archetype: 'note', action: 'edit', convention: 'napplet:note/open' },
-      { archetype: 'note', convention: 'napplet:note/open?draft=true' },
-    ]) {
-      expect(validateEnvelope(intentInvoke(request)).errors).toContainEqual(
-        expect.objectContaining({
-          code: 'invalid-intent-request',
-          field: 'request.convention',
-        }),
-      );
-    }
   });
 });

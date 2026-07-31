@@ -3,7 +3,12 @@ import type { ReferenceDeliveryQueue } from './reference-delivery.js';
 const REFERENCE_HANDLER = 'reference-handler';
 const REFERENCE_SUBSCRIBER = 'reference-subscriber';
 const REFERENCE_CONVENTION = 'napplet:note/open';
-const REFERENCE_CONTRACT = { convention: REFERENCE_CONVENTION, eventKinds: [1, 30023] };
+const REFERENCE_ALTERNATE_CONVENTION = 'napplet:article/read';
+const REFERENCE_CONVENTIONS = [REFERENCE_CONVENTION, REFERENCE_ALTERNATE_CONVENTION] as const;
+const REFERENCE_CONTRACTS = [
+  { convention: REFERENCE_CONVENTION, eventKinds: [1, 30023] },
+  { convention: REFERENCE_ALTERNATE_CONVENTION, eventKinds: [30023] },
+];
 
 export interface ReferenceIntentEndpoint {
   readonly dTag: string;
@@ -53,15 +58,27 @@ export function handleIntentInvoke(
     );
   }
 
-  const convention = normalized.convention ?? `napplet:${archetype}/${action}`;
+  if (archetype !== 'note' || action !== 'open') {
+    return unavailableIntent(env.id, archetype, action, 'no reference handler for archetype and action');
+  }
+
+  const requestedHandler = normalized.handler ?? 'default';
+  if (typeof requestedHandler !== 'string') {
+    return unavailableIntent(env.id, archetype, action, 'intent handler must be a string');
+  }
+  if (
+    requestedHandler !== 'default'
+    && requestedHandler !== 'choose'
+    && requestedHandler !== REFERENCE_HANDLER
+  ) {
+    return unavailableIntent(env.id, archetype, action, 'requested intent handler is unavailable');
+  }
+
+  const convention = normalized.convention ?? REFERENCE_CONVENTION;
   if (typeof convention !== 'string') {
     return unavailableIntent(env.id, archetype, action, 'intent convention must be a string');
   }
-  const parsed = /^napplet:([^/?#\s]+)\/([^/?#\s]+)$/.exec(convention);
-  if (!parsed || parsed[1] !== archetype || parsed[2] !== action) {
-    return unavailableIntent(env.id, archetype, action, 'intent request conflicts with its convention');
-  }
-  if (convention !== REFERENCE_CONVENTION) {
+  if (!(REFERENCE_CONVENTIONS as readonly string[]).includes(convention)) {
     return unavailableIntent(env.id, archetype, action, 'no reference handler for convention');
   }
 
@@ -94,8 +111,8 @@ export function intentAvailability(archetype: unknown): Record<string, unknown> 
     candidates: [{
       dTag: REFERENCE_HANDLER,
       actions: ['open'],
-      conventions: [REFERENCE_CONVENTION],
-      contracts: [REFERENCE_CONTRACT],
+      conventions: [...REFERENCE_CONVENTIONS],
+      contracts: REFERENCE_CONTRACTS,
       isDefault: true,
     }],
     hasDefault: true,

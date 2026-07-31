@@ -72,7 +72,7 @@ describe('reference shell retained deliveries', () => {
         handled: false,
         archetype: 'profile',
         action: 'open',
-        error: 'no reference handler for convention',
+        error: 'no reference handler for archetype and action',
       },
     }]);
   });

@@ -54,8 +54,11 @@ describe('createReferenceShell — record + respond', () => {
             {
               dTag: 'reference-handler',
               actions: ['open'],
-              conventions: ['napplet:note/open'],
-              contracts: [{ convention: 'napplet:note/open', eventKinds: [1, 30023] }],
+              conventions: ['napplet:note/open', 'napplet:article/read'],
+              contracts: [
+                { convention: 'napplet:note/open', eventKinds: [1, 30023] },
+                { convention: 'napplet:article/read', eventKinds: [30023] },
+              ],
               isDefault: true,
             },
           ],
