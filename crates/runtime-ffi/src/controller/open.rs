@@ -390,11 +390,15 @@ pub(super) fn open_runtime_controller(
     providers.extend(extra_providers);
     let app_limits = AppLimits::default();
     let maximum_envelope_bytes = app_limits.maximum_envelope_bytes;
+    let bridge_limits = BridgeLimits {
+        provider_pushes: config.provider_push_limits,
+        ..BridgeLimits::default()
+    };
     let app = RuntimeApp::open(RuntimeAppConfig {
         limits: app_limits,
         resource_limits: ResourceLimits::default(),
         grant_limits: GrantLimits::default(),
-        bridge_limits: BridgeLimits::default(),
+        bridge_limits,
         binding_limits: BindingLimits::default(),
         store: runtime_store.clone(),
         data_plane: data_plane.clone(),

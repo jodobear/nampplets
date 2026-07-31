@@ -10,6 +10,7 @@ mod library;
 mod native_capabilities;
 mod permissions;
 mod profile_preferences;
+mod provider_push_limits;
 mod receipt_slot;
 mod receipts;
 mod snapshot_delivery;

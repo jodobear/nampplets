@@ -1,6 +1,7 @@
 //! Native-supplied runtime configuration and its validated Rust-owned form.
 
 use nmp_native_artifact::ArtifactLimits;
+use nmp_native_nap_bridge::ProviderPushLimits;
 
 use crate::{
     DEFAULT_MAXIMUM_ARTIFACT_READ_BYTES, DEFAULT_MAXIMUM_BOUNDARY_EVENTS,
@@ -26,6 +27,8 @@ pub struct RuntimeConfig {
     pub allowed_local_relay_hosts: Vec<String>,
     pub maximum_nmp_relays: u64,
     pub maximum_bridge_workers: u64,
+    pub maximum_provider_push_envelope_bytes: u64,
+    pub maximum_provider_push_pending_bytes: u64,
     pub maximum_observers: u64,
     pub maximum_boundary_events: u64,
     pub maximum_config_items: u64,
@@ -58,6 +61,26 @@ impl RuntimeConfig {
         )?;
         let maximum_bridge_workers =
             nonzero_usize(self.maximum_bridge_workers, "maximum_bridge_workers")?;
+        let maximum_provider_push_envelope_bytes = provider_push_capacity(
+            self.maximum_provider_push_envelope_bytes,
+            "maximum_provider_push_envelope_bytes",
+        )?;
+        let maximum_provider_push_pending_bytes = provider_push_capacity(
+            self.maximum_provider_push_pending_bytes,
+            "maximum_provider_push_pending_bytes",
+        )?;
+        if maximum_provider_push_envelope_bytes > maximum_provider_push_pending_bytes {
+            return Err(RuntimeOpenError::InvalidConfig {
+                detail: "maximum_provider_push_envelope_bytes must not exceed \
+                         maximum_provider_push_pending_bytes"
+                    .to_owned(),
+            });
+        }
+        let provider_push_limits = ProviderPushLimits {
+            maximum_envelope_bytes: maximum_provider_push_envelope_bytes,
+            maximum_pending_bytes: maximum_provider_push_pending_bytes,
+            ..ProviderPushLimits::default()
+        };
         let maximum_blob_sources =
             nonzero_usize(self.maximum_blob_sources, "maximum_blob_sources")?;
         let artifact_limits = ArtifactLimits {
@@ -114,6 +137,7 @@ impl RuntimeConfig {
             allowed_local_relay_hosts: self.allowed_local_relay_hosts,
             maximum_nmp_relays,
             maximum_bridge_workers,
+            provider_push_limits,
             maximum_observers,
             maximum_boundary_events,
             maximum_manifest_bytes,
@@ -139,6 +163,10 @@ impl Default for RuntimeConfig {
             allowed_local_relay_hosts: Vec::new(),
             maximum_nmp_relays: 64,
             maximum_bridge_workers: 12,
+            maximum_provider_push_envelope_bytes: ProviderPushLimits::default()
+                .maximum_envelope_bytes as u64,
+            maximum_provider_push_pending_bytes: ProviderPushLimits::default().maximum_pending_bytes
+                as u64,
             maximum_observers: DEFAULT_MAXIMUM_OBSERVERS,
             maximum_boundary_events: DEFAULT_MAXIMUM_BOUNDARY_EVENTS,
             maximum_config_items: DEFAULT_MAXIMUM_CONFIG_ITEMS,
@@ -165,6 +193,7 @@ pub(crate) struct ValidatedConfig {
     pub(crate) allowed_local_relay_hosts: Vec<String>,
     pub(crate) maximum_nmp_relays: usize,
     pub(crate) maximum_bridge_workers: usize,
+    pub(crate) provider_push_limits: ProviderPushLimits,
     pub(crate) maximum_observers: usize,
     pub(crate) maximum_boundary_events: usize,
     pub(crate) maximum_manifest_bytes: usize,
@@ -206,4 +235,14 @@ fn nonzero_usize(value: u64, name: &str) -> Result<usize, RuntimeOpenError> {
         .ok_or_else(|| RuntimeOpenError::InvalidConfig {
             detail: format!("{name} must fit usize and be non-zero"),
         })
+}
+
+fn provider_push_capacity(value: u64, name: &str) -> Result<usize, RuntimeOpenError> {
+    let value = nonzero_usize(value, name)?;
+    if value == usize::MAX {
+        return Err(RuntimeOpenError::InvalidConfig {
+            detail: format!("{name} must leave usize arithmetic overflow headroom"),
+        });
+    }
+    Ok(value)
 }
