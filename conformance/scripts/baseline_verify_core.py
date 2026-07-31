@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import generate_digests
+from baseline_verify_registry import verify_registry_snapshots
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,7 +47,6 @@ def verify_lock(lock: dict[str, Any]) -> None:
     )
     if any(not re.fullmatch(r"[0-9a-f]{40}", commit) for commit in required_commits):
         raise BaselineError("every upstream commit must be exact 40-hex")
-
     patch = lock["napplet_packages"]["local_patch"]
     if patch != "conformance/patches/napplet-web/compat-v2.patch":
         raise BaselineError("napplet/web compatibility patch path drifted")
@@ -68,6 +68,8 @@ def verify_lock(lock: dict[str, Any]) -> None:
     for relative, expected in source_snapshots.items():
         if sha256_file(ROOT / relative) != expected:
             raise BaselineError(f"authority snapshot drifted: {relative}")
+
+    verify_registry_snapshots(CONFORMANCE, lock["nap_registry"], BaselineError)
 
     if lock["nip_5d"]["manifest_kinds"] != [5129, 15129, 35129]:
         raise BaselineError("manifest kind baseline drifted")

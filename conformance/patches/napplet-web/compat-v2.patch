@@ -1525,10 +1525,10 @@ index 570d2106005014fb9d20cc02571a7a4770ce14a2..339520b3c367c8914e4c0319fb32dd17
   *
 diff --git a/packages/conformance/src/validators/intent-request.test.ts b/packages/conformance/src/validators/intent-request.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..84330cbab5e6575d18712520c7fe0f61794e7618
+index 0000000000000000000000000000000000000000..ce36cc5c3b426545c5551d705cf831546005399a
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.test.ts
-@@ -0,0 +1,170 @@
+@@ -0,0 +1,186 @@
 +import { describe, expect, it } from 'vitest';
 +
 +import { validateEnvelope } from './envelope.js';
@@ -1685,6 +1685,22 @@ index 0000000000000000000000000000000000000000..84330cbab5e6575d18712520c7fe0f61
 +    }));
 +  });
 +
++  it('matches the runtime convention text boundary for both aliases', () => {
++    for (const field of ['convention', 'protocol'] as const) {
++      for (const value of [
++        'napplet:note/\0open',
++        'napplet:note/\x7fopen',
++        `napplet:note/${'ö'.repeat(506)}`,
++      ]) {
++        expect(validateEnvelope(intentInvoke({ archetype: 'note', [field]: value })).errors)
++          .toContainEqual(expect.objectContaining({
++            code: 'invalid-intent-request',
++            field: `request.${field}`,
++          }));
++      }
++    }
++  });
++
 +  it('rejects conflicting convention and legacy protocol aliases', () => {
 +    expect(validateEnvelope(intentInvoke({
 +      archetype: 'note',
@@ -1701,10 +1717,10 @@ index 0000000000000000000000000000000000000000..84330cbab5e6575d18712520c7fe0f61
 +});
 diff --git a/packages/conformance/src/validators/intent-request.ts b/packages/conformance/src/validators/intent-request.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..9676831bd40f17a2e68ddc2def076dd731ed7b3b
+index 0000000000000000000000000000000000000000..b858be109e844501eb99d0e0b7c1fa95169846a5
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.ts
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,157 @@
 +import type { EnvelopeError } from './envelope.js';
 +
 +const STABLE_CONVENTION = /^napplet:[^/?#\s]+\/[^/?#\s]+$/;
@@ -1838,7 +1854,10 @@ index 0000000000000000000000000000000000000000..9676831bd40f17a2e68ddc2def076dd7
 +
 +  for (const field of ['convention', 'protocol'] as const) {
 +    const convention = normalized[field];
-+    if (typeof convention === 'string' && !STABLE_CONVENTION.test(convention)) {
++    if (
++      typeof convention === 'string'
++      && (!validRuntimeText(convention) || !STABLE_CONVENTION.test(convention))
++    ) {
 +      errors.push({
 +        code: 'invalid-intent-request',
 +        message: 'Intent convention must be a stable queryless napplet convention',

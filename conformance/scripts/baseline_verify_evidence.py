@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from baseline_generate_sources import canonical_digest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFORMANCE = ROOT / "conformance"
@@ -104,6 +106,9 @@ def verify_corpus(
         raise error("reference corpus digest mismatch")
     if kehto["digest"] != lock["corpus"]["kehto_fixture_digest"]:
         raise error("Kehto corpus digest mismatch")
+    kehto_content = {key: value for key, value in kehto.items() if key != "digest"}
+    if canonical_digest(kehto_content) != kehto["digest"]:
+        raise error("Kehto corpus canonical digest mismatch")
     if published["digest"] != lock["corpus"]["published_fixture_digest"]:
         raise error("published corpus digest mismatch")
     if kehto["source"]["commit"] != lock["kehto"]["commit"]:

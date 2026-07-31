@@ -131,7 +131,10 @@ export function validateIntentInvokeRequest(
 
   for (const field of ['convention', 'protocol'] as const) {
     const convention = normalized[field];
-    if (typeof convention === 'string' && !STABLE_CONVENTION.test(convention)) {
+    if (
+      typeof convention === 'string'
+      && (!validRuntimeText(convention) || !STABLE_CONVENTION.test(convention))
+    ) {
       errors.push({
         code: 'invalid-intent-request',
         message: 'Intent convention must be a stable queryless napplet convention',

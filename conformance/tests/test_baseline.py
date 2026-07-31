@@ -69,6 +69,48 @@ class BaselineTests(unittest.TestCase):
         ):
             verify_baseline.verify_lock(lock)
 
+    def test_nap_registry_snapshots_are_bound_to_lock_objects(self) -> None:
+        lock = verify_baseline.load_lock()
+        for field in (
+            "naps_tree",
+            "archetypes_blob",
+            "readme_blob",
+            "web_projection_blob",
+        ):
+            with self.subTest(field=field):
+                drifted = copy.deepcopy(lock)
+                drifted["nap_registry"][field] = "0" * 40
+                with self.assertRaisesRegex(
+                    verify_baseline.BaselineError,
+                    "NAP registry",
+                ):
+                    verify_baseline.verify_lock(drifted)
+
+    def test_kehto_corpus_digest_is_recomputed_from_content(self) -> None:
+        lock = verify_baseline.load_lock()
+        indexes = {
+            relative: verify_baseline.load_json(relative)
+            for relative in (
+                "conformance/napplet-corpus/reference/index.json",
+                "conformance/napplet-corpus/kehto/index.json",
+                "conformance/napplet-corpus/published/index.json",
+            )
+        }
+        indexes["conformance/napplet-corpus/kehto/index.json"]["applications"][0][
+            "requires"
+        ].append("identity")
+
+        with mock.patch.object(
+            verify_baseline,
+            "load_json",
+            side_effect=lambda relative: indexes[relative],
+        ):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "Kehto corpus canonical digest mismatch",
+            ):
+                verify_baseline.verify_corpus(lock)
+
     def test_one_byte_fixture_mutation_fails_hash(self) -> None:
         index = json.loads(
             (

@@ -19,6 +19,8 @@ manifest_kinds = [5129, 15129, 35129]
 repository = "napplet/naps"
 commit = "5ac0490461ca6fec2f0d2e45b4835cf9bc08de24"
 naps_tree = "af3f89da520b32dba6935a8c07e3462da4e3b6b0"
+archetypes_blob = "ca965b7f4071381ba86c748725e7ae027a1ddd73"
+readme_blob = "b221131b2723f97107332b8f48124b8b939a99f8"
 web_projection_blob = "fab9a94734c43f7a30c2248db3a749d5feb5f1c7"
 
 [napplet_packages]
@@ -30,7 +32,7 @@ sdk = "0.25.0"
 nap = "0.29.0"
 conformance = "0.14.0"
 local_patch = "conformance/patches/napplet-web/compat-v2.patch"
-local_patch_sha256 = "efda216cbb0b1f9e37f58dd71c70b32a72b1a0c9ec8d397fae16b7fd7fca02fe"
+local_patch_sha256 = "098f0f692ecf8468b73e9992a07288c7f4e2672ce0bee4c2f7d70fce6b80c463"
 
 [napplet_packages.source_trees]
 core = "1f9904103ce7684a302efdb0491c3315a92fb04a"

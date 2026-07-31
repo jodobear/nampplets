@@ -154,6 +154,22 @@ describe('intent.invoke request validation', () => {
     }));
   });
 
+  it('matches the runtime convention text boundary for both aliases', () => {
+    for (const field of ['convention', 'protocol'] as const) {
+      for (const value of [
+        'napplet:note/\0open',
+        'napplet:note/\x7fopen',
+        `napplet:note/${'ö'.repeat(506)}`,
+      ]) {
+        expect(validateEnvelope(intentInvoke({ archetype: 'note', [field]: value })).errors)
+          .toContainEqual(expect.objectContaining({
+            code: 'invalid-intent-request',
+            field: `request.${field}`,
+          }));
+      }
+    }
+  });
+
   it('rejects conflicting convention and legacy protocol aliases', () => {
     expect(validateEnvelope(intentInvoke({
       archetype: 'note',
