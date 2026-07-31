@@ -11,8 +11,6 @@ extension NativeRuntimeProfile {
             return
         }
         sessions = sessions.filter { $0.value.value != nil }
-        latchStopEventLossLocked(frame)
-        let stoppingSessionsAtFrameStart = stoppingSessions
         var activeSessionsByID = stoppingSessions.mapValues(\.session)
         for (sessionID, session) in sessions {
             if let value = session.value {
@@ -223,11 +221,9 @@ extension NativeRuntimeProfile {
         for session in activeSessions {
             session.deliver(frame: frame)
         }
+        recordDeliveredStopTerminalEvents(frame)
         if let snapshot {
-            completeStopsAfterDelivery(
-                snapshot: snapshot,
-                stoppingSessionsAtFrameStart: stoppingSessionsAtFrameStart
-            )
+            completeStopsAfterDelivery(snapshot: snapshot)
         }
         if let snapshot,
            snapshot.revision > previousActivityRevision

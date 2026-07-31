@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn session_change_is_projected_as_typed_lifecycle_evidence() {
+    let principal = Principal::new("a".repeat(64), "app", "b".repeat(64)).unwrap();
+    let event = PlatformEvent::SessionChanged(nmp_native_runtime_core::SessionSnapshot {
+        id: SessionId(5),
+        principal,
+        profile: nmp_native_runtime_core::ExecutionProfile::Renderer,
+        state: nmp_native_runtime_core::SessionState::Stopped,
+    });
+
+    let projected = project_event(10, &event);
+    assert_eq!(projected.kind, "session-changed");
+    assert_eq!(projected.detail, "stopped");
+    assert_eq!(projected.session_id, Some(5));
+    assert_eq!(projected.response_json, None);
+}
+
+#[test]
 fn envelope_response_is_projected_as_exact_machine_readable_json() {
     let response =
         BoundedJson::from_raw(r#"{"type":"shell.init","capabilities":{}}"#, 1_024).unwrap();

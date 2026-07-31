@@ -6,56 +6,56 @@ extension NativeRuntimeProfile {
     struct StoppingSession {
         let session: RustRuntimeNappletSession
         let minimumTerminalRevision: UInt64
-        /// Any event gap while this Stop is pending can contain its terminal
-        /// response. Keep the sink instead of treating a later clean snapshot
-        /// as proof that the response was delivered.
-        var terminalEvidenceWasLost = false
+        /// Rust emits this session's final stopped event after every terminal
+        /// response. Completion waits until that ordered marker was delivered.
+        var terminalBatchDelivered = false
     }
 
     enum StopFrameDisposition: Equatable {
         case wait
         case complete
-        case preserveAfterEvidenceLoss
     }
 
     static func stopFrameDisposition(
         snapshotRevision: UInt64,
         minimumTerminalRevision: UInt64,
         snapshotRetainsSession: Bool,
-        terminalEvidenceWasLost: Bool
+        terminalBatchDelivered: Bool
     ) -> StopFrameDisposition {
         guard snapshotRevision >= minimumTerminalRevision,
-              !snapshotRetainsSession
+              !snapshotRetainsSession,
+              terminalBatchDelivered
         else {
             return .wait
-        }
-        if terminalEvidenceWasLost {
-            return .preserveAfterEvidenceLoss
         }
         return .complete
     }
 
-    /// Called while the profile lock is held, before snapshot projection can
-    /// refuse the frame. Event replay has already advanced on the Rust side, so
-    /// every pending Stop must remember the gap even without a usable snapshot.
-    func latchStopEventLossLocked(_ frame: RuntimeObservationFrame) {
-        guard frame.eventCursorWasStale || frame.lostBeforeBatch > 0 else {
-            return
-        }
-        for sessionID in Array(stoppingSessions.keys) {
-            if var stopping = stoppingSessions[sessionID] {
-                stopping.terminalEvidenceWasLost = true
-                stoppingSessions[sessionID] = stopping
+    /// Called only after every event in the frame has been handed to session
+    /// sinks. Rust projects this typed stopped event after all terminal
+    /// responses for the same Stop, so it is an exact delivery watermark.
+    func recordDeliveredStopTerminalEvents(_ frame: RuntimeObservationFrame) {
+        let terminalSessionIDs = Set(
+            frame.events.compactMap { event in
+                event.kind == "session-changed" && event.detail == "stopped"
+                    ? event.sessionId
+                    : nil
             }
+        )
+        guard !terminalSessionIDs.isEmpty else { return }
+        lock.lock()
+        for sessionID in terminalSessionIDs {
+            guard var stopping = stoppingSessions[sessionID] else { continue }
+            stopping.terminalBatchDelivered = true
+            stoppingSessions[sessionID] = stopping
         }
+        lock.unlock()
     }
 
-    func completeStopsAfterDelivery(
-        snapshot: RuntimeSnapshot,
-        stoppingSessionsAtFrameStart: [UInt64: StoppingSession]
-    ) {
+    func completeStopsAfterDelivery(snapshot: RuntimeSnapshot) {
         let retainedSessionIDs = Set(snapshot.sessions.map(\.id))
-        let stopFrames = stoppingSessionsAtFrameStart.values.map { stopping in
+        lock.lock()
+        let stopFrames = stoppingSessions.values.map { stopping in
             (
                 session: stopping.session,
                 disposition: Self.stopFrameDisposition(
@@ -64,10 +64,11 @@ extension NativeRuntimeProfile {
                     snapshotRetainsSession: retainedSessionIDs.contains(
                         stopping.session.sessionID
                     ),
-                    terminalEvidenceWasLost: stopping.terminalEvidenceWasLost
+                    terminalBatchDelivered: stopping.terminalBatchDelivered
                 )
             )
         }
+        lock.unlock()
         completeStopsWithDeliveredEvidence(stopFrames)
     }
 

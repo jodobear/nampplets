@@ -45,12 +45,20 @@ fn observation_cut_captures_snapshot_before_a_stop_terminal_batch() {
             .iter()
             .any(|candidate| candidate.id == session)
     );
+    let terminal_event = terminal
+        .events
+        .iter()
+        .find(|event| {
+            event.kind == "session-changed"
+                && event.session_id == Some(session)
+                && event.detail == "stopped"
+        })
+        .expect("Stop terminal marker must follow the retained-session snapshot cut");
     assert!(
-        terminal
-            .events
-            .iter()
-            .any(|event| event.kind == "session-changed"),
-        "Stop terminal events must follow the retained-session snapshot cut"
+        terminal.events.iter().all(|event| {
+            event.kind != "envelope-handled" || event.sequence < terminal_event.sequence
+        }),
+        "Stop responses must precede its terminal marker"
     );
 
     let after = controller.capture_app_observation_after_snapshot(
