@@ -175,7 +175,24 @@ impl ProviderRegistry {
         profile: ExecutionProfile,
         required: &BTreeSet<Capability>,
     ) -> Result<InjectionPlan, BridgeError> {
-        let domains = self
+        let domains = self.admitted_domains(principal, profile);
+        let missing = required.difference(&domains).cloned().collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(BridgeError::MissingRequiredDomains { missing });
+        }
+        Ok(InjectionPlan {
+            principal: principal.clone(),
+            profile,
+            domains,
+        })
+    }
+
+    fn admitted_domains(
+        &self,
+        principal: &Principal,
+        profile: ExecutionProfile,
+    ) -> BTreeSet<Capability> {
+        let mut domains = self
             .providers
             .keys()
             .filter(|domain| profile_allows(profile, domain))
@@ -188,15 +205,18 @@ impl ProviderRegistry {
             })
             .cloned()
             .collect::<BTreeSet<_>>();
-        let missing = required.difference(&domains).cloned().collect::<Vec<_>>();
-        if !missing.is_empty() {
-            return Err(BridgeError::MissingRequiredDomains { missing });
+        for _ in 0..self.providers.len() {
+            let admitted = domains.clone();
+            domains.retain(|domain| {
+                self.providers
+                    .get(domain)
+                    .is_some_and(|provider| provider.descriptor().dependencies.is_subset(&admitted))
+            });
+            if domains.len() == admitted.len() {
+                break;
+            }
         }
-        Ok(InjectionPlan {
-            principal: principal.clone(),
-            profile,
-            domains,
-        })
+        domains
     }
 
     pub fn census(&self) -> BridgeCensus {

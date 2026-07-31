@@ -75,5 +75,6 @@ fn fixture(burst: u32) -> (ProviderRegistry, Principal, Arc<GrantLedger>, Capabi
     (registry, principal, grants, domain)
 }
 
+mod dependencies;
 mod dispatch;
 mod lifecycle;

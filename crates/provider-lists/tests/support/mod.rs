@@ -6,14 +6,11 @@
 
 #![allow(dead_code)]
 
-use std::{
-    collections::BTreeSet,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+mod bridge;
+mod dependency_provider;
 
-use nmp_native_nap_bridge::{
-    BridgeLimits, MemoryActivitySink, ProviderRegistry, SessionContext, SourceWindowId,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 // Re-exported so every test target gets the same vocabulary from one `use
 // support::*;` rather than repeating bridge imports per file.
 pub use nmp_native_nap_bridge::{Provider, ProviderCall, ProviderPushObserver, ProviderRequest};
@@ -21,13 +18,13 @@ pub use nmp_native_runtime_core::{
     AccountRef, BoundedJson, Cancellation, Principal, ReceiptSnapshot, WriteReceiptId,
 };
 use nmp_native_runtime_core::{
-    Capability, ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, ResourceClass,
-    ResourceLimits, ResourceTracker, Sensitivity, SessionId,
+    Capability, ResourceClass, ResourceLimits, ResourceTracker, SessionId,
 };
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 pub use std::sync::Arc;
 
+pub use bridge::opened_session;
 use nmp_native_provider_lists::*;
 
 /// A list source that records exactly what the provider asked it to do, so a
@@ -173,48 +170,6 @@ pub fn provider_with(entries: Vec<ListEntry>) -> (Arc<ListsProvider>, Arc<FakeSo
     let erased: Arc<dyn ListsDataPlane> = source.clone();
     let provider = ListsProvider::new(erased, ListsProviderLimits::default()).unwrap();
     (provider, source)
-}
-
-/// Registers the provider on a real bridge so session binding, grants and the
-/// outbound lane are the production ones rather than a test double.
-pub fn opened_session(provider: Arc<ListsProvider>) -> (ProviderRegistry, ProviderPushObserver) {
-    let resources = Arc::new(ResourceTracker::new(ResourceLimits::default()).unwrap());
-    let grants =
-        Arc::new(GrantLedger::new(GrantLimits::default(), Arc::clone(&resources)).unwrap());
-    let activity = Arc::new(MemoryActivitySink::bounded(32));
-    let mut registry = ProviderRegistry::new(
-        BridgeLimits::default(),
-        resources,
-        Arc::clone(&grants),
-        activity,
-    )
-    .unwrap();
-    grants
-        .set(
-            principal(),
-            Capability::new(DOMAIN).unwrap(),
-            Sensitivity::Sensitive,
-            GrantDecision::AllowExactBuild,
-        )
-        .unwrap();
-    registry.register(provider).unwrap();
-    let context = SessionContext {
-        id: SessionId(7),
-        principal: principal(),
-        profile: ExecutionProfile::Legacy,
-    };
-    let plan = registry
-        .negotiate(
-            &context.principal,
-            context.profile,
-            &BTreeSet::from([Capability::new(DOMAIN).unwrap()]),
-        )
-        .unwrap();
-    let observer = registry
-        .open_session_bound(&context, &plan, SourceWindowId(11), 0)
-        .unwrap();
-    registry.mark_session_ready(context.id).unwrap();
-    (registry, observer)
 }
 
 pub fn request(action: &str, payload: Value) -> ProviderRequest {

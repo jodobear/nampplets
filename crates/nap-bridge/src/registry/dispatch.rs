@@ -155,14 +155,23 @@ impl ProviderRegistry {
                 .map_err(BridgeError::ResourceRefused);
         }
         match self.grants.decision(&context.principal, domain) {
-            decision if decision.allows_without_prompt() => self
-                .resources
-                .admit(
-                    context.id,
-                    Some(domain.clone()),
-                    ResourceClass::ProviderCall,
-                )
-                .map_err(BridgeError::ResourceRefused),
+            decision if decision.allows_without_prompt() => {
+                if !self
+                    .admitted_domains(&context.principal, context.profile)
+                    .contains(domain)
+                {
+                    return Err(BridgeError::CapabilityDenied {
+                        domain: domain.clone(),
+                    });
+                }
+                self.resources
+                    .admit(
+                        context.id,
+                        Some(domain.clone()),
+                        ResourceClass::ProviderCall,
+                    )
+                    .map_err(BridgeError::ResourceRefused)
+            }
             GrantDecision::AskEveryTime => Err(BridgeError::GrantDecisionRequired {
                 domain: domain.clone(),
             }),
