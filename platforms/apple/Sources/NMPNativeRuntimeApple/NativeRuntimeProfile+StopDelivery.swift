@@ -166,7 +166,9 @@ extension NativeRuntimeProfile {
     func retireRustTerminatedSessionsAfterDelivery(snapshot: RuntimeSnapshot) {
         let retainedSessionIDs = Set(snapshot.sessions.map(\.id))
         lock.lock()
-        let candidates = sessions.compactMap { sessionID, weakSession in
+        let candidates: [RustRuntimeNappletSession] = sessions.compactMap {
+            entry -> RustRuntimeNappletSession? in
+            let (sessionID, weakSession) = entry
             guard stoppingSessions[sessionID] == nil,
                   snapshot.closed || !retainedSessionIDs.contains(sessionID)
             else { return nil }
