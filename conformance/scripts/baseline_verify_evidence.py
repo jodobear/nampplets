@@ -60,7 +60,7 @@ def verify_upgrade_report(
         ],
         "rejected": [
             "caller-supplied-inc-sender",
-            "malformed-or-conflicting-normalized-intent-identity",
+            "malformed-intent-fields-or-conflicting-aliases",
             "kehto-artifacts-with-modulepreload-fetch",
             "raw-nip51-list-item-wire",
         ],

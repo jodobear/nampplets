@@ -11,7 +11,7 @@
   "local_patches": {
     "napplet_web": {
       "path": "conformance/patches/napplet-web/compat-v2.patch",
-      "sha256": "a1f758cc50d726adb4ca93b75bc39ec8936329be40062a2a63150adcb3c0e440"
+      "sha256": "a962a7f9146a94a7f5bc40df8f0dbd53064cc4419daa0a1a72bc6ac74458ffb2"
     }
   },
   "from": {
@@ -40,7 +40,7 @@
   ],
   "rejected": [
     "caller-supplied-inc-sender",
-    "malformed-or-conflicting-normalized-intent-identity",
+    "malformed-intent-fields-or-conflicting-aliases",
     "kehto-artifacts-with-modulepreload-fetch",
     "raw-nip51-list-item-wire"
   ],

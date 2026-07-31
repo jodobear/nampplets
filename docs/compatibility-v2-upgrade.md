@@ -33,7 +33,9 @@ conformance digest manifest.
   boundary.
 - `intent.invoke.request` requires `archetype`; omitted `action` defaults to
   `open`, and omitted `convention` defaults to the matching queryless
-  `napplet:<archetype>/<action>` identity before reference delivery.
+  `napplet:<archetype>/<action>` identity before reference delivery. An
+  explicit queryless convention remains the 0.28 routing identity and need not
+  be derived from the archetype/action pair.
 - `intent.deliver` is an independent shell-to-napplet carrier with
   runtime-attested sender provenance.
 - The NIP-5D source snapshot now recommends a strict self-contained iframe CSP.
@@ -53,7 +55,7 @@ conformance digest manifest.
 
 - A napplet-emitted `inc.emit.sender` is rejected.
 - A 0.29 intent request with malformed optional identity fields, a queried or
-  fragmented convention, mismatched explicit archetype/action/convention, or
+  fragmented convention, conflicting `convention`/`protocol` aliases, or a
   caller-supplied sender is rejected by the pinned conformance validator.
 - Kehto production artifacts containing Vite's module-preload `fetch` helper
   are not compatibility fixtures.
@@ -81,7 +83,7 @@ ratified and does not advertise private-item support.
 Existing 0.28-built napplets remain source-compatible: optional intent fields
 are accepted and defaulted by both the patched web reference boundary and the
 Rust provider, while Rust also accepts the historic `protocol` alias. Delivery
-uses the normalized identity. This tolerance is one-way; the runtime never
+uses the selected queryless convention identity. This tolerance is one-way; the runtime never
 emits a forged sender or converts a carrier back into caller-controlled
 identity.
 
