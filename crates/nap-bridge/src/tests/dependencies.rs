@@ -6,6 +6,7 @@ fn provider_is_absent_until_every_dependency_is_admitted() {
     let identity = Capability::new("identity").unwrap();
     let relay = Capability::new("relay").unwrap();
     let lists = Capability::new("lists").unwrap();
+    let groups = Capability::new("groups").unwrap();
     for domain in [&identity, &relay] {
         registry
             .register(Arc::new(EchoProvider {
@@ -34,6 +35,19 @@ fn provider_is_absent_until_every_dependency_is_admitted() {
             calls: Arc::new(AtomicUsize::new(0)),
         }))
         .unwrap();
+    registry
+        .register(Arc::new(EchoProvider {
+            descriptor: ProviderDescriptor {
+                domain: groups.clone(),
+                protocol_versions: BTreeSet::from([Arc::from("NAP-GROUPS")]),
+                actions: BTreeSet::from([Arc::from("list")]),
+                sensitive: true,
+                dependencies: BTreeSet::from([lists.clone()]),
+                platform_availability: ProviderPlatformAvailability::Available,
+            },
+            calls: Arc::new(AtomicUsize::new(0)),
+        }))
+        .unwrap();
     grants
         .set(
             principal.clone(),
@@ -47,6 +61,14 @@ fn provider_is_absent_until_every_dependency_is_admitted() {
         .negotiate(&principal, ExecutionProfile::Legacy, &BTreeSet::new())
         .unwrap();
     assert!(!no_dependencies.exposes(&lists));
+    assert_eq!(
+        registry.revocation_scope(&identity),
+        BTreeSet::from([identity.clone(), lists.clone(), groups.clone()])
+    );
+    assert_eq!(
+        registry.revocation_scope(&relay),
+        BTreeSet::from([relay.clone(), lists.clone(), groups])
+    );
 
     for dependency in [&identity, &relay] {
         grants

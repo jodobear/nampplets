@@ -6,7 +6,7 @@ mod policy;
 mod review;
 mod revision;
 
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use nmp_native_runtime_core::{Capability, GrantDecision, Principal, Sensitivity};
 use nmp_native_runtime_store::StoreError;
@@ -69,6 +69,9 @@ impl RuntimeApp {
             self.refuse_store(state, Some(principal), None, error, now);
             return;
         }
+        if previous.allows_without_prompt() && !decision.allows_without_prompt() {
+            self.cancel_revocation_scope(state, &principal, &capability, false, now);
+        }
         self.record_activity(
             state,
             &principal,
@@ -123,24 +126,7 @@ impl RuntimeApp {
             self.refuse_store(state, Some(principal), None, error, now);
             return;
         }
-        let operations = state
-            .operations
-            .iter()
-            .filter_map(|(id, operation)| {
-                (operation.principal == principal && operation.domain == capability)
-                    .then_some((*id, operation.session))
-            })
-            .collect::<Vec<_>>();
-        for (id, _) in operations {
-            if let Some(operation) = state.operations.remove(&id) {
-                self.cancel_provider_operation(
-                    state,
-                    operation,
-                    Arc::from("permission revoked"),
-                    now,
-                );
-            }
-        }
+        self.cancel_revocation_scope(state, &principal, &capability, true, now);
         self.bridge.revoke(&principal, &capability);
         self.record_activity(
             state,
@@ -178,6 +164,50 @@ impl RuntimeApp {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn cancel_provider_operations_for_domains(
+        &self,
+        state: &mut AppState,
+        principal: &Principal,
+        domains: &BTreeSet<Capability>,
+        now: u64,
+    ) {
+        let operations = state
+            .operations
+            .iter()
+            .filter_map(|(id, operation)| {
+                (&operation.principal == principal && domains.contains(&operation.domain))
+                    .then_some(*id)
+            })
+            .collect::<Vec<_>>();
+        for id in operations {
+            if let Some(operation) = state.operations.remove(&id) {
+                self.cancel_provider_operation(
+                    state,
+                    operation,
+                    Arc::from("permission revoked"),
+                    now,
+                );
+            }
+        }
+    }
+
+    fn cancel_revocation_scope(
+        &self,
+        state: &mut AppState,
+        principal: &Principal,
+        capability: &Capability,
+        root_uses_revoke: bool,
+        now: u64,
+    ) {
+        let domains = self.bridge.revocation_scope(capability);
+        self.cancel_provider_operations_for_domains(state, principal, &domains, now);
+        for domain in domains {
+            if !root_uses_revoke || domain != *capability {
+                self.bridge.cancel_capability_work(principal, &domain);
+            }
+        }
     }
 }
 

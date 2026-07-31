@@ -169,6 +169,24 @@ impl ProviderRegistry {
             .collect()
     }
 
+    /// Returns the revoked capability and every registered provider whose
+    /// direct or transitive dependency closure contains it.
+    pub fn revocation_scope(&self, capability: &Capability) -> BTreeSet<Capability> {
+        let mut affected = BTreeSet::from([capability.clone()]);
+        for _ in 0..self.providers.len() {
+            let prior = affected.len();
+            for (domain, provider) in &self.providers {
+                if !provider.descriptor().dependencies.is_disjoint(&affected) {
+                    affected.insert(domain.clone());
+                }
+            }
+            if affected.len() == prior {
+                break;
+            }
+        }
+        affected
+    }
+
     pub fn negotiate(
         &self,
         principal: &Principal,
