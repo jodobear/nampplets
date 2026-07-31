@@ -104,6 +104,52 @@ final class RuntimeSessionStopEvidenceTests: RuntimeNappletSessionTestCase {
         )
     }
 
+    func testStaleBatchContainingTerminalMarkerDoesNotProveDelivery() throws {
+        let fixture = try makeStoppingFixture("stale-terminal-marker")
+        defer { fixture.profile.close() }
+
+        let lossIndicators: [(cursorWasStale: Bool, lostBeforeBatch: UInt64)] = [
+            (true, 1),
+            (true, 0),
+            (false, 1),
+        ]
+        for loss in lossIndicators {
+            fixture.profile.update(
+                frame: RuntimeObservationFrame(
+                    snapshot: .snapshot(fixture.snapshot),
+                    catalog: fixture.profile.catalogSnapshotForTesting,
+                    events: [
+                        RuntimeEvent(
+                            sequence: 2,
+                            kind: "session-changed",
+                            detail: "stopped",
+                            sessionId: fixture.session.sessionID,
+                            responseJson: nil
+                        ),
+                    ],
+                    oldestAvailableEvent: 2,
+                    newestAvailableEvent: 2,
+                    eventCursorWasStale: loss.cursorWasStale,
+                    lostBeforeBatch: loss.lostBeforeBatch
+                )
+            )
+            XCTAssertEqual(
+                stoppingSession(in: fixture.profile, id: fixture.session.sessionID)?
+                    .terminalBatchDelivered,
+                false
+            )
+        }
+        XCTAssertEqual(
+            NativeRuntimeProfile.stopFrameDisposition(
+                snapshotRevision: fixture.snapshot.revision,
+                minimumTerminalRevision: fixture.snapshot.revision,
+                snapshotRetainsSession: false,
+                terminalBatchDelivered: false
+            ),
+            .wait
+        )
+    }
+
     private func makeStoppingFixture(
         _ name: String
     ) throws -> (

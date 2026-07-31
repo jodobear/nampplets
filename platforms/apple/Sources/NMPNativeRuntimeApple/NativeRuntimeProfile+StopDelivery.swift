@@ -33,8 +33,13 @@ extension NativeRuntimeProfile {
 
     /// Called only after every event in the frame has been handed to session
     /// sinks. Rust projects this typed stopped event after all terminal
-    /// responses for the same Stop, so it is an exact delivery watermark.
+    /// responses for the same Stop, so a loss-free batch makes it an exact
+    /// delivery watermark. A stale batch can retain the marker after evicting
+    /// an earlier terminal response.
     func recordDeliveredStopTerminalEvents(_ frame: RuntimeObservationFrame) {
+        guard !frame.eventCursorWasStale, frame.lostBeforeBatch == 0 else {
+            return
+        }
         let terminalSessionIDs = Set(
             frame.events.compactMap { event in
                 event.kind == "session-changed" && event.detail == "stopped"
