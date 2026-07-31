@@ -6,7 +6,7 @@ import XCTest
 // MARK: - Stop terminal-response handoff
 
 final class RuntimeSessionStopDeliveryTests: RuntimeNappletSessionTestCase {
-    func testLostStopFramePreservesTerminalSinkAcrossLaterCleanFrames() throws {
+    func testRefusedStaleFramePreservesStopAcrossLaterCleanSnapshot() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "runtime-apple-stop-evidence-loss-\(UUID().uuidString)",
@@ -23,42 +23,48 @@ final class RuntimeSessionStopDeliveryTests: RuntimeNappletSessionTestCase {
             maximumReadBytes: 1_024
         )
         var terminalSnapshot = try profile.snapshotForTesting
-        terminalSnapshot.revision = UInt64.max
+        terminalSnapshot.revision += 1
         let stopping = NativeRuntimeProfile.StoppingSession(
             session: session,
-            minimumTerminalRevision: UInt64.max
+            minimumTerminalRevision: terminalSnapshot.revision
         )
         profile.lock.lock()
         profile.stoppingSessions[session.sessionID] = stopping
         profile.lock.unlock()
-        func frame(stale: Bool, lost: UInt64) -> RuntimeObservationFrame {
-            RuntimeObservationFrame(
-                snapshot: .snapshot(terminalSnapshot),
+        profile.update(
+            frame: RuntimeObservationFrame(
+                snapshot: .refused(
+                    revision: terminalSnapshot.revision,
+                    closed: false,
+                    refusal: RuntimeRefusal(
+                        code: "snapshot-projection-refused",
+                        detail: "deterministic stop-loss regression",
+                        occurredAtMillis: 1
+                    )
+                ),
                 catalog: profile.catalogSnapshotForTesting,
                 events: [],
                 oldestAvailableEvent: 1,
                 newestAvailableEvent: 1,
-                eventCursorWasStale: stale,
-                lostBeforeBatch: lost
+                eventCursorWasStale: true,
+                lostBeforeBatch: 1
             )
-        }
-
-        profile.completeStopsAfterDelivery(
-            frame: frame(stale: true, lost: 1),
-            snapshot: terminalSnapshot,
-            activeSessions: [session],
-            stoppingSessionsAtFrameStart: [session.sessionID: stopping]
         )
         profile.lock.lock()
         let preserved = profile.stoppingSessions[session.sessionID]
         profile.lock.unlock()
         XCTAssertEqual(preserved?.terminalEvidenceWasLost, true)
 
-        profile.completeStopsAfterDelivery(
-            frame: frame(stale: false, lost: 0),
-            snapshot: terminalSnapshot,
-            activeSessions: [session],
-            stoppingSessionsAtFrameStart: [session.sessionID: try XCTUnwrap(preserved)]
+        profile.update(
+            frame: RuntimeObservationFrame(
+                snapshot: .snapshot(terminalSnapshot),
+                catalog: profile.catalogSnapshotForTesting,
+                events: [],
+                oldestAvailableEvent: 1,
+                newestAvailableEvent: 1,
+                eventCursorWasStale: false,
+                lostBeforeBatch: 0
+            )
         )
         profile.lock.lock()
         let stillPreserved = profile.stoppingSessions[session.sessionID]
@@ -70,9 +76,7 @@ final class RuntimeSessionStopDeliveryTests: RuntimeNappletSessionTestCase {
                 snapshotRevision: 12,
                 minimumTerminalRevision: 12,
                 snapshotRetainsSession: false,
-                eventCursorWasStale: false,
-                lostBeforeBatch: 1,
-                terminalEvidenceWasLost: false
+                terminalEvidenceWasLost: true
             ),
             .preserveAfterEvidenceLoss
         )

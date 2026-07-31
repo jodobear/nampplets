@@ -15,8 +15,7 @@ use crate::{
     ObservationStart, RuntimeObservation, RuntimeObservationFrame, RuntimeObserver,
     RuntimeReceiptsSlotObservationStart, RuntimeReceiptsSlotObserver,
     RuntimeRelayDiagnosticsObservationStart, RuntimeRelayDiagnosticsObserver,
-    RuntimeRelayDiagnosticsSnapshot, projection::project_event, slots::project_receipts,
-    support::bump_signal,
+    RuntimeRelayDiagnosticsSnapshot, slots::project_receipts, support::bump_signal,
 };
 
 #[uniffi::export]
@@ -91,20 +90,16 @@ impl RuntimeController {
                         if stopped.load(Ordering::Acquire) {
                             break;
                         }
-                        let batch = controller.app.events_after(event_cursor);
-                        event_cursor = batch.newest_available;
+                        let cut = controller.capture_app_observation(&app_observer, event_cursor);
+                        event_cursor = cut.newest_available_event;
                         observer.update(RuntimeObservationFrame {
-                            snapshot: controller.project_snapshot(&app_observer.latest()),
+                            snapshot: cut.snapshot,
                             catalog: controller.catalog.feed_snapshot(None),
-                            events: batch
-                                .events
-                                .into_iter()
-                                .map(|event| project_event(event.sequence, &event.event))
-                                .collect(),
-                            oldest_available_event: batch.oldest_available,
-                            newest_available_event: batch.newest_available,
-                            event_cursor_was_stale: batch.cursor_was_stale,
-                            lost_before_batch: batch.lost_before_batch,
+                            events: cut.events,
+                            oldest_available_event: cut.oldest_available_event,
+                            newest_available_event: cut.newest_available_event,
+                            event_cursor_was_stale: cut.event_cursor_was_stale,
+                            lost_before_batch: cut.lost_before_batch,
                         });
                         tokio::select! {
                             changed = app_observer.changed() => {

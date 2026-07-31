@@ -6,9 +6,9 @@ extension NativeRuntimeProfile {
     struct StoppingSession {
         let session: RustRuntimeNappletSession
         let minimumTerminalRevision: UInt64
-        /// Once Rust reports an event gap in the frame that removes this
-        /// session, the Stop terminal may be gone permanently. Keep the sink
-        /// instead of later pretending a clean frame delivered it.
+        /// Any event gap while this Stop is pending can contain its terminal
+        /// response. Keep the sink instead of treating a later clean snapshot
+        /// as proof that the response was delivered.
         var terminalEvidenceWasLost = false
     }
 
@@ -22,8 +22,6 @@ extension NativeRuntimeProfile {
         snapshotRevision: UInt64,
         minimumTerminalRevision: UInt64,
         snapshotRetainsSession: Bool,
-        eventCursorWasStale: Bool,
-        lostBeforeBatch: UInt64,
         terminalEvidenceWasLost: Bool
     ) -> StopFrameDisposition {
         guard snapshotRevision >= minimumTerminalRevision,
@@ -31,56 +29,46 @@ extension NativeRuntimeProfile {
         else {
             return .wait
         }
-        if terminalEvidenceWasLost || eventCursorWasStale || lostBeforeBatch > 0 {
+        if terminalEvidenceWasLost {
             return .preserveAfterEvidenceLoss
         }
         return .complete
     }
 
+    /// Called while the profile lock is held, before snapshot projection can
+    /// refuse the frame. Event replay has already advanced on the Rust side, so
+    /// every pending Stop must remember the gap even without a usable snapshot.
+    func latchStopEventLossLocked(_ frame: RuntimeObservationFrame) {
+        guard frame.eventCursorWasStale || frame.lostBeforeBatch > 0 else {
+            return
+        }
+        for sessionID in Array(stoppingSessions.keys) {
+            if var stopping = stoppingSessions[sessionID] {
+                stopping.terminalEvidenceWasLost = true
+                stoppingSessions[sessionID] = stopping
+            }
+        }
+    }
+
     func completeStopsAfterDelivery(
-        frame: RuntimeObservationFrame,
         snapshot: RuntimeSnapshot,
-        activeSessions: [RustRuntimeNappletSession],
         stoppingSessionsAtFrameStart: [UInt64: StoppingSession]
     ) {
         let retainedSessionIDs = Set(snapshot.sessions.map(\.id))
-        let stopFrames = activeSessions.compactMap { session in
-            stoppingSessionsAtFrameStart[session.sessionID].map { stopping in
-                (
-                    session: session,
-                    disposition: Self.stopFrameDisposition(
-                        snapshotRevision: snapshot.revision,
-                        minimumTerminalRevision: stopping.minimumTerminalRevision,
-                        snapshotRetainsSession: retainedSessionIDs.contains(session.sessionID),
-                        eventCursorWasStale: frame.eventCursorWasStale,
-                        lostBeforeBatch: frame.lostBeforeBatch,
-                        terminalEvidenceWasLost: stopping.terminalEvidenceWasLost
-                    )
+        let stopFrames = stoppingSessionsAtFrameStart.values.map { stopping in
+            (
+                session: stopping.session,
+                disposition: Self.stopFrameDisposition(
+                    snapshotRevision: snapshot.revision,
+                    minimumTerminalRevision: stopping.minimumTerminalRevision,
+                    snapshotRetainsSession: retainedSessionIDs.contains(
+                        stopping.session.sessionID
+                    ),
+                    terminalEvidenceWasLost: stopping.terminalEvidenceWasLost
                 )
-            }
+            )
         }
-        preserveStopsWithLostEvidence(stopFrames)
         completeStopsWithDeliveredEvidence(stopFrames)
-    }
-
-    private func preserveStopsWithLostEvidence(
-        _ stopFrames: [(session: RustRuntimeNappletSession, disposition: StopFrameDisposition)]
-    ) {
-        let evidenceLost = stopFrames.filter {
-            $0.disposition == .preserveAfterEvidenceLoss
-        }
-        guard !evidenceLost.isEmpty else { return }
-        lock.lock()
-        for candidate in evidenceLost {
-            let session = candidate.session
-            if var stopping = stoppingSessions[session.sessionID],
-               stopping.session === session
-            {
-                stopping.terminalEvidenceWasLost = true
-                stoppingSessions[session.sessionID] = stopping
-            }
-        }
-        lock.unlock()
     }
 
     private func completeStopsWithDeliveredEvidence(
