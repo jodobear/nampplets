@@ -50,17 +50,26 @@ pub(super) fn validate_invocation(
     // `intent.open(archetype, payload, { protocol })` sugar spreads `opts`
     // directly onto the wire request) sends it as `protocol`. Accept either
     // spelling so real-world napplets built against that SDK aren't rejected.
-    let convention = optional_text(request, object, "convention", limits.maximum_text_bytes)?.or(
-        optional_text(request, object, "protocol", limits.maximum_text_bytes)?,
-    );
-    if convention
-        .as_deref()
-        .is_some_and(|value| !value.starts_with("napplet:"))
-    {
+    let named_convention = optional_text(request, object, "convention", limits.maximum_text_bytes)?;
+    let protocol_alias = optional_text(request, object, "protocol", limits.maximum_text_bytes)?;
+    if matches!(
+        (&named_convention, &protocol_alias),
+        (Some(convention), Some(protocol)) if convention != protocol
+    ) {
         return Err(invalid(
             request,
-            "`convention` must use the napplet: namespace",
+            "`convention` and its `protocol` alias must agree",
         ));
+    }
+    let convention = named_convention.or(protocol_alias);
+    if let Some(convention) = convention.as_deref() {
+        let expected = format!("napplet:{archetype}/{action}");
+        if convention != expected {
+            return Err(invalid(
+                request,
+                "intent convention must exactly match its archetype and action",
+            ));
+        }
     }
     let handler_request = match object.get("handler").and_then(Value::as_str) {
         None | Some("default") => IntentHandlerRequest::Default,

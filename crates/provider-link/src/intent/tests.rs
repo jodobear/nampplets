@@ -334,6 +334,15 @@ fn malformed_convention_and_behavior_are_rejected_before_dispatch() {
     let rig = Rig::new(Arc::new(CancelIntentChoice));
     for request in [
         json!({"archetype":"note","convention":"https://example.com"}),
+        json!({"archetype":"note","action":"open","convention":"napplet:note/edit"}),
+        json!({"archetype":"note","action":"open","protocol":"napplet:profile/open"}),
+        json!({
+            "archetype":"note",
+            "action":"open",
+            "convention":"napplet:note/open",
+            "protocol":"napplet:note/edit"
+        }),
+        json!({"archetype":"note","convention":"napplet:note/open?draft=true"}),
         json!({"archetype":"Note"}),
         json!({"archetype":"note","behavior":{"focus":"yes"}}),
         json!({"archetype":"note","unknown":true}),

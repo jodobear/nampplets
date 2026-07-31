@@ -244,7 +244,7 @@ impl RuntimeApp {
                 let mut proposal = call.take_write_proposal();
                 if handle.is_some() && proposal.is_some() {
                     if let Some(proposal) = proposal.take() {
-                        proposal.refuse(Arc::from(
+                        proposal.refuse_system(Arc::from(
                             "provider returned both a streaming operation and a write proposal",
                         ));
                     }
@@ -264,7 +264,8 @@ impl RuntimeApp {
                 let operation = if handle.is_some() || proposal.is_some() {
                     if state.operations.len() >= self.limits.maximum_provider_operations {
                         if let Some(proposal) = proposal.take() {
-                            proposal.refuse(Arc::from("provider operation capacity is full"));
+                            proposal
+                                .refuse_system(Arc::from("provider operation capacity is full"));
                         }
                         if let Some(handle) = handle.take() {
                             handle.cancel();
@@ -281,7 +282,7 @@ impl RuntimeApp {
                     }
                     let Some(next) = state.next_operation_id.checked_add(1) else {
                         if let Some(proposal) = proposal.take() {
-                            proposal.refuse(Arc::from(
+                            proposal.refuse_system(Arc::from(
                                 "provider operation identifier space is exhausted",
                             ));
                         }

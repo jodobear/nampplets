@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use nmp_native_nap_bridge::{ProviderPushSender, ProviderWriteCompletion};
+use nmp_native_nap_bridge::{ProviderPushSender, ProviderWriteCompletion, ProviderWriteRefusal};
 use nmp_native_runtime_core::{BoundedJson, ReceiptEventSink, ReceiptSinkError, ReceiptSnapshot};
 use serde_json::{Map, Value};
 
@@ -76,10 +76,14 @@ impl ProviderWriteCompletion for ListsWriteCompletion {
         Arc::new((*self).into_sink())
     }
 
-    fn refused(self: Box<Self>, reason: Arc<str>) {
+    fn refused(self: Box<Self>, refusal: ProviderWriteRefusal) {
+        let (error, reason) = match refusal {
+            ProviderWriteRefusal::UserDenied(reason) => ("user-denied", reason),
+            ProviderWriteRefusal::SystemUnavailable(reason) => ("list-unavailable", reason),
+        };
         (*self)
             .into_sink()
-            .deliver(false, None, Some("user-denied"), Some(reason.to_string()));
+            .deliver(false, None, Some(error), Some(reason.to_string()));
     }
 }
 

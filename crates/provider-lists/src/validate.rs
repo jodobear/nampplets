@@ -3,10 +3,12 @@ use std::{collections::BTreeSet, sync::Arc};
 use serde_json::{Map, Value};
 
 use crate::{
-    ListEntry, ListItemTag, ListMutation, ListSelector, ListsProviderLimits, request::ListRefusal,
+    ListEntry, ListItemTag, ListMutation, ListSelector, ListsProviderLimits, SupportedList,
+    request::ListRefusal,
 };
 
 pub(crate) fn validate_value(
+    supported: &SupportedList,
     tag: ListItemTag,
     value: &str,
     limits: ListsProviderLimits,
@@ -36,6 +38,9 @@ pub(crate) fn validate_value(
             if value.len() > limits.maximum_value_bytes || !is_address(value) {
                 return Err(reject("kind:pubkey:identifier"));
             }
+            if supported.kind == 10_015 && address_kind(value) != Some(30_015) {
+                return Err(reject("a kind 30015 interest-set address"));
+            }
         }
     }
     Ok(())
@@ -61,6 +66,10 @@ fn is_address(value: &str) -> bool {
         && kind.bytes().all(|byte| byte.is_ascii_digit())
         && is_hex32(pubkey)
         && !identifier.contains(':')
+}
+
+fn address_kind(value: &str) -> Option<u16> {
+    value.split(':').next()?.parse().ok()
 }
 
 /// Decides the exact result of adding `items` to `current`.

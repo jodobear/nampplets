@@ -220,7 +220,7 @@ fn parse_item(
         .get("value")
         .and_then(Value::as_str)
         .ok_or(ListRefusal::MalformedItems)?;
-    validate_value(tag, value, limits)?;
+    validate_value(supported, tag, value, limits)?;
     for hint in ["relay", "label"] {
         if let Some(value) = item.get(hint) {
             let value = value.as_str().ok_or(ListRefusal::MalformedItems)?;

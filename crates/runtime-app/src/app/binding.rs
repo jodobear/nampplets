@@ -143,7 +143,7 @@ impl RuntimeApp {
             return;
         };
         if !approve {
-            proposal.refuse(Arc::from("native approval was denied"));
+            proposal.refuse_user(Arc::from("native approval was denied"));
             if let Some(handle) = operation.handle {
                 handle.cancel();
             }

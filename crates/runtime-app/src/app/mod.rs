@@ -159,7 +159,7 @@ pub(crate) struct ActiveOperation {
 impl ActiveOperation {
     fn cancel(self, reason: Arc<str>) {
         if let Some(proposal) = self.proposal {
-            proposal.refuse(reason);
+            proposal.refuse_system(reason);
         }
         if let Some(handle) = self.handle {
             handle.cancel();

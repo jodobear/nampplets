@@ -38,6 +38,19 @@ const REFERENCE_SUBSCRIBER = 'reference-subscriber';
 const REFERENCE_CONVENTION = 'napplet:note/open';
 const REFERENCE_CONTRACT = { convention: REFERENCE_CONVENTION, eventKinds: [1, 30023] };
 
+/** Fixed retained-delivery bounds used by the reference shell, including browser boot runs. */
+export const REFERENCE_DELIVERY_LIMITS = Object.freeze({ perTarget: 32, total: 48 });
+
+/** Bounded host-observable state for retained target delivery saturation. */
+export interface ReferenceDeliveryState {
+  readonly retained: number;
+  readonly refused: number;
+  readonly lastRefusal: {
+    readonly target: string;
+    readonly reason: 'per-target-limit' | 'global-limit';
+  } | null;
+}
+
 /** One recorded inbound envelope from the napplet, with its validation verdict. */
 export interface RecordedEnvelope {
   /** The raw envelope the napplet posted. */
@@ -287,6 +300,8 @@ export interface ReferenceShell {
    * The endpoint, never envelope fields, determines delivered sender provenance.
    */
   handleFrom(endpoint: ReferenceEndpoint, envelope: unknown): unknown[];
+  /** Current bounded delivery occupancy and the latest observable refusal. */
+  readonly deliveryState: ReferenceDeliveryState;
   /** Drain retained target deliveries for one resolved reference target. */
   takeDeliveries(target: string): unknown[];
   /** Clear recorded envelopes. */
@@ -307,24 +322,38 @@ export function createReferenceShell(options: ReferenceShellOptions = {}): Refer
   const now = options.now ?? (() => Date.now());
   const records: RecordedEnvelope[] = [];
   const targetQueues = new Map<string, unknown[]>();
+  let retainedDeliveries = 0;
+  let refusedDeliveries = 0;
+  let lastDeliveryRefusal: ReferenceDeliveryState['lastRefusal'] = null;
 
-  function queueDelivery(target: string, delivery: unknown): void {
-    const queue = targetQueues.get(target);
-    if (queue) {
-      queue.push(delivery);
-      return;
+  function queueDelivery(target: string, delivery: unknown): boolean {
+    const queue = targetQueues.get(target) ?? [];
+    const refusalReason =
+      queue.length >= REFERENCE_DELIVERY_LIMITS.perTarget
+        ? 'per-target-limit'
+        : retainedDeliveries >= REFERENCE_DELIVERY_LIMITS.total
+          ? 'global-limit'
+          : null;
+    if (refusalReason) {
+      refusedDeliveries += 1;
+      lastDeliveryRefusal = { target, reason: refusalReason };
+      return false;
     }
-    targetQueues.set(target, [delivery]);
+    queue.push(delivery);
+    targetQueues.set(target, queue);
+    retainedDeliveries += 1;
+    return true;
   }
 
   function takeDeliveries(target: string): unknown[] {
     const queue = targetQueues.get(target) ?? [];
     targetQueues.delete(target);
+    retainedDeliveries -= queue.length;
     return queue;
   }
 
   function unavailableIntent(id: unknown, error: string): unknown[] {
-    return ok({ type: 'intent.invoke.result', id, result: { ok: false, error } });
+    return ok({ type: 'intent.invoke.result', id, result: { ok: false, handled: false, error } });
   }
 
   function handleIntentInvoke(endpoint: ReferenceEndpoint, env: Record<string, unknown>): unknown[] {
@@ -354,12 +383,14 @@ export function createReferenceShell(options: ReferenceShellOptions = {}): Refer
       convention,
     };
     if ('payload' in normalized) delivery.payload = normalized.payload;
-    queueDelivery(REFERENCE_HANDLER, { type: 'intent.deliver', delivery });
+    if (!queueDelivery(REFERENCE_HANDLER, { type: 'intent.deliver', delivery })) {
+      return unavailableIntent(env.id, 'reference delivery queue saturated');
+    }
 
     return ok({
       type: 'intent.invoke.result',
       id: env.id,
-      result: { ok: true, archetype, action, convention, handler: REFERENCE_HANDLER },
+      result: { ok: true, handled: true, archetype, action, convention, handler: REFERENCE_HANDLER },
     });
   }
 
@@ -423,12 +454,22 @@ export function createReferenceShell(options: ReferenceShellOptions = {}): Refer
     get records() {
       return records;
     },
+    get deliveryState() {
+      return {
+        retained: retainedDeliveries,
+        refused: refusedDeliveries,
+        lastRefusal: lastDeliveryRefusal ? { ...lastDeliveryRefusal } : null,
+      };
+    },
     handle,
     handleFrom,
     takeDeliveries,
     reset() {
       records.length = 0;
       targetQueues.clear();
+      retainedDeliveries = 0;
+      refusedDeliveries = 0;
+      lastDeliveryRefusal = null;
     },
   };
 }

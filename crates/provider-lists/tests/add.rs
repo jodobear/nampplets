@@ -105,13 +105,35 @@ fn a_refused_write_still_answers_the_napplet() {
     result
         .take_write_proposal()
         .unwrap()
-        .refuse(Arc::from("the user declined"));
+        .refuse_user(Arc::from("the user declined"));
 
     let pushed = drain(&observer);
     assert_eq!(pushed.len(), 1);
     assert_eq!(pushed[0]["ok"], false);
     assert_eq!(pushed[0]["error"], "user-denied");
     assert_eq!(pushed[0]["reason"], "the user declined");
+}
+
+#[test]
+fn a_system_refusal_is_not_reported_as_user_denial() {
+    let (provider, _source) = provider_with(vec![entry("a")]);
+    let (_registry, observer) = opened_session(provider.clone());
+
+    let mut result = call(
+        &provider,
+        "add",
+        json!({"list": follows(), "items": [p(&pubkey("b"))]}),
+    );
+    result
+        .take_write_proposal()
+        .unwrap()
+        .refuse_system(Arc::from("provider operation capacity is full"));
+
+    let pushed = drain(&observer);
+    assert_eq!(pushed.len(), 1);
+    assert_eq!(pushed[0]["ok"], false);
+    assert_eq!(pushed[0]["error"], "list-unavailable");
+    assert_eq!(pushed[0]["reason"], "provider operation capacity is full");
 }
 
 #[test]

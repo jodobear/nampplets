@@ -104,12 +104,40 @@ impl ProviderWriteProposal {
         (write, completion, work)
     }
 
-    pub fn refuse(mut self, reason: Arc<str>) {
+    pub fn refuse_user(mut self, reason: Arc<str>) {
         if let Some(completion) = self.completion.take() {
-            completion.refused(reason);
+            completion.refused(ProviderWriteRefusal::UserDenied(reason));
         }
         if let Some(work) = self.work.take() {
             work.cancellation().cancel();
+        }
+    }
+
+    pub fn refuse_system(mut self, reason: Arc<str>) {
+        if let Some(completion) = self.completion.take() {
+            completion.refused(ProviderWriteRefusal::SystemUnavailable(reason));
+        }
+        if let Some(work) = self.work.take() {
+            work.cancellation().cancel();
+        }
+    }
+}
+
+/// Why a retained provider write was refused before it reached NMP.
+///
+/// User denial is intentionally distinct from runtime capacity, lifecycle,
+/// and ownership failures so providers never blame a person for a system
+/// refusal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProviderWriteRefusal {
+    UserDenied(Arc<str>),
+    SystemUnavailable(Arc<str>),
+}
+
+impl ProviderWriteRefusal {
+    pub fn into_reason(self) -> Arc<str> {
+        match self {
+            Self::UserDenied(reason) | Self::SystemUnavailable(reason) => reason,
         }
     }
 }
@@ -129,7 +157,7 @@ impl Drop for ProviderWriteProposal {
 /// projection and the provider's protocol result through one observation.
 pub trait ProviderWriteCompletion: Send + Sync + fmt::Debug {
     fn into_receipt_sink(self: Box<Self>) -> Arc<dyn ReceiptEventSink>;
-    fn refused(self: Box<Self>, reason: Arc<str>);
+    fn refused(self: Box<Self>, refusal: ProviderWriteRefusal);
 }
 
 /// The lifecycle owner for one active provider operation.

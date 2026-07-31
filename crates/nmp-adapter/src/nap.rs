@@ -26,7 +26,7 @@ use nmp::{
 use nmp_native_nap_bridge::{
     Provider, ProviderCall, ProviderDescriptor, ProviderError, ProviderPlatformAvailability,
     ProviderPushSender, ProviderRequest, ProviderSession, ProviderSessionContext,
-    ProviderSessionEnd, ProviderWriteCompletion,
+    ProviderSessionEnd, ProviderWriteCompletion, ProviderWriteRefusal,
 };
 use nmp_native_runtime_core::{
     AccountRef, ApprovedWrite, BoundedJson, Capability, Principal, PublicIdentityDataPlane,
@@ -2073,9 +2073,9 @@ impl ProviderWriteCompletion for NapPublishCompletion {
         })
     }
 
-    fn refused(self: Box<Self>, reason: Arc<str>) {
+    fn refused(self: Box<Self>, refusal: ProviderWriteRefusal) {
         let sink = self.into_receipt_sink();
-        sink.close(Some(reason));
+        sink.close(Some(refusal.into_reason()));
     }
 }
 
@@ -3240,7 +3240,7 @@ mod tests {
             ReceiptReattachment::NotFound
         ));
 
-        proposal.refuse(Arc::from("native approval refused"));
+        proposal.refuse_user(Arc::from("native approval refused"));
         let batch = tokio::time::timeout(Duration::from_secs(1), rig.observer.changed(1))
             .await
             .expect("refusal result must remain bounded")

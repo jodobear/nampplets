@@ -261,6 +261,36 @@ fn a_replaceable_address_must_be_kind_pubkey_identifier() {
 }
 
 #[test]
+fn interests_accept_only_kind_30015_interest_set_addresses() {
+    let (answer, _) = refusal(
+        Vec::new(),
+        json!({
+            "list": {"kind": 10015},
+            "items": [{"itemType": "address", "value": format!("30023:{}:article", pubkey("b"))}],
+        }),
+    );
+    assert_eq!(answer["ok"], false);
+    assert_eq!(answer["error"], "invalid-item");
+
+    let (provider, source) = provider_with(Vec::new());
+    let (_registry, _observer) = opened_session(provider.clone());
+    let address = format!("30015:{}:nostr", pubkey("b"));
+    let mut result = call(
+        &provider,
+        "add",
+        json!({
+            "list": {"kind": 10015},
+            "items": [{"itemType": "address", "value": address}],
+        }),
+    );
+    assert!(result.take_write_proposal().is_some());
+    assert_eq!(
+        source.drafted(),
+        vec![vec![ListEntry::new(ListItemTag::A, address)]]
+    );
+}
+
+#[test]
 fn a_missing_correlation_id_is_a_transport_fault() {
     let (provider, _) = provider_with(Vec::new());
     let (_registry, _observer) = opened_session(provider.clone());
