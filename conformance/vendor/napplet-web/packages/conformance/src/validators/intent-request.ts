@@ -11,6 +11,7 @@ const INTENT_REQUEST_FIELDS = new Set([
   'handler',
   'behavior',
 ]);
+const INTENT_BEHAVIOR_FIELDS = new Set(['focus', 'newWindow', 'reuse']);
 
 function optionalString(
   request: Record<string, unknown>,
@@ -24,6 +25,33 @@ function optionalString(
       message: `Intent request field "${field}" must be a string`,
       field: `request.${field}`,
     });
+  }
+}
+
+function validateBehavior(value: unknown, errors: EnvelopeError[]): void {
+  if (value === undefined) return;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    errors.push({
+      code: 'wrong-type',
+      message: 'Intent request field "behavior" must be an object',
+      field: 'request.behavior',
+    });
+    return;
+  }
+  for (const [field, hint] of Object.entries(value)) {
+    if (!INTENT_BEHAVIOR_FIELDS.has(field)) {
+      errors.push({
+        code: 'invalid-intent-request',
+        message: `Unknown intent behavior field "${field}"`,
+        field: `request.behavior.${field}`,
+      });
+    } else if (typeof hint !== 'boolean') {
+      errors.push({
+        code: 'wrong-type',
+        message: `Intent behavior field "${field}" must be a boolean`,
+        field: `request.behavior.${field}`,
+      });
+    }
   }
 }
 
@@ -67,6 +95,7 @@ export function validateIntentInvokeRequest(
   for (const field of ['action', 'convention', 'protocol', 'handler'] as const) {
     optionalString(normalized, field, errors);
   }
+  validateBehavior(normalized.behavior, errors);
 
   if (typeof normalized.action === 'string' && !INTENT_SLUG.test(normalized.action)) {
     errors.push({

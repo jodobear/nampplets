@@ -81,8 +81,20 @@ describe('intent.invoke request validation', () => {
     expect(validateEnvelope(intentInvoke({
       archetype: 'note',
       payload: { extra: true },
-      behavior: { custom: true },
+      behavior: { focus: true, newWindow: false, reuse: true },
     })).ok).toBe(true);
+  });
+
+  it('matches the runtime intent behavior schema exactly', () => {
+    for (const [behavior, field] of [
+      [null, 'request.behavior'],
+      ['focus', 'request.behavior'],
+      [{ focus: 'yes' }, 'request.behavior.focus'],
+      [{ custom: true }, 'request.behavior.custom'],
+    ] as const) {
+      expect(validateEnvelope(intentInvoke({ archetype: 'note', behavior })).errors)
+        .toContainEqual(expect.objectContaining({ field }));
+    }
   });
 
   it('rejects archetypes outside the runtime lowercase slug boundary', () => {

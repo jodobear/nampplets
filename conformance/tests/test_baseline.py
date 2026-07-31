@@ -156,6 +156,20 @@ class BaselineTests(unittest.TestCase):
             {"accepted": 7, "rejected": 4, "explicitly_unsupported": 1},
         )
 
+    def test_upgrade_report_rejects_previous_authority_drift(self) -> None:
+        lock = verify_baseline.load_lock()
+        report = verify_baseline.load_json(
+            "conformance/reports/compatibility-v2.json"
+        )
+        report["from"]["napplet_web"] = "0" * 40
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=report):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "upgrade report previous authority mismatch",
+            ):
+                verify_baseline.verify_upgrade_report(lock)
+
     def test_upgrade_report_binds_every_lists_authority(self) -> None:
         lock = verify_baseline.load_lock()
         for authority in (

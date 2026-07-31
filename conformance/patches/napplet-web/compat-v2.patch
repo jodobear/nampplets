@@ -1525,10 +1525,10 @@ index 570d2106005014fb9d20cc02571a7a4770ce14a2..339520b3c367c8914e4c0319fb32dd17
   *
 diff --git a/packages/conformance/src/validators/intent-request.test.ts b/packages/conformance/src/validators/intent-request.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..76b9543fd0d3ad27ea404200dc7c6cdbf9e86843
+index 0000000000000000000000000000000000000000..8af84595bbf2bba8fb06fc246ed6759022be0c37
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.test.ts
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,156 @@
 +import { describe, expect, it } from 'vitest';
 +
 +import { validateEnvelope } from './envelope.js';
@@ -1612,8 +1612,20 @@ index 0000000000000000000000000000000000000000..76b9543fd0d3ad27ea404200dc7c6cdb
 +    expect(validateEnvelope(intentInvoke({
 +      archetype: 'note',
 +      payload: { extra: true },
-+      behavior: { custom: true },
++      behavior: { focus: true, newWindow: false, reuse: true },
 +    })).ok).toBe(true);
++  });
++
++  it('matches the runtime intent behavior schema exactly', () => {
++    for (const [behavior, field] of [
++      [null, 'request.behavior'],
++      ['focus', 'request.behavior'],
++      [{ focus: 'yes' }, 'request.behavior.focus'],
++      [{ custom: true }, 'request.behavior.custom'],
++    ] as const) {
++      expect(validateEnvelope(intentInvoke({ archetype: 'note', behavior })).errors)
++        .toContainEqual(expect.objectContaining({ field }));
++    }
 +  });
 +
 +  it('rejects archetypes outside the runtime lowercase slug boundary', () => {
@@ -1675,10 +1687,10 @@ index 0000000000000000000000000000000000000000..76b9543fd0d3ad27ea404200dc7c6cdb
 +});
 diff --git a/packages/conformance/src/validators/intent-request.ts b/packages/conformance/src/validators/intent-request.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..4f70fa54b9f26f50abc5fe155661d8163f6c63d3
+index 0000000000000000000000000000000000000000..d22b76ad4ee9af7f8d542e66374cd07b2596ca28
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.ts
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,138 @@
 +import type { EnvelopeError } from './envelope.js';
 +
 +const STABLE_CONVENTION = /^napplet:[^/?#\s]+\/[^/?#\s]+$/;
@@ -1692,6 +1704,7 @@ index 0000000000000000000000000000000000000000..4f70fa54b9f26f50abc5fe155661d816
 +  'handler',
 +  'behavior',
 +]);
++const INTENT_BEHAVIOR_FIELDS = new Set(['focus', 'newWindow', 'reuse']);
 +
 +function optionalString(
 +  request: Record<string, unknown>,
@@ -1705,6 +1718,33 @@ index 0000000000000000000000000000000000000000..4f70fa54b9f26f50abc5fe155661d816
 +      message: `Intent request field "${field}" must be a string`,
 +      field: `request.${field}`,
 +    });
++  }
++}
++
++function validateBehavior(value: unknown, errors: EnvelopeError[]): void {
++  if (value === undefined) return;
++  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
++    errors.push({
++      code: 'wrong-type',
++      message: 'Intent request field "behavior" must be an object',
++      field: 'request.behavior',
++    });
++    return;
++  }
++  for (const [field, hint] of Object.entries(value)) {
++    if (!INTENT_BEHAVIOR_FIELDS.has(field)) {
++      errors.push({
++        code: 'invalid-intent-request',
++        message: `Unknown intent behavior field "${field}"`,
++        field: `request.behavior.${field}`,
++      });
++    } else if (typeof hint !== 'boolean') {
++      errors.push({
++        code: 'wrong-type',
++        message: `Intent behavior field "${field}" must be a boolean`,
++        field: `request.behavior.${field}`,
++      });
++    }
 +  }
 +}
 +
@@ -1748,6 +1788,7 @@ index 0000000000000000000000000000000000000000..4f70fa54b9f26f50abc5fe155661d816
 +  for (const field of ['action', 'convention', 'protocol', 'handler'] as const) {
 +    optionalString(normalized, field, errors);
 +  }
++  validateBehavior(normalized.behavior, errors);
 +
 +  if (typeof normalized.action === 'string' && !INTENT_SLUG.test(normalized.action)) {
 +    errors.push({

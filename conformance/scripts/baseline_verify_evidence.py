@@ -8,6 +8,12 @@ from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFORMANCE = ROOT / "conformance"
+COMPATIBILITY_V1_AUTHORITIES = {
+    "nip_5d": "78efc118278e3ed42201eba9b60530b65835d7ed",
+    "nap_registry": "6461e4b37c29dc09a20dff35d9515889c4433874",
+    "napplet_web": "b335c40c77f55547f23af81d6d999e2e4e3a3623",
+    "kehto": "bb3929b3523b75356fd65f658f9bd14c7ff697e4",
+}
 
 
 def verify_upgrade_report(
@@ -22,6 +28,8 @@ def verify_upgrade_report(
         raise error("upgrade report capture date mismatch")
     if report["status"] != lock["baseline"]["status"]:
         raise error("upgrade report status mismatch")
+    if report["from"] != COMPATIBILITY_V1_AUTHORITIES:
+        raise error("upgrade report previous authority mismatch")
     expected_authorities = {
         "nip_5d": lock["nip_5d"]["commit"],
         "nap_registry": lock["nap_registry"]["commit"],
