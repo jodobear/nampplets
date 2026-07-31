@@ -1,5 +1,7 @@
 use super::*;
 
+use std::sync::mpsc::{self, SyncSender};
+
 use nmp_native_nap_bridge::{
     ProviderPushLimits, ProviderPushSender, ProviderSession, ProviderSessionContext,
 };
@@ -10,6 +12,21 @@ const LARGE_RESPONSE_BYTES: usize = 600 * 1_024;
 struct StreamingResourceProvider {
     descriptor: ProviderDescriptor,
     outbound: Mutex<BTreeMap<SessionId, ProviderPushSender>>,
+}
+
+struct ProviderPushRecorder(SyncSender<String>);
+
+impl RuntimeObserver for ProviderPushRecorder {
+    fn update(&self, frame: RuntimeObservationFrame) {
+        let response = frame.events.into_iter().find_map(|event| {
+            let response = event.response_json?;
+            (serde_json::from_str::<Value>(&response).ok()?.get("type")? == "resource.bytes.result")
+                .then_some(response)
+        });
+        if let Some(response) = response {
+            let _ = self.0.try_send(response);
+        }
+    }
 }
 
 impl StreamingResourceProvider {
@@ -158,38 +175,21 @@ fn opted_in_host_receives_streaming_response_larger_than_default_envelope() {
     .unwrap();
 
     let (_, session) = install_and_launch(&controller, &[]);
+    let (send, receive) = mpsc::sync_channel(1);
+    let observation = controller
+        .clone()
+        .observe(Box::new(ProviderPushRecorder(send)))
+        .observation
+        .expect("provider-push observer admitted");
     controller.mapped_envelope(
         session,
         br#"{"type":"resource.bytes","id":"large-response","url":"https://example.test/picture.jpg"}"#
             .to_vec(),
     );
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let envelope = loop {
-        if let Some(envelope) =
-            controller
-                .app
-                .events_after(0)
-                .events
-                .into_iter()
-                .find_map(|event| match event.event {
-                    PlatformEvent::ProviderPush { envelope, .. }
-                        if envelope.decode().ok()?.get("type")?.as_str()
-                            == Some("resource.bytes.result") =>
-                    {
-                        Some(envelope)
-                    }
-                    _ => None,
-                })
-        {
-            break envelope;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "large provider push was not delivered"
-        );
-        thread::sleep(Duration::from_millis(10));
-    };
+    let response = receive.recv().expect("large provider push delivered");
+    observation.stop();
+    let envelope = BoundedJson::from_raw(&response, 1_024 * 1_024).unwrap();
 
     assert!(
         envelope.byte_len() > ProviderPushLimits::default().maximum_envelope_bytes,
