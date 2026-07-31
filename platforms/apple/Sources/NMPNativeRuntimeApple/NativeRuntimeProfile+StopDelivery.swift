@@ -52,6 +52,74 @@ extension NativeRuntimeProfile {
         }
     }
 
+    func stopSession(_ session: RustRuntimeNappletSession) {
+        let sessionID = session.sessionID
+        let snapshotProjection = pullSnapshotProjection()
+        let terminalEvidence = session.stopTerminalEvidence()
+        lock.lock()
+        let isRegistered = sessions[sessionID]?.value === session
+        let acceptedSnapshot: RuntimeSnapshot
+        switch snapshotProjection {
+        case let .snapshot(snapshot):
+            acceptedSnapshot = snapshot
+        case .refused:
+            acceptedSnapshot = lastAcceptedSnapshot
+        }
+        let profileClosed = isClosed || acceptedSnapshot.closed
+        let rustRetainsSession = acceptedSnapshot.sessions.contains {
+            $0.id == sessionID
+        }
+        let rustAlreadyEnded = terminalEvidence != .pending
+            || !rustRetainsSession
+        let shouldStop = !profileClosed && isRegistered && !rustAlreadyEnded
+        let shouldAwaitExistingTerminal = !profileClosed
+            && isRegistered
+            && rustAlreadyEnded
+        if shouldStop {
+            // Rust dispatch and observation are asynchronous. Retain the
+            // borrowed session until update(frame:) hands off the terminal
+            // refusal emitted by Stop.
+            stoppingSessions[sessionID] = StoppingSession(
+                session: session,
+                minimumTerminalRevision: acceptedSnapshot.revision == UInt64.max
+                    ? UInt64.max
+                    : acceptedSnapshot.revision + 1,
+                terminalEvidence: terminalEvidence
+            )
+        } else if shouldAwaitExistingTerminal {
+            // Rust already ended the session, so a second Stop would produce
+            // only UnknownSession. Keep the sink until its already-queued
+            // stopped/crashed marker, explicit event loss, or runtime closure.
+            stoppingSessions[sessionID] = StoppingSession(
+                session: session,
+                minimumTerminalRevision: acceptedSnapshot.revision,
+                terminalEvidence: terminalEvidence
+            )
+        } else if isRegistered {
+            sessions.removeValue(forKey: sessionID)
+            stoppingSessions.removeValue(forKey: sessionID)
+        }
+        lock.unlock()
+        if shouldStop || shouldAwaitExistingTerminal {
+            // Close the race where an observer handed off the marker between
+            // the evidence read above and insertion into stoppingSessions.
+            recordStopTerminalEvidence()
+        }
+
+        let stopStillRequired = shouldStop
+            && session.stopTerminalEvidence() == .pending
+        if stopStillRequired {
+            controller.stop(sessionId: sessionID)
+        } else if shouldStop || shouldAwaitExistingTerminal {
+            lock.lock()
+            let completionSnapshot = lastAcceptedSnapshot
+            lock.unlock()
+            completeStopsAfterDelivery(snapshot: completionSnapshot)
+        } else {
+            session.profileDidClose()
+        }
+    }
+
     /// Synchronizes evidence latched by each session only after that session
     /// handed frame responses to its sink. Keeping the evidence on the session
     /// also covers a Rust Stop/Crash whose marker arrived before wrapper Stop.

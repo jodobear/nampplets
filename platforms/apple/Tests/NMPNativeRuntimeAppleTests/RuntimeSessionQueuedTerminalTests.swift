@@ -43,7 +43,9 @@ final class RuntimeSessionQueuedTerminalTests: RuntimeNappletSessionTestCase {
         let sessionID = fixture.runtime.sessionID
 
         endInRust(fixture.profile, sessionID)
-        let ended = try fixture.profile.snapshotForTesting
+        let ended = try NativeRuntimeProfile.initialSnapshot(
+            from: fixture.profile.controller.snapshot()
+        )
         XCTAssertFalse(ended.sessions.contains { $0.id == sessionID })
         let responseJSON =
             #"{"type":"outbox.publish.result","id":"queued-terminal","ok":false,"error":"provider operation cancelled"}"#
@@ -60,6 +62,30 @@ final class RuntimeSessionQueuedTerminalTests: RuntimeNappletSessionTestCase {
         }
         fixture.runtime.stop()
         XCTAssertEqual(try fixture.profile.snapshotForTesting.revision, ended.revision)
+        if markerBeforeWrapperStop {
+            let duplicateStopWindow = expectation(
+                description: "duplicate Stop command had time to drain"
+            )
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+                duplicateStopWindow.fulfill()
+            }
+            wait(for: [duplicateStopWindow], timeout: 2)
+            let settled = try fixture.profile.snapshotForTesting
+            XCTAssertEqual(settled.revision, ended.revision)
+            XCTAssertEqual(
+                settled.recentErrors.map(\.code),
+                ended.recentErrors.map(\.code)
+            )
+            XCTAssertEqual(settled.droppedErrors, ended.droppedErrors)
+            XCTAssertEqual(
+                settled.boundaryRefusals.map(\.code),
+                ended.boundaryRefusals.map(\.code)
+            )
+            XCTAssertEqual(
+                settled.droppedBoundaryRefusals,
+                ended.droppedBoundaryRefusals
+            )
+        }
         if !markerBeforeWrapperStop {
             assertStopping(fixture, evidence: .pending)
             fixture.profile.update(frame: terminalFrame)
