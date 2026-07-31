@@ -16,7 +16,8 @@ use serde_json::{Map, Value, json};
 
 use super::{CachedEventLookup, NapDomain, cached_event_by_id, push_value};
 
-const OVERSIZED_REFUSAL_ERROR: &str = "provider refusal exceeded configured response bound";
+pub(super) const OVERSIZED_REFUSAL_ERROR: &str =
+    "provider refusal exceeded configured response bound";
 
 pub(super) struct NapPublishCompletion {
     domain: NapDomain,
@@ -62,7 +63,7 @@ impl NapPublishCompletion {
     }
 }
 
-fn bounded_refusal_message(
+pub(super) fn bounded_refusal_message(
     domain: NapDomain,
     id: &str,
     reason: &str,

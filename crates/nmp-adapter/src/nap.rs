@@ -924,13 +924,9 @@ fn validate_limits(limits: NapNostrProviderLimits) -> Result<(), ProviderError> 
     // escaped controls). Reserve enough room for that id plus the fixed
     // publish-refusal envelope so an admitted provider can always report an
     // oversized system reason through the bounded fallback.
-    let publish_refusal_fits = limits
-        .maximum_correlation_id_bytes
-        .checked_mul(6)
-        .and_then(|escaped_id_bytes| {
-            escaped_id_bytes.checked_add(PUBLISH_REFUSAL_FIXED_HEADROOM_BYTES)
-        })
-        .is_some_and(|minimum| limits.maximum_response_bytes >= minimum);
+    let publish_refusal_fits =
+        minimum_publish_refusal_response_bytes(limits.maximum_correlation_id_bytes)
+            .is_some_and(|minimum| limits.maximum_response_bytes >= minimum);
     let finite = [
         limits.maximum_sessions,
         limits.maximum_subscriptions_per_session,
@@ -962,6 +958,14 @@ fn validate_limits(limits: NapNostrProviderLimits) -> Result<(), ProviderError> 
             ),
         })
     }
+}
+
+fn minimum_publish_refusal_response_bytes(maximum_correlation_id_bytes: usize) -> Option<usize> {
+    maximum_correlation_id_bytes
+        .checked_mul(6)
+        .and_then(|escaped_id_bytes| {
+            escaped_id_bytes.checked_add(PUBLISH_REFUSAL_FIXED_HEADROOM_BYTES)
+        })
 }
 
 fn object_payload(request: &ProviderRequest) -> Result<&Map<String, Value>, ProviderError> {
@@ -2169,6 +2173,34 @@ mod tests {
             ..NapNostrProviderLimits::default()
         };
 
+        assert!(matches!(
+            validate_limits(limits),
+            Err(ProviderError::Failed { .. })
+        ));
+    }
+
+    #[test]
+    fn minimum_admitted_publish_refusal_bound_fits_the_maximally_escaped_id() {
+        let mut limits = NapNostrProviderLimits::default();
+        let minimum = minimum_publish_refusal_response_bytes(limits.maximum_correlation_id_bytes)
+            .expect("default correlation bound has finite refusal size");
+        let escaped_id = "\u{0001}".repeat(limits.maximum_correlation_id_bytes);
+
+        limits.maximum_response_bytes = minimum;
+        assert!(validate_limits(limits).is_ok());
+        let response = publish_completion::bounded_refusal_message(
+            NapDomain::Outbox,
+            &escaped_id,
+            &"upstream failure ".repeat(minimum),
+            minimum,
+        )
+        .expect("minimum admitted response bound fits the typed fallback");
+        assert!(response.byte_len() <= minimum);
+        let value = response.decode().expect("fallback is valid JSON");
+        assert_eq!(value["id"], escaped_id);
+        assert_eq!(value["error"], publish_completion::OVERSIZED_REFUSAL_ERROR);
+
+        limits.maximum_response_bytes = minimum - 1;
         assert!(matches!(
             validate_limits(limits),
             Err(ProviderError::Failed { .. })
