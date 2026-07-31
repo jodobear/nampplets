@@ -38,8 +38,14 @@ pub(crate) fn validate_value(
             if value.len() > limits.maximum_value_bytes || !is_address(value) {
                 return Err(reject("kind:pubkey:identifier"));
             }
-            if supported.kind == 10_015 && address_kind(value) != Some(30_015) {
-                return Err(reject("a kind 30015 interest-set address"));
+            match supported.kind {
+                10_003 | 30_003 if address_kind(value) != Some(30_023) => {
+                    return Err(reject("a kind 30023 article address"));
+                }
+                10_015 if address_kind(value) != Some(30_015) => {
+                    return Err(reject("a kind 30015 interest-set address"));
+                }
+                _ => {}
             }
         }
     }

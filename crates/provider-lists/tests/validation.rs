@@ -238,7 +238,7 @@ fn a_well_formed_hashtag_is_accepted() {
 }
 
 #[test]
-fn a_replaceable_address_must_be_kind_pubkey_identifier() {
+fn bookmark_lists_accept_only_kind_30023_article_addresses() {
     for value in ["30023", "30023:short:x", &format!("x:{}:slug", pubkey("b"))] {
         let (answer, _) = refusal(
             Vec::new(),
@@ -247,17 +247,37 @@ fn a_replaceable_address_must_be_kind_pubkey_identifier() {
         assert_eq!(answer["ok"], false, "accepted {value:?}");
     }
 
-    let (provider, _) = provider_with(Vec::new());
-    let (_registry, _observer) = opened_session(provider.clone());
-    let mut result = call(
-        &provider,
-        "add",
-        json!({
-            "list": {"kind": 10003},
-            "items": [{"itemType": "address", "value": format!("30023:{}:slug", pubkey("b"))}],
-        }),
-    );
-    assert!(result.take_write_proposal().is_some());
+    for list in [
+        json!({"kind": 10003}),
+        json!({"kind": 30003, "identifier": "reading"}),
+    ] {
+        let (answer, reads) = refusal(
+            Vec::new(),
+            json!({
+                "list": &list,
+                "items": [{"itemType": "address", "value": format!("30015:{}:wrong", pubkey("b"))}],
+            }),
+        );
+        assert_eq!(answer["ok"], false);
+        assert_eq!(answer["error"], "invalid-item");
+        assert_eq!(
+            answer["reason"],
+            "a a value must be a kind 30023 article address"
+        );
+        assert_eq!(reads, 0);
+
+        let (provider, _) = provider_with(Vec::new());
+        let (_registry, _observer) = opened_session(provider.clone());
+        let mut result = call(
+            &provider,
+            "add",
+            json!({
+                "list": list,
+                "items": [{"itemType": "address", "value": format!("30023:{}:article", pubkey("b"))}],
+            }),
+        );
+        assert!(result.take_write_proposal().is_some());
+    }
 }
 
 #[test]
