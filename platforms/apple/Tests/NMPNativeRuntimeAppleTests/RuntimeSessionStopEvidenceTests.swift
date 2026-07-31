@@ -34,7 +34,7 @@ final class RuntimeSessionStopEvidenceTests: RuntimeNappletSessionTestCase {
 
         fixture.profile.update(
             frame: RuntimeObservationFrame(
-                snapshot: .snapshot(fixture.snapshot),
+                snapshot: .snapshot(snapshot: fixture.snapshot),
                 catalog: fixture.profile.catalogSnapshotForTesting,
                 events: [
                     RuntimeEvent(
@@ -79,7 +79,7 @@ final class RuntimeSessionStopEvidenceTests: RuntimeNappletSessionTestCase {
         )
         fixture.profile.update(
             frame: RuntimeObservationFrame(
-                snapshot: .snapshot(fixture.snapshot),
+                snapshot: .snapshot(snapshot: fixture.snapshot),
                 catalog: fixture.profile.catalogSnapshotForTesting,
                 events: [],
                 oldestAvailableEvent: 2,
@@ -116,7 +116,7 @@ final class RuntimeSessionStopEvidenceTests: RuntimeNappletSessionTestCase {
         for loss in lossIndicators {
             fixture.profile.update(
                 frame: RuntimeObservationFrame(
-                    snapshot: .snapshot(fixture.snapshot),
+                    snapshot: .snapshot(snapshot: fixture.snapshot),
                     catalog: fixture.profile.catalogSnapshotForTesting,
                     events: [
                         RuntimeEvent(
