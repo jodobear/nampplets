@@ -73,11 +73,12 @@ pub(super) fn validate_invocation(
             "intent convention must be a stable queryless napplet convention",
         ));
     }
-    let handler_request = match object.get("handler").and_then(Value::as_str) {
-        None | Some("default") => IntentHandlerRequest::Default,
-        Some("choose") => IntentHandlerRequest::Choose,
-        Some(value) if valid_text(value, limits.maximum_text_bytes) => {
-            IntentHandlerRequest::Specific(Arc::from(value))
+    let handler_request = match object.get("handler") {
+        None => IntentHandlerRequest::Default,
+        Some(Value::String(value)) if value == "default" => IntentHandlerRequest::Default,
+        Some(Value::String(value)) if value == "choose" => IntentHandlerRequest::Choose,
+        Some(Value::String(value)) if valid_text(value, limits.maximum_text_bytes) => {
+            IntentHandlerRequest::Specific(Arc::from(value.as_str()))
         }
         _ => return Err(invalid(request, "`handler` is invalid")),
     };

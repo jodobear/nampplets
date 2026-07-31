@@ -41,6 +41,24 @@ impl IntentChooser for FixedChoice {
 }
 
 #[derive(Debug)]
+struct AllowSpecificIntent;
+
+impl IntentPolicy for AllowSpecificIntent {
+    fn evaluate(&self, _request: &IntentPolicyRequest) -> IntentPolicyDecision {
+        IntentPolicyDecision {
+            allow: true,
+            allow_specific_handler: true,
+            confirmation_required: true,
+            reveal_candidates: true,
+        }
+    }
+
+    fn allow_discovery(&self, _caller: &Principal, _archetype: &str) -> bool {
+        true
+    }
+}
+
+#[derive(Debug)]
 struct NoBridgeActivity;
 
 impl ActivitySink for NoBridgeActivity {
@@ -58,10 +76,14 @@ struct Rig {
 
 impl Rig {
     fn new(chooser: Arc<dyn IntentChooser>) -> Self {
+        Self::new_with_policy(chooser, Arc::new(ConfirmEveryIntent))
+    }
+
+    fn new_with_policy(chooser: Arc<dyn IntentChooser>, policy: Arc<dyn IntentPolicy>) -> Self {
         let dispatcher = Arc::new(FakeDispatcher::default());
         let provider = Arc::new(
             IntentProvider::new(
-                Arc::new(ConfirmEveryIntent),
+                policy,
                 chooser,
                 dispatcher.clone(),
                 Arc::new(NoopIntentActivity),
@@ -239,6 +261,84 @@ fn omitted_legacy_identity_fields_are_defaulted_before_native_dispatch() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].action.as_ref(), "open");
     assert_eq!(requests[0].convention.as_deref(), Some("napplet:note/open"));
+}
+
+#[test]
+fn explicit_default_handler_value_routes_the_declared_default() {
+    let rig = Rig::new(Arc::new(CancelIntentChoice));
+    let handler = principal("note-viewer", 'c');
+    rig.provider
+        .register_handler(handler.clone(), vec![note_declaration()])
+        .unwrap();
+    rig.provider
+        .set_default("note", Some(handler.clone()))
+        .unwrap();
+    let _ = rig.observer.drain(16).unwrap();
+
+    assert_eq!(
+        rig.dispatch(json!({
+            "type":"intent.invoke",
+            "id":"invoke-explicit-default-1",
+            "request":{"archetype":"note","handler":"default"}
+        }))
+        .unwrap(),
+        None
+    );
+    let requests = rig.dispatcher.requests.lock();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].handler, handler);
+}
+
+#[test]
+fn non_string_handler_values_are_rejected_before_default_resolution() {
+    let rig = Rig::new(Arc::new(CancelIntentChoice));
+    let handler = principal("note-viewer", 'c');
+    rig.provider
+        .register_handler(handler.clone(), vec![note_declaration()])
+        .unwrap();
+    rig.provider.set_default("note", Some(handler)).unwrap();
+    let _ = rig.observer.drain(16).unwrap();
+
+    for invalid_handler in [
+        json!(7),
+        Value::Null,
+        json!({"dTag":"note-viewer"}),
+        json!(["note-viewer"]),
+        json!(true),
+    ] {
+        assert!(
+            rig.dispatch(json!({
+                "type":"intent.invoke",
+                "id":"invoke-invalid-handler",
+                "request":{"archetype":"note","handler":invalid_handler}
+            }))
+            .is_err()
+        );
+    }
+    assert!(rig.dispatcher.requests.lock().is_empty());
+}
+
+#[test]
+fn declared_explicit_handler_routes_when_policy_allows_specific_targeting() {
+    let rig = Rig::new_with_policy(Arc::new(CancelIntentChoice), Arc::new(AllowSpecificIntent));
+    let handler = principal("note-viewer", 'c');
+    rig.provider
+        .register_handler(handler.clone(), vec![note_declaration()])
+        .unwrap();
+    let _ = rig.observer.drain(16).unwrap();
+
+    assert_eq!(
+        rig.dispatch(json!({
+            "type":"intent.invoke",
+            "id":"invoke-specific-handler-1",
+            "request":{"archetype":"note","handler":"note-viewer"}
+        }))
+        .unwrap(),
+        None
+    );
+    let requests = rig.dispatcher.requests.lock();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].handler, handler);
 }
 
 #[test]
