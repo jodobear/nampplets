@@ -16,6 +16,8 @@ mod push;
 mod revisions;
 mod session;
 mod terminal;
+#[cfg(test)]
+mod terminal_write_refusal_tests;
 mod write_refusal;
 
 pub use diagnostic::NappletDiagnosticLevel;
