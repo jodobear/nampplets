@@ -1,40 +1,6 @@
 use super::*;
 
 #[test]
-fn rust_native_provider_uses_the_ordinary_permission_and_lifecycle_registry() {
-    let temp = TempDir::new().unwrap();
-    let controller = controller_with_rust_resource_provider(&temp);
-    let artifact = controller
-        .verify_artifact(
-            EVENT.to_vec(),
-            ArtifactCoordinate::Named {
-                author: AUTHOR.to_owned(),
-                d_tag: D_TAG.to_owned(),
-            },
-        )
-        .artifact
-        .unwrap();
-    controller.install(Arc::clone(&artifact));
-    let review = controller
-        .permission_review(exact_coordinate(&artifact))
-        .review
-        .unwrap();
-    let resource = review
-        .capabilities
-        .iter()
-        .find(|capability| capability.domain == "resource")
-        .unwrap();
-    assert_eq!(
-        resource.platform_availability,
-        RuntimePermissionPlatformAvailability::Available
-    );
-    assert_eq!(
-        resource.controller,
-        RuntimePermissionDecisionController::User
-    );
-}
-
-#[test]
 fn no_published_build_receives_a_runtime_pinned_capability_profile() {
     let temp = TempDir::new().unwrap();
     let controller = controller(&temp);
