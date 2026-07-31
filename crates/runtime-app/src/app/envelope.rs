@@ -5,11 +5,11 @@ use std::{collections::BTreeSet, sync::Arc, thread::JoinHandle};
 use nmp_native_nap_bridge::{BridgeError, DispatchOutcome, InjectionPlan};
 use nmp_native_runtime_core::{BoundedJson, Capability, SessionId, SessionState};
 
-use super::{ActiveOperation, AppState, RuntimeApp};
+use super::{AppState, RuntimeApp, write_refusal::ProviderOperationAdmission};
 use crate::{
     activity::ActivityDetail,
     app::diagnostic::{DiagnosticEnvelope, MAXIMUM_SESSION_DIAGNOSTICS, classify_diagnostic},
-    commands::{PlatformEvent, ProviderOperationId},
+    commands::PlatformEvent,
     views::AppErrorCode,
 };
 
@@ -240,104 +240,16 @@ impl RuntimeApp {
                         now,
                     );
                 }
-                let mut handle = call.take_operation();
-                let mut proposal = call.take_write_proposal();
-                if handle.is_some() && proposal.is_some() {
-                    if let Some(proposal) = proposal.take() {
-                        let response = proposal.refuse_system(Arc::from(
-                            "provider returned both a streaming operation and a write proposal",
-                        ));
-                        self.project_write_refusal(
-                            state,
-                            principal.clone(),
-                            session_id,
-                            response,
-                            now,
-                        );
-                    }
-                    if let Some(handle) = handle.take() {
-                        handle.cancel();
-                    }
-                    self.refuse(
-                        state,
-                        AppErrorCode::Bridge,
-                        Some(principal.clone()),
-                        Some(session_id),
-                        "provider returned conflicting operation ownership",
-                        now,
-                    );
-                    return None;
-                }
-                let operation = if handle.is_some() || proposal.is_some() {
-                    if state.operations.len() >= self.limits.maximum_provider_operations {
-                        if let Some(proposal) = proposal.take() {
-                            let response = proposal
-                                .refuse_system(Arc::from("provider operation capacity is full"));
-                            self.project_write_refusal(
-                                state,
-                                principal.clone(),
-                                session_id,
-                                response,
-                                now,
-                            );
-                        }
-                        if let Some(handle) = handle.take() {
-                            handle.cancel();
-                        }
-                        self.refuse(
-                            state,
-                            AppErrorCode::Capacity,
-                            Some(principal),
-                            Some(session_id),
-                            "provider operation ownership capacity is full",
-                            now,
-                        );
-                        return None;
-                    }
-                    let Some(next) = state.next_operation_id.checked_add(1) else {
-                        if let Some(proposal) = proposal.take() {
-                            let response = proposal.refuse_system(Arc::from(
-                                "provider operation identifier space is exhausted",
-                            ));
-                            self.project_write_refusal(
-                                state,
-                                principal.clone(),
-                                session_id,
-                                response,
-                                now,
-                            );
-                        }
-                        if let Some(handle) = handle.take() {
-                            handle.cancel();
-                        }
-                        self.refuse(
-                            state,
-                            AppErrorCode::Capacity,
-                            Some(principal),
-                            Some(session_id),
-                            "provider operation identifier space is exhausted",
-                            now,
-                        );
-                        return None;
-                    };
-                    let domain = domain.clone().unwrap_or_else(|| {
-                        Capability::new("unknown").expect("static capability is valid")
-                    });
-                    let id = ProviderOperationId(next);
-                    state.next_operation_id = next;
-                    state.operations.insert(
-                        id,
-                        ActiveOperation {
-                            session: session_id,
-                            principal: principal.clone(),
-                            domain,
-                            handle,
-                            proposal,
-                        },
-                    );
-                    Some(id)
-                } else {
-                    None
+                let operation = match self.admit_provider_operation(
+                    state,
+                    &principal,
+                    session_id,
+                    domain.as_ref(),
+                    &mut call,
+                    now,
+                ) {
+                    ProviderOperationAdmission::Accepted(operation) => operation,
+                    ProviderOperationAdmission::Refused => return None,
                 };
                 self.push_event(
                     state,
