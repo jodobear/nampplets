@@ -10,6 +10,8 @@ use nmp_native_nap_bridge::{ProviderPushSender, ProviderWriteCompletion, Provide
 use nmp_native_runtime_core::{BoundedJson, ReceiptEventSink, ReceiptSinkError, ReceiptSnapshot};
 use serde_json::{Map, Value};
 
+const OVERSIZED_TERMINAL_ERROR: &str = "response-too-large";
+
 /// The two mutating actions, and the pinned field each reports its count
 /// under.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,8 +165,44 @@ impl ListsReceiptSink {
         if let Some(reason) = reason {
             envelope.insert("reason".to_owned(), Value::from(reason));
         }
-        BoundedJson::from_value(&Value::Object(envelope), self.maximum_response_bytes).ok()
+        BoundedJson::from_value(&Value::Object(envelope), self.maximum_response_bytes)
+            .or_else(|_| {
+                BoundedJson::from_value(
+                    &terminal_fallback(self.action, &self.id),
+                    self.maximum_response_bytes,
+                )
+            })
+            .ok()
     }
+}
+
+pub(crate) fn minimum_terminal_response_bytes(
+    maximum_correlation_id_bytes: usize,
+) -> Option<usize> {
+    // One input byte can become six JSON bytes when it is an escaped control.
+    // The fixed part is measured from the real fallback shape so additions and
+    // removals cannot drift away from construction-time admission.
+    let escaped_id_bytes = maximum_correlation_id_bytes.checked_mul(6)?;
+    [ListsAction::Add, ListsAction::Remove]
+        .into_iter()
+        .try_fold(0, |largest, action| {
+            let fixed = serde_json::to_vec(&terminal_fallback(action, "")).ok()?;
+            fixed
+                .len()
+                .checked_add(escaped_id_bytes)
+                .map(|size| largest.max(size))
+        })
+}
+
+fn terminal_fallback(action: ListsAction, id: &str) -> Value {
+    let mut envelope = Map::new();
+    envelope.insert("type".to_owned(), Value::from(action.result_type()));
+    envelope.insert("id".to_owned(), Value::from(id));
+    envelope.insert("ok".to_owned(), Value::from(false));
+    envelope.insert(action.changed_field().to_owned(), Value::from(0));
+    envelope.insert("skipped".to_owned(), Value::from(0));
+    envelope.insert("error".to_owned(), Value::from(OVERSIZED_TERMINAL_ERROR));
+    Value::Object(envelope)
 }
 
 impl ReceiptEventSink for ListsReceiptSink {

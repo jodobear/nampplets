@@ -141,6 +141,55 @@ fn zero_limits_are_refused_at_construction() {
     assert_eq!(error, ListsProviderBuildError::InvalidLimits);
 }
 
+#[test]
+fn minimum_terminal_bound_fits_a_maximally_escaped_id_and_refuses_one_less() {
+    let maximum_id_bytes = 32;
+    let id = "\u{0001}".repeat(maximum_id_bytes);
+    let fallback = json!({
+        "type": "lists.remove.result",
+        "id": id,
+        "ok": false,
+        "removed": 0,
+        "skipped": 0,
+        "error": "response-too-large",
+    });
+    let minimum = serde_json::to_vec(&fallback).unwrap().len();
+    let limits = ListsProviderLimits {
+        maximum_response_bytes: minimum,
+        maximum_correlation_id_bytes: maximum_id_bytes,
+        ..ListsProviderLimits::default()
+    };
+    let source: Arc<dyn ListsDataPlane> = FakeSource::new(vec![entry("b")]);
+    let provider = ListsProvider::new(source, limits).unwrap();
+    let (_registry, _observer) = opened_session(provider.clone());
+    let mut request = request(
+        "remove",
+        json!({"list": follows(), "items": [p(&pubkey("b"))]}),
+    );
+    request.correlation_id = Some(Arc::from(id.as_str()));
+    let mut result = provider.call(request).unwrap();
+    let response = result
+        .take_write_proposal()
+        .unwrap()
+        .refuse_system(Arc::from("upstream failure ".repeat(minimum)))
+        .expect("admitted terminal bound always carries a typed fallback");
+    assert_eq!(response.byte_len(), minimum);
+    assert_eq!(response.decode().unwrap(), fallback);
+
+    let source: Arc<dyn ListsDataPlane> = FakeSource::new(Vec::new());
+    assert_eq!(
+        ListsProvider::new(
+            source,
+            ListsProviderLimits {
+                maximum_response_bytes: minimum - 1,
+                ..limits
+            }
+        )
+        .unwrap_err(),
+        ListsProviderBuildError::InvalidLimits
+    );
+}
+
 /// The catalog is a compatibility surface: a napplet matches on these names.
 #[test]
 fn catalog_types_and_kinds_are_unique() {
