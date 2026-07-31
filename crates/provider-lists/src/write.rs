@@ -10,7 +10,9 @@ use nmp_native_nap_bridge::{ProviderPushSender, ProviderWriteCompletion, Provide
 use nmp_native_runtime_core::{BoundedJson, ReceiptEventSink, ReceiptSinkError, ReceiptSnapshot};
 use serde_json::{Map, Value};
 
-const OVERSIZED_TERMINAL_ERROR: &str = "response-too-large";
+use crate::write_terminal::{
+    LIST_UNAVAILABLE_ERROR, PUBLISH_FAILED_ERROR, USER_DENIED_ERROR, terminal_fallback,
+};
 
 /// The two mutating actions, and the pinned field each reports its count
 /// under.
@@ -82,13 +84,18 @@ impl ProviderWriteCompletion for ListsWriteCompletion {
         let sink = (*self).into_sink();
         match refusal {
             ProviderWriteRefusal::UserDenied(reason) => {
-                sink.deliver(false, None, Some("user-denied"), Some(reason.to_string()));
+                sink.deliver(
+                    false,
+                    None,
+                    Some(USER_DENIED_ERROR),
+                    Some(reason.to_string()),
+                );
                 None
             }
             ProviderWriteRefusal::SystemUnavailable(reason) => sink.message(
                 false,
                 None,
-                Some("list-unavailable"),
+                Some(LIST_UNAVAILABLE_ERROR),
                 Some(reason.to_string()),
             ),
         }
@@ -168,41 +175,19 @@ impl ListsReceiptSink {
         BoundedJson::from_value(&Value::Object(envelope), self.maximum_response_bytes)
             .or_else(|_| {
                 BoundedJson::from_value(
-                    &terminal_fallback(self.action, &self.id),
+                    &terminal_fallback(
+                        self.action,
+                        &self.id,
+                        ok,
+                        self.changed,
+                        self.skipped,
+                        error,
+                    ),
                     self.maximum_response_bytes,
                 )
             })
             .ok()
     }
-}
-
-pub(crate) fn minimum_terminal_response_bytes(
-    maximum_correlation_id_bytes: usize,
-) -> Option<usize> {
-    // One input byte can become six JSON bytes when it is an escaped control.
-    // The fixed part is measured from the real fallback shape so additions and
-    // removals cannot drift away from construction-time admission.
-    let escaped_id_bytes = maximum_correlation_id_bytes.checked_mul(6)?;
-    [ListsAction::Add, ListsAction::Remove]
-        .into_iter()
-        .try_fold(0, |largest, action| {
-            let fixed = serde_json::to_vec(&terminal_fallback(action, "")).ok()?;
-            fixed
-                .len()
-                .checked_add(escaped_id_bytes)
-                .map(|size| largest.max(size))
-        })
-}
-
-fn terminal_fallback(action: ListsAction, id: &str) -> Value {
-    let mut envelope = Map::new();
-    envelope.insert("type".to_owned(), Value::from(action.result_type()));
-    envelope.insert("id".to_owned(), Value::from(id));
-    envelope.insert("ok".to_owned(), Value::from(false));
-    envelope.insert(action.changed_field().to_owned(), Value::from(0));
-    envelope.insert("skipped".to_owned(), Value::from(0));
-    envelope.insert("error".to_owned(), Value::from(OVERSIZED_TERMINAL_ERROR));
-    Value::Object(envelope)
 }
 
 impl ReceiptEventSink for ListsReceiptSink {
@@ -233,7 +218,7 @@ impl ReceiptEventSink for ListsReceiptSink {
             self.deliver(
                 false,
                 None,
-                Some("publish-failed"),
+                Some(PUBLISH_FAILED_ERROR),
                 Some("NMP delivered the list change without a valid eventId".to_owned()),
             );
             return Ok(());
@@ -245,7 +230,7 @@ impl ReceiptEventSink for ListsReceiptSink {
                 .unwrap_or("NMP did not durably write the list change")
                 .to_owned()
         });
-        self.deliver(ok, event_id, (!ok).then_some("publish-failed"), reason);
+        self.deliver(ok, event_id, (!ok).then_some(PUBLISH_FAILED_ERROR), reason);
         Ok(())
     }
 
@@ -253,7 +238,7 @@ impl ReceiptEventSink for ListsReceiptSink {
         let reason = reason
             .map(|reason| reason.to_string())
             .unwrap_or_else(|| "the list change was not accepted".to_owned());
-        self.deliver(false, None, Some("publish-failed"), Some(reason));
+        self.deliver(false, None, Some(PUBLISH_FAILED_ERROR), Some(reason));
     }
 }
 

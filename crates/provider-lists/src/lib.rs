@@ -22,6 +22,7 @@ mod types;
 mod validate;
 mod wire;
 mod write;
+mod write_terminal;
 
 pub use catalog::*;
 pub use provider::*;
