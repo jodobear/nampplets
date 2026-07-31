@@ -287,6 +287,43 @@ pub fn open_app(
     )
 }
 
+pub fn open_app_with_provider(
+    store: Arc<RuntimeStore>,
+    host: Arc<FakeHostDataPlane>,
+    provider: Arc<dyn Provider>,
+) -> (Arc<RuntimeApp>, Arc<ShellProvider>) {
+    open_app_with_provider_and_bridge_limits(store, host, provider, BridgeLimits::default())
+}
+
+pub fn open_app_with_provider_and_bridge_limits(
+    store: Arc<RuntimeStore>,
+    host: Arc<FakeHostDataPlane>,
+    provider: Arc<dyn Provider>,
+    bridge_limits: BridgeLimits,
+) -> (Arc<RuntimeApp>, Arc<ShellProvider>) {
+    let data_plane: Arc<dyn nmp_native_runtime_core::HostDataPlane> = host;
+    let shell_environment: Arc<dyn ShellEnvironmentSource> = Arc::new(FixedShellEnvironment {
+        override_domains: None,
+    });
+    let shell_provider =
+        Arc::new(ShellProvider::new(shell_environment, ShellProviderLimits::default()).unwrap());
+    let app = RuntimeApp::open(RuntimeAppConfig {
+        limits: AppLimits::default(),
+        resource_limits: ResourceLimits::default(),
+        grant_limits: GrantLimits::default(),
+        bridge_limits,
+        binding_limits: BindingLimits::default(),
+        store,
+        data_plane,
+        clock: Arc::new(TestClock::new(1_000)),
+        permission_default: PermissionDefaultPreference::AskEveryTime,
+        shell_provider: shell_provider.clone(),
+        providers: vec![provider],
+    })
+    .unwrap();
+    (app, shell_provider)
+}
+
 pub fn open_app_with_shell_domains(
     store: Arc<RuntimeStore>,
     host: Arc<FakeHostDataPlane>,
@@ -338,12 +375,11 @@ pub fn open_app_with_shell_source(
 pub fn open_app_with_shell_source_and_limits(
     store: Arc<RuntimeStore>,
     host: Arc<FakeHostDataPlane>,
-    provider: Arc<CapturingProvider>,
+    provider: Arc<dyn Provider>,
     shell_environment: Arc<dyn ShellEnvironmentSource>,
     limits: AppLimits,
 ) -> (Arc<RuntimeApp>, Arc<ShellProvider>) {
     let data_plane: Arc<dyn nmp_native_runtime_core::HostDataPlane> = host;
-    let provider: Arc<dyn Provider> = provider;
     let shell_provider =
         Arc::new(ShellProvider::new(shell_environment, ShellProviderLimits::default()).unwrap());
     let app = RuntimeApp::open(RuntimeAppConfig {

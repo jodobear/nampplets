@@ -9,18 +9,17 @@ use nmp_native_nap_bridge::{
 };
 use nmp_native_runtime_core::{AccountRef, ApprovedWrite, Capability, Principal, SessionId};
 use parking_lot::Mutex;
+use serde_json::Value;
 use thiserror::Error;
 
 use crate::{
-    DOMAIN, ListMutation, ListReadLimits, ListSelector, ListSnapshot, ListsDataError,
-    ListsDataPlane, ListsProviderLimits, PINNED_NAP_PROTOCOL,
-    validate::{
-        ListRefusal, apply_add, apply_remove, parse_items, parse_selector, selector_value,
-        validate_limits,
-    },
+    DOMAIN, ListMutation, ListReadLimits, ListSelector, ListSnapshot, ListsDataPlane,
+    ListsProviderLimits, PINNED_NAP_PROTOCOL,
+    request::{ListRefusal, parse_items, parse_options, parse_selector},
+    validate::{apply_add, apply_remove, selector_value, validate_limits},
     wire::{
-        completed, correlation_id, denied, exact_payload, failed, mutation_result, refusal_result,
-        supported_result,
+        completed, completed_refusal, correlation_id, denied, exact_payload, failed,
+        mutation_payload, mutation_result, supported_result,
     },
     write::{ListsAction, ListsWriteCompletion},
 };
@@ -66,7 +65,10 @@ impl ListsProvider {
                 // Follow, mute and block membership is social-graph data, and
                 // these actions change it under the user's own key.
                 sensitive: true,
-                dependencies: BTreeSet::new(),
+                dependencies: BTreeSet::from([
+                    Capability::new("identity").expect("static identity capability is valid"),
+                    Capability::new("relay").expect("static relay capability is valid"),
+                ]),
                 platform_availability: ProviderPlatformAvailability::Available,
             },
             state: Mutex::new(ListsState::default()),
@@ -117,28 +119,30 @@ impl ListsProvider {
     ) -> Result<ProviderCall, ProviderError> {
         let id = correlation_id(&request, self.limits)?;
         let outbound = self.session_outbound(&request)?;
-        let payload = exact_payload(&request, &["list", "items"])?;
+        let payload = mutation_payload(&request)?;
 
         let refuse = |refusal: &ListRefusal| {
-            completed(
-                &refusal_result(action, &id, refusal),
-                self.limits,
-                &request.action,
-            )
+            completed_refusal(action, &id, refusal, self.limits, &request.action)
         };
 
         let (supported, selector) = match parse_selector(payload.get("list"), self.limits) {
             Ok(parsed) => parsed,
             Err(refusal) => return refuse(&refusal),
         };
-        let items = match parse_items(payload.get("items"), supported, self.limits) {
+        let options = match parse_options(payload.get("options")) {
+            Ok(options) => options,
+            Err(refusal) => return refuse(&refusal),
+        };
+        let items = match parse_items(payload.get("items"), supported, self.limits, action) {
             Ok(items) => items,
             Err(refusal) => return refuse(&refusal),
         };
         let account = match self.source.freeze_account() {
             Ok(Some(account)) => account,
             Ok(None) => return refuse(&ListRefusal::NoAccount),
-            Err(error) => return Err(failed(&request.action, error.to_string())),
+            Err(error) => {
+                return refuse(&ListRefusal::ListUnavailable(Arc::from(error.to_string())));
+            }
         };
         if request.work.cancellation().is_cancelled() {
             return Err(failed(&request.action, "the request was cancelled"));
@@ -153,14 +157,25 @@ impl ListsProvider {
             },
         ) {
             Ok(snapshot) => snapshot,
-            Err(error) => return Err(failed(&request.action, error.to_string())),
+            Err(error) => {
+                return refuse(&ListRefusal::ListUnavailable(Arc::from(error.to_string())));
+            }
         };
+        if !(snapshot.exists || action == ListsAction::Add && options.create == Some(true)) {
+            return refuse(&ListRefusal::ListNotFound);
+        }
+        if action == ListsAction::Remove && items.remove_private_matches {
+            match snapshot_has_encrypted_content(&selector, &snapshot) {
+                Ok(true) | Err(_) => return refuse(&ListRefusal::DecryptFailed),
+                Ok(false) => {}
+            }
+        }
         let mutation = match action {
-            ListsAction::Add => match apply_add(&snapshot.entries, &items, self.limits) {
+            ListsAction::Add => match apply_add(&snapshot.entries, &items.entries, self.limits) {
                 Ok(mutation) => mutation,
                 Err(refusal) => return refuse(&refusal),
             },
-            ListsAction::Remove => apply_remove(&snapshot.entries, &items),
+            ListsAction::Remove => apply_remove(&snapshot.entries, &items.entries),
         };
         if mutation.is_noop() {
             // Nothing changes, so nothing is written. Republishing an
@@ -189,21 +204,24 @@ impl ListsProvider {
         mutation: ListMutation,
         outbound: ProviderPushSender,
     ) -> Result<ProviderCall, ProviderError> {
-        let draft = self
-            .source
-            .draft_replacement(
-                &account,
-                &selector,
-                &snapshot,
-                &mutation.entries,
-                self.limits.maximum_draft_bytes,
-            )
-            .map_err(|error| match error {
-                ListsDataError::DraftTooLarge => {
-                    failed(&request.action, ListsDataError::DraftTooLarge.to_string())
-                }
-                error => failed(&request.action, error.to_string()),
-            })?;
+        let draft = match self.source.draft_replacement(
+            &account,
+            &selector,
+            &snapshot,
+            &mutation.entries,
+            self.limits.maximum_draft_bytes,
+        ) {
+            Ok(draft) => draft,
+            Err(error) => {
+                return completed_refusal(
+                    action,
+                    &id,
+                    &ListRefusal::ListUnavailable(Arc::from(error.to_string())),
+                    self.limits,
+                    &request.action,
+                );
+            }
+        };
         let write = ApprovedWrite {
             approval_id: approval_id(action, &selector, &id),
             origin_principal: request.principal.clone(),
@@ -226,6 +244,20 @@ impl ListsProvider {
             request.work,
         ))
     }
+}
+
+fn snapshot_has_encrypted_content(
+    selector: &ListSelector,
+    snapshot: &ListSnapshot,
+) -> Result<bool, ()> {
+    // Kind 3 content is the public NIP-02 relay-usage map. It is metadata for
+    // the follow list, never encrypted private list items.
+    if selector.kind == 3 {
+        return Ok(false);
+    }
+    let retained = snapshot.retained.decode().map_err(|_| ())?;
+    let content = retained.get("content").and_then(Value::as_str).ok_or(())?;
+    Ok(!content.is_empty())
 }
 
 /// Names the approval after the exact list it changes, so a native reviewer

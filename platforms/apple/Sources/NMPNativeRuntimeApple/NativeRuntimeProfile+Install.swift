@@ -4,6 +4,12 @@ import NMPNativeRuntime
 // MARK: - Signed install, launch, and borrowed session plumbing
 
 extension NativeRuntimeProfile {
+    enum SessionLaunchAdmission: Equatable {
+        case admitted
+        case profileClosed
+        case capacity(maximum: Int)
+    }
+
     /// Verifies and installs one exact named build without granting or
     /// launching it. The returned opaque handle is bound to this profile.
     public func installSignedNamed(
@@ -74,14 +80,19 @@ extension NativeRuntimeProfile {
         guard installed.ownerID == profileID else {
             throw RuntimeNappletOpenError.installedArtifactProfileMismatch
         }
-        lock.lock()
-        let closed = isClosed
-        lock.unlock()
-        guard !closed else {
+        switch reserveSessionLaunch() {
+        case .profileClosed:
             throw RuntimeNappletOpenError.launchRefused(
                 detail: "The application runtime profile is closed"
             )
+        case let .capacity(maximum):
+            throw RuntimeNappletOpenError.launchRefused(
+                detail: "Native terminal-response session capacity \(maximum) is full"
+            )
+        case .admitted:
+            break
         }
+        defer { releaseSessionLaunch() }
 
         let artifact = installed.artifact
         let coordinate = installed.permissionCoordinate
@@ -149,6 +160,47 @@ extension NativeRuntimeProfile {
         )
     }
 
+    static func sessionLaunchOccupancy(
+        activeSessionIDs: Set<UInt64>,
+        stoppingSessionIDs: Set<UInt64>,
+        reservations: Int
+    ) -> Int {
+        activeSessionIDs.union(stoppingSessionIDs).count + reservations
+    }
+
+    func reserveSessionLaunch() -> SessionLaunchAdmission {
+        lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            return .profileClosed
+        }
+        let acceptedSnapshot = lastAcceptedSnapshot
+        lock.unlock()
+        retireRustTerminatedSessionsAfterDelivery(snapshot: acceptedSnapshot)
+
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isClosed else { return .profileClosed }
+        sessions = sessions.filter { $0.value.value != nil }
+        let occupancy = Self.sessionLaunchOccupancy(
+            activeSessionIDs: Set(sessions.keys),
+            stoppingSessionIDs: Set(stoppingSessions.keys),
+            reservations: sessionLaunchReservations
+        )
+        guard occupancy < NativeRuntimeLibraryLimits.maximumSessions else {
+            return .capacity(maximum: NativeRuntimeLibraryLimits.maximumSessions)
+        }
+        sessionLaunchReservations += 1
+        return .admitted
+    }
+
+    func releaseSessionLaunch() {
+        lock.lock()
+        precondition(sessionLaunchReservations > 0)
+        sessionLaunchReservations -= 1
+        lock.unlock()
+    }
+
     /// Compatibility helper retained for existing Apple package callers.
     /// Product launch flows must use install, atomic permission review, and
     /// launch as separate operations.
@@ -194,9 +246,13 @@ extension NativeRuntimeProfile {
         controller.mappedEnvelope(sessionId: sessionID, bytes: bytes)
     }
 
-    func stopSession(_ sessionID: UInt64) {
+    /// A borrowed wrapper was released without an explicit Stop consumer.
+    /// No sink remains to receive terminal output, so do not resurrect the
+    /// wrapper from deinit; just close the Rust session and weak registry row.
+    func abandonSession(_ sessionID: UInt64) {
         lock.lock()
         let shouldStop = !isClosed && sessions.removeValue(forKey: sessionID) != nil
+        stoppingSessions.removeValue(forKey: sessionID)
         lock.unlock()
         if shouldStop {
             controller.stop(sessionId: sessionID)

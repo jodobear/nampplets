@@ -24,6 +24,7 @@ INCLUDED_ROOTS = (
     Path("conformance/envelopes"),
     Path("conformance/legacy-host"),
     Path("conformance/napplet-corpus"),
+    Path("conformance/patches"),
     Path("conformance/reports"),
     Path("conformance/scripts"),
     Path("conformance/test-services"),

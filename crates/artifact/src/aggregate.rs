@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// Exact aggregate algorithm emitted by the pinned
-/// `napplet/web@b335c40c77f55547f23af81d6d999e2e4e3a3623` toolchain.
+/// `napplet/web@60889f1c2476e063500c7ab6624af6abe0dbcbe5` toolchain.
 ///
 /// Each verified `path` tag becomes `"<sha256> <absolute-path>\n"`, lines are
 /// sorted bytewise, concatenated as UTF-8, and SHA-256 hashed to lowercase

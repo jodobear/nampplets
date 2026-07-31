@@ -21,6 +21,7 @@ tokio.workspace = true
 
 [dev-dependencies]
 cucumber.workspace = true
+nmp-native-nmp-adapter = { path = "../nmp-adapter" }
 nmp-native-test-harness = { path = "../test-harness" }
 tempfile.workspace = true
 

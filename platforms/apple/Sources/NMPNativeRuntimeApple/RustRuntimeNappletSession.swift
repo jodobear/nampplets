@@ -34,6 +34,9 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
     private var responseSink:
         (owner: UUID, receive: @Sendable (Data) -> Void)?
     private var diagnosticSink: (@Sendable (String, String) -> Void)?
+    private var terminalEvidence: NativeRuntimeProfile.StopTerminalEvidence = .pending
+    private var possibleTerminalLoss: UInt64?
+    private var isStopping = false
     private var isStopped = false
 
     init(
@@ -47,8 +50,11 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
     }
 
     func readSealed(logicalPath: String) throws -> SealedArtifactBytes? {
-        guard let profile else { return nil }
-        switch profile.readVerified(
+        lock.lock()
+        let activeProfile = isStopped || isStopping ? nil : profile
+        lock.unlock()
+        guard let activeProfile else { return nil }
+        switch activeProfile.readVerified(
             sessionID: sessionID,
             logicalPath: logicalPath,
             maximumBytes: maximumReadBytes
@@ -66,6 +72,10 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
 
     func setResponseSink(_ sink: (@Sendable (Data) -> Void)?) {
         lock.lock()
+        guard !isStopped && !isStopping else {
+            lock.unlock()
+            return
+        }
         responseSink = sink.map { (UUID(), $0) }
         lock.unlock()
     }
@@ -75,7 +85,7 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
         _ sink: @escaping @Sendable (Data) -> Void
     ) {
         lock.lock()
-        guard !isStopped else {
+        guard !isStopped && !isStopping else {
             lock.unlock()
             return
         }
@@ -85,7 +95,7 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
 
     func clearResponseSink(owner: UUID) {
         lock.lock()
-        if responseSink?.owner == owner {
+        if !isStopping, responseSink?.owner == owner {
             responseSink = nil
         }
         lock.unlock()
@@ -99,13 +109,16 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
 
     func mappedEnvelope(_ bytes: Data) {
         lock.lock()
-        let stopped = isStopped
+        let stopped = isStopped || isStopping
         lock.unlock()
         guard !stopped else { return }
         profile?.mappedEnvelope(sessionID: sessionID, bytes: bytes)
     }
 
-    func deliver(frame: RuntimeObservationFrame) {
+    func deliver(
+        frame: RuntimeObservationFrame,
+        acceptedSnapshotRetainsSession: Bool?
+    ) {
         lock.lock()
         let sink = responseSink?.receive
         let diagnostics = diagnosticSink
@@ -135,27 +148,63 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
                 continue
             }
         }
+
+        let lossWasReported = frame.eventCursorWasStale
+            || frame.lostBeforeBatch > 0
+        let deliveredTerminalMarker = !lossWasReported
+            && frame.events.contains { event in
+                event.sessionId == sessionID
+                    && event.kind == "session-changed"
+                    && (event.detail == "stopped" || event.detail == "crashed")
+            }
+        lock.lock()
+        if !isStopped {
+            if deliveredTerminalMarker {
+                // Rust orders this marker after every correlation-bearing
+                // terminal response. We only latch it after calling the sink.
+                terminalEvidence = .delivered
+                possibleTerminalLoss = nil
+            } else if lossWasReported, terminalEvidence == .pending {
+                possibleTerminalLoss = frame.lostBeforeBatch
+            }
+            if acceptedSnapshotRetainsSession == false,
+               terminalEvidence == .pending,
+               let lostBeforeBatch = possibleTerminalLoss
+            {
+                terminalEvidence = .deliveryLost(
+                    lostBeforeBatch: lostBeforeBatch
+                )
+            }
+        }
+        lock.unlock()
+    }
+
+    func stopTerminalEvidence() -> NativeRuntimeProfile.StopTerminalEvidence {
+        lock.lock()
+        defer { lock.unlock() }
+        return terminalEvidence
     }
 
     func stop() {
         lock.lock()
-        guard !isStopped else {
+        guard !isStopped && !isStopping else {
             lock.unlock()
             return
         }
-        isStopped = true
-        responseSink = nil
-        diagnosticSink = nil
+        isStopping = true
         let profile = profile
-        self.profile = nil
         lock.unlock()
 
-        profile?.stopSession(sessionID)
+        if let profile {
+            profile.stopSession(self)
+        } else {
+            profileDidClose()
+        }
     }
 
     func crash(reason: String) {
         lock.lock()
-        let stopped = isStopped
+        let stopped = isStopped || isStopping
         lock.unlock()
         guard !stopped else { return }
         profile?.crashSession(sessionID, reason: reason)
@@ -163,13 +212,53 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
 
     func profileDidClose() {
         lock.lock()
+        isStopping = false
         isStopped = true
         responseSink = nil
+        diagnosticSink = nil
         profile = nil
         lock.unlock()
     }
 
+    /// Called only after an accepted frame proves this session ended or the
+    /// whole Rust runtime closed. Native has either handed off the ordered
+    /// terminal batch or preserved Rust's explicit event-loss/closure fact.
+    func completeStopAfterTerminalEvidence() -> Bool {
+        lock.lock()
+        guard isStopping && !isStopped else {
+            lock.unlock()
+            return false
+        }
+        isStopping = false
+        isStopped = true
+        responseSink = nil
+        diagnosticSink = nil
+        profile = nil
+        lock.unlock()
+        return true
+    }
+
+    /// Retires a wrapper whose Rust-owned session ended without a native Stop.
+    /// The profile calls this only after delivering the accepted terminal frame,
+    /// so clearing the sinks cannot discard a correlation-bearing response.
+    func completeRustTerminationAfterDelivery(runtimeClosed: Bool) -> Bool {
+        lock.lock()
+        guard !isStopping,
+              !isStopped,
+              runtimeClosed || terminalEvidence != .pending
+        else {
+            lock.unlock()
+            return false
+        }
+        isStopped = true
+        responseSink = nil
+        diagnosticSink = nil
+        profile = nil
+        lock.unlock()
+        return true
+    }
+
     deinit {
-        stop()
+        profile?.abandonSession(sessionID)
     }
 }

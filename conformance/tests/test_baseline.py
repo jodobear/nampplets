@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import subprocess
@@ -7,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,12 +46,70 @@ class BaselineTests(unittest.TestCase):
 
             self.assertEqual(expected, generate_digests.manifest_bytes(root))
 
+    def test_digest_inputs_include_the_local_package_patch(self) -> None:
+        self.assertIn(
+            Path("conformance/patches/napplet-web/compat-v2.patch"),
+            generate_digests.tracked_inputs(),
+        )
+
     def test_full_offline_baseline(self) -> None:
         result = verify_baseline.verify()
         self.assertEqual(result["status"], "unratified")
         self.assertGreaterEqual(result["envelopes"], 200)
         self.assertEqual(result["falsifiers"], 10)
         self.assertGreaterEqual(result["corpus"]["published"], 1)
+
+    def test_nip_5d_snapshot_is_bound_to_its_lock_hash(self) -> None:
+        lock = verify_baseline.load_lock()
+        lock["nip_5d"]["document_sha256"] = "0" * 64
+
+        with self.assertRaisesRegex(
+            verify_baseline.BaselineError,
+            "authority snapshot drifted: conformance/vendor/nip-5d/5D.md",
+        ):
+            verify_baseline.verify_lock(lock)
+
+    def test_nap_registry_snapshots_are_bound_to_lock_objects(self) -> None:
+        lock = verify_baseline.load_lock()
+        for field in (
+            "naps_tree",
+            "archetypes_blob",
+            "readme_blob",
+            "web_projection_blob",
+        ):
+            with self.subTest(field=field):
+                drifted = copy.deepcopy(lock)
+                drifted["nap_registry"][field] = "0" * 40
+                with self.assertRaisesRegex(
+                    verify_baseline.BaselineError,
+                    "NAP registry",
+                ):
+                    verify_baseline.verify_lock(drifted)
+
+    def test_kehto_corpus_digest_is_recomputed_from_content(self) -> None:
+        lock = verify_baseline.load_lock()
+        indexes = {
+            relative: verify_baseline.load_json(relative)
+            for relative in (
+                "conformance/napplet-corpus/reference/index.json",
+                "conformance/napplet-corpus/kehto/index.json",
+                "conformance/napplet-corpus/published/index.json",
+            )
+        }
+        indexes["conformance/napplet-corpus/kehto/index.json"]["applications"][0][
+            "requires"
+        ].append("identity")
+
+        with mock.patch.object(
+            verify_baseline,
+            "load_json",
+            side_effect=lambda relative: indexes[relative],
+        ):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "Kehto corpus canonical digest mismatch",
+            ):
+                verify_baseline.verify_corpus(lock)
 
     def test_one_byte_fixture_mutation_fails_hash(self) -> None:
         index = json.loads(
@@ -84,6 +144,20 @@ class BaselineTests(unittest.TestCase):
         self.assertEqual(lock["web_projection"]["unknown_message_policy"], "ignore")
         self.assertEqual(inventory["unknown_message_policy"], "ignore")
 
+    def test_envelope_inventory_is_bound_to_patched_validator_bytes(self) -> None:
+        lock = verify_baseline.load_lock()
+        inventory = verify_baseline.load_json(
+            "conformance/envelopes/inventory.json"
+        )
+        inventory["source"]["sha256"] = "0" * 64
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=inventory):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "envelope inventory source digest mismatch",
+            ):
+                verify_baseline.verify_envelopes(lock)
+
     def test_shell_handshake_drift_is_not_hidden(self) -> None:
         inventory = verify_baseline.load_json(
             "conformance/envelopes/inventory.json"
@@ -100,6 +174,125 @@ class BaselineTests(unittest.TestCase):
                 "shell.ready": "registry-only-handshake",
             },
         )
+
+    def test_registry_package_drift_is_not_hidden(self) -> None:
+        inventory = verify_baseline.load_json(
+            "conformance/envelopes/inventory.json"
+        )
+        unsupported = {
+            item["type"]: item["validator"]
+            for item in inventory["entries"]
+            if item["validator"] == "explicit-unsupported"
+        }
+        self.assertEqual(
+            unsupported,
+            {"inc.channel.opened": "explicit-unsupported"},
+        )
+
+    def test_falsifier_matrix_is_bound_to_the_lock(self) -> None:
+        lock = verify_baseline.load_lock()
+        matrix = verify_baseline.load_json("conformance/bdd/falsifiers.json")
+        matrix["baseline"] = "native-runtime-compat-v1"
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=matrix):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "falsifier baseline mismatch",
+            ):
+                verify_baseline.verify_falsifiers(lock)
+
+    def test_upgrade_report_is_bound_to_the_lock(self) -> None:
+        lock = verify_baseline.load_lock()
+        self.assertEqual(
+            verify_baseline.verify_upgrade_report(lock),
+            {"accepted": 7, "rejected": 4, "explicitly_unsupported": 1},
+        )
+
+    def test_upgrade_report_rejects_previous_authority_drift(self) -> None:
+        lock = verify_baseline.load_lock()
+        report = verify_baseline.load_json(
+            "conformance/reports/compatibility-v2.json"
+        )
+        report["from"]["napplet_web"] = "0" * 40
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=report):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "upgrade report previous authority mismatch",
+            ):
+                verify_baseline.verify_upgrade_report(lock)
+
+    def test_upgrade_report_binds_every_lists_authority(self) -> None:
+        lock = verify_baseline.load_lock()
+        for authority in (
+            "semantic_commit",
+            "package_merge_commit",
+            "nip_51_commit",
+        ):
+            with self.subTest(authority=authority):
+                drifted = copy.deepcopy(lock)
+                drifted["nap_lists"][authority] = "0" * 40
+                with self.assertRaisesRegex(
+                    verify_baseline.BaselineError,
+                    "upgrade report authority mismatch",
+                ):
+                    verify_baseline.verify_upgrade_report(drifted)
+
+    def test_upgrade_report_rejects_accepted_decision_drift(self) -> None:
+        lock = verify_baseline.load_lock()
+        report = verify_baseline.load_json(
+            "conformance/reports/compatibility-v2.json"
+        )
+        report["accepted"][0] = "caller-selected-inc-sender"
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=report):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "accepted decisions drifted",
+            ):
+                verify_baseline.verify_upgrade_report(lock)
+
+    def test_upgrade_report_rejects_rejected_decision_drift(self) -> None:
+        lock = verify_baseline.load_lock()
+        report = verify_baseline.load_json(
+            "conformance/reports/compatibility-v2.json"
+        )
+        report["rejected"].append("strict-child-csp-guidance")
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=report):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "rejected decisions drifted",
+            ):
+                verify_baseline.verify_upgrade_report(lock)
+
+    def test_upgrade_report_rejects_migration_decision_drift(self) -> None:
+        lock = verify_baseline.load_lock()
+        report = verify_baseline.load_json(
+            "conformance/reports/compatibility-v2.json"
+        )
+        report["migration"]["platform_domains_advertised"] = ["inc"]
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=report):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "migration decisions drifted",
+            ):
+                verify_baseline.verify_upgrade_report(lock)
+
+    def test_upgrade_report_rejects_local_patch_drift(self) -> None:
+        lock = verify_baseline.load_lock()
+        report = verify_baseline.load_json(
+            "conformance/reports/compatibility-v2.json"
+        )
+        report["local_patches"]["napplet_web"]["sha256"] = "0" * 64
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=report):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "upgrade report local patch mismatch",
+            ):
+                verify_baseline.verify_upgrade_report(lock)
 
     def test_m0_advertises_no_domains(self) -> None:
         lock = verify_baseline.load_lock()

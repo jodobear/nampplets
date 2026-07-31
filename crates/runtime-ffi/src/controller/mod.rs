@@ -5,6 +5,7 @@ mod catalog;
 mod intent_restore;
 mod library;
 mod observation;
+mod observation_frame;
 mod open;
 mod permission_changes;
 mod permissions;

@@ -72,11 +72,13 @@ impl ProviderRegistry {
         let action = Arc::clone(&request.action);
         match provider.call(request) {
             Ok(call) => {
-                if call.response.as_ref().is_some_and(|response| {
-                    response.byte_len() > self.limits.maximum_response_bytes
-                }) {
+                if let Some(error) = call
+                    .response
+                    .as_ref()
+                    .and_then(|response| self.validate_response(response).err())
+                {
                     self.record_refusal(context, &domain, action);
-                    return Err(BridgeError::ResponseTooLarge);
+                    return Err(error);
                 }
                 let outcome = if call.is_active() {
                     ActivityOutcome::Active
@@ -153,14 +155,23 @@ impl ProviderRegistry {
                 .map_err(BridgeError::ResourceRefused);
         }
         match self.grants.decision(&context.principal, domain) {
-            decision if decision.allows_without_prompt() => self
-                .resources
-                .admit(
-                    context.id,
-                    Some(domain.clone()),
-                    ResourceClass::ProviderCall,
-                )
-                .map_err(BridgeError::ResourceRefused),
+            decision if decision.allows_without_prompt() => {
+                if !self
+                    .admitted_domains(&context.principal, context.profile)
+                    .contains(domain)
+                {
+                    return Err(BridgeError::CapabilityDenied {
+                        domain: domain.clone(),
+                    });
+                }
+                self.resources
+                    .admit(
+                        context.id,
+                        Some(domain.clone()),
+                        ResourceClass::ProviderCall,
+                    )
+                    .map_err(BridgeError::ResourceRefused)
+            }
             GrantDecision::AskEveryTime => Err(BridgeError::GrantDecisionRequired {
                 domain: domain.clone(),
             }),

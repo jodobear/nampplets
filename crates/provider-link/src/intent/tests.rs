@@ -10,6 +10,8 @@ use serde_json::json;
 
 use super::*;
 
+mod routing;
+
 #[derive(Debug, Default)]
 struct FakeDispatcher {
     requests: Mutex<Vec<NativeIntentDispatch>>,
@@ -58,10 +60,14 @@ struct Rig {
 
 impl Rig {
     fn new(chooser: Arc<dyn IntentChooser>) -> Self {
+        Self::new_with_policy(chooser, Arc::new(ConfirmEveryIntent))
+    }
+
+    fn new_with_policy(chooser: Arc<dyn IntentChooser>, policy: Arc<dyn IntentPolicy>) -> Self {
         let dispatcher = Arc::new(FakeDispatcher::default());
         let provider = Arc::new(
             IntentProvider::new(
-                Arc::new(ConfirmEveryIntent),
+                policy,
                 chooser,
                 dispatcher.clone(),
                 Arc::new(NoopIntentActivity),
@@ -216,71 +222,6 @@ fn default_handler_receives_exact_validated_dispatch_and_result_is_pushed() {
 }
 
 #[test]
-fn protocol_field_is_accepted_as_a_convention_alias() {
-    // Real published napplets are built against the `@napplet/nap` SDK,
-    // whose `intent.open(archetype, payload, { protocol })` sugar sends
-    // the wire field as `protocol`, not the vendored spec's `convention`.
-    let rig = Rig::new(Arc::new(CancelIntentChoice));
-    let handler = principal("note-viewer", 'c');
-    rig.provider
-        .register_handler(handler.clone(), vec![note_declaration()])
-        .unwrap();
-    rig.provider
-        .set_default("note", Some(handler.clone()))
-        .unwrap();
-    let _ = rig.observer.drain(16).unwrap();
-
-    assert_eq!(
-        rig.dispatch(json!({
-            "type":"intent.invoke",
-            "id":"invoke-protocol-1",
-            "request":{
-                "archetype":"note",
-                "action":"open",
-                "protocol":"napplet:note/open",
-                "payload":{"target":"abc"}
-            }
-        }))
-        .unwrap(),
-        None
-    );
-    let requests = rig.dispatcher.requests.lock();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].handler, handler);
-    drop(requests);
-}
-
-#[test]
-fn undeclared_choice_and_specific_target_execute_nothing() {
-    let rig = Rig::new(Arc::new(FixedChoice(Arc::from("spoofed"))));
-    rig.provider
-        .register_handler(principal("note-viewer", 'c'), vec![note_declaration()])
-        .unwrap();
-    let _ = rig.observer.drain(8).unwrap();
-    let choose = rig
-        .dispatch(json!({
-            "type":"intent.invoke",
-            "id":"choose-1",
-            "request":{"archetype":"note","handler":"choose"}
-        }))
-        .unwrap()
-        .unwrap();
-    assert_eq!(choose["result"]["handled"], false);
-    assert_eq!(choose["result"]["error"], "no handler");
-
-    let specific = rig
-        .dispatch(json!({
-            "type":"intent.invoke",
-            "id":"specific-1",
-            "request":{"archetype":"note","handler":"note-viewer"}
-        }))
-        .unwrap()
-        .unwrap();
-    assert_eq!(specific["result"]["error"], "invoke denied");
-    assert!(rig.dispatcher.requests.lock().is_empty());
-}
-
-#[test]
 fn exact_build_dtag_collision_is_rejected() {
     let rig = Rig::new(Arc::new(CancelIntentChoice));
     rig.provider
@@ -327,25 +268,4 @@ fn teardown_cancels_pending_dispatch_and_late_completion_is_refused() {
         ),
         Err(IntentCompletionError::UnknownOperation)
     );
-}
-
-#[test]
-fn malformed_convention_and_behavior_are_rejected_before_dispatch() {
-    let rig = Rig::new(Arc::new(CancelIntentChoice));
-    for request in [
-        json!({"archetype":"note","convention":"https://example.com"}),
-        json!({"archetype":"Note"}),
-        json!({"archetype":"note","behavior":{"focus":"yes"}}),
-        json!({"archetype":"note","unknown":true}),
-    ] {
-        assert!(
-            rig.dispatch(json!({
-                "type":"intent.invoke",
-                "id":"bad",
-                "request":request
-            }))
-            .is_err()
-        );
-    }
-    assert!(rig.dispatcher.requests.lock().is_empty());
 }

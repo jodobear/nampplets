@@ -53,10 +53,27 @@ fn valid_slug(value: &str) -> bool {
         })
 }
 
-/// Mirrors `provider-link::intent`'s `valid_declaration` convention rule: a
-/// non-empty, bounded string in the `napplet:` namespace.
+/// Mirrors `provider-link::intent`'s queryless convention rule exactly, so a
+/// manifest declaration cannot pass artifact verification and then disappear
+/// when the intent provider registers the installed handler.
 fn valid_protocol(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 1_024 && value.starts_with("napplet:")
+    let Some(path) = value.strip_prefix("napplet:") else {
+        return false;
+    };
+    let Some((subject, action)) = path.split_once('/') else {
+        return false;
+    };
+    !value.is_empty()
+        && value.len() <= 1_024
+        && !value.bytes().any(|byte| byte.is_ascii_control())
+        && !subject.is_empty()
+        && !action.is_empty()
+        && !action.contains('/')
+        && [subject, action].into_iter().all(|component| {
+            !component
+                .chars()
+                .any(|character| character.is_whitespace() || matches!(character, '?' | '#'))
+        })
 }
 
 fn valid_kind(value: &str) -> bool {
@@ -106,6 +123,24 @@ mod tests {
     #[test]
     fn archetype_tag_rejects_protocol_outside_the_napplet_namespace() {
         assert!(parse_archetype_tag(&tag(&["archetype", "nip29-group", "https://evil"])).is_err());
+    }
+
+    #[test]
+    fn archetype_tag_rejects_protocol_the_intent_provider_cannot_register() {
+        let invalid = [
+            "napplet:nip29-group".to_owned(),
+            "napplet:/open".to_owned(),
+            "napplet:nip29-group/".to_owned(),
+            "napplet:nip29-group/open/extra".to_owned(),
+            "napplet:nip29-group/open?mode=compact".to_owned(),
+            "napplet:nip29-group/open#fragment".to_owned(),
+            "napplet:nip29-group/\0open".to_owned(),
+            format!("napplet:nip29-group/{}", "ö".repeat(512)),
+        ];
+        for protocol in invalid {
+            let fields = ["archetype".to_owned(), "nip29-group".to_owned(), protocol];
+            assert!(parse_archetype_tag(&fields).is_err());
+        }
     }
 
     #[test]

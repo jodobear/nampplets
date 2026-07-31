@@ -63,6 +63,7 @@ fn the_napplet_result_is_emitted_only_once_the_write_is_durable() {
     assert_eq!(pushed[0]["type"], "lists.add.result");
     assert_eq!(pushed[0]["id"], "request-1");
     assert_eq!(pushed[0]["ok"], true);
+    assert_eq!(pushed[0]["eventId"], "e".repeat(64));
     assert_eq!(pushed[0]["added"], 2);
     assert_eq!(pushed[0]["skipped"], 0);
 }
@@ -87,7 +88,8 @@ fn a_failed_write_reports_zero_added_rather_than_the_requested_count() {
     assert_eq!(pushed.len(), 1);
     assert_eq!(pushed[0]["ok"], false);
     assert_eq!(pushed[0]["added"], 0);
-    assert!(pushed[0]["error"].is_string());
+    assert_eq!(pushed[0]["error"], "publish-failed");
+    assert!(pushed[0]["reason"].is_string());
 }
 
 #[test]
@@ -100,15 +102,44 @@ fn a_refused_write_still_answers_the_napplet() {
         "add",
         json!({"list": follows(), "items": [p(&pubkey("b"))]}),
     );
-    result
-        .take_write_proposal()
-        .unwrap()
-        .refuse(Arc::from("the user declined"));
+    assert!(
+        result
+            .take_write_proposal()
+            .unwrap()
+            .refuse_user(Arc::from("the user declined"))
+            .is_none()
+    );
 
     let pushed = drain(&observer);
     assert_eq!(pushed.len(), 1);
     assert_eq!(pushed[0]["ok"], false);
-    assert_eq!(pushed[0]["error"], "the user declined");
+    assert_eq!(pushed[0]["error"], "user-denied");
+    assert_eq!(pushed[0]["reason"], "the user declined");
+}
+
+#[test]
+fn a_system_refusal_is_not_reported_as_user_denial() {
+    let (provider, _source) = provider_with(vec![entry("a")]);
+    let (_registry, observer) = opened_session(provider.clone());
+
+    let mut result = call(
+        &provider,
+        "add",
+        json!({"list": follows(), "items": [p(&pubkey("b"))]}),
+    );
+    let response = result
+        .take_write_proposal()
+        .unwrap()
+        .refuse_system(Arc::from("provider operation capacity is full"))
+        .expect("system refusal must cross as host-owned terminal output")
+        .decode()
+        .unwrap();
+
+    let pushed = drain(&observer);
+    assert!(pushed.is_empty());
+    assert_eq!(response["ok"], false);
+    assert_eq!(response["error"], "list-unavailable");
+    assert_eq!(response["reason"], "provider operation capacity is full");
 }
 
 #[test]
@@ -174,7 +205,11 @@ fn a_list_the_account_has_never_published_is_created_by_the_first_change() {
     let mut result = call(
         &provider,
         "add",
-        json!({"list": follows(), "items": [p(&pubkey("b"))]}),
+        json!({
+            "list": follows(),
+            "items": [p(&pubkey("b"))],
+            "options": {"create": true},
+        }),
     );
 
     assert!(result.take_write_proposal().is_some());
@@ -195,30 +230,29 @@ fn signing_out_refuses_the_change_instead_of_writing_under_another_key() {
 
     assert_eq!(answer["ok"], false);
     assert_eq!(answer["added"], 0);
+    assert_eq!(answer["error"], "not-signed-in");
     assert_eq!(
-        answer["error"],
+        answer["reason"],
         "no account is connected, so there is no list to change"
     );
     assert_eq!(source.reads(), 0, "no list is read without an account");
 }
 
 #[test]
-fn a_source_read_failure_is_a_transport_fault_not_a_silent_success() {
+fn a_source_read_failure_returns_a_typed_protocol_result() {
     let (provider, source) = provider_with(vec![entry("a")]);
     let (_registry, _observer) = opened_session(provider.clone());
     source.fail_reads(ListsDataError::Closed);
 
-    let error = provider
-        .call(request(
-            "add",
-            json!({"list": follows(), "items": [p(&pubkey("b"))]}),
-        ))
-        .unwrap_err();
+    let answer = response(
+        &provider,
+        "add",
+        json!({"list": follows(), "items": [p(&pubkey("b"))]}),
+    );
 
-    assert!(matches!(
-        error,
-        nmp_native_nap_bridge::ProviderError::Failed { .. }
-    ));
+    assert_eq!(answer["ok"], false);
+    assert_eq!(answer["error"], "list-unavailable");
+    assert!(answer["reason"].as_str().unwrap().contains("closed"));
 }
 
 #[test]
@@ -227,17 +261,59 @@ fn an_undraftable_change_is_refused_before_any_write_is_proposed() {
     let (_registry, _observer) = opened_session(provider.clone());
     source.fail_drafts(ListsDataError::DraftTooLarge);
 
-    let error = provider
-        .call(request(
+    let answer = response(
+        &provider,
+        "add",
+        json!({"list": follows(), "items": [p(&pubkey("b"))]}),
+    );
+
+    assert_eq!(answer["ok"], false);
+    assert_eq!(answer["error"], "list-unavailable");
+    assert!(answer["reason"].as_str().unwrap().contains("draft"));
+}
+
+#[test]
+fn an_account_freeze_failure_returns_a_typed_protocol_result() {
+    let (provider, source) = provider_with(vec![entry("a")]);
+    let (_registry, _observer) = opened_session(provider.clone());
+    source.fail_account_freeze(ListsDataError::Closed);
+
+    let answer = response(
+        &provider,
+        "add",
+        json!({"list": follows(), "items": [p(&pubkey("b"))]}),
+    );
+
+    assert_eq!(answer["ok"], false);
+    assert_eq!(answer["error"], "list-unavailable");
+}
+
+#[test]
+fn delivered_receipts_without_a_canonical_event_id_fail_closed() {
+    for state in [
+        json!({"state": "delivered"}),
+        json!({"state": "delivered", "eventId": "NOT-AN-EVENT-ID"}),
+    ] {
+        let (provider, _source) = provider_with(vec![entry("a")]);
+        let (_registry, observer) = opened_session(provider.clone());
+        let mut result = call(
+            &provider,
             "add",
             json!({"list": follows(), "items": [p(&pubkey("b"))]}),
-        ))
-        .unwrap_err();
+        );
+        let (_write, completion, _work) = result.take_write_proposal().unwrap().into_parts();
 
-    assert!(matches!(
-        error,
-        nmp_native_nap_bridge::ProviderError::Failed { .. }
-    ));
+        completion
+            .into_receipt_sink()
+            .push_latest(receipt_value(state))
+            .unwrap();
+
+        let pushed = drain(&observer);
+        assert_eq!(pushed.len(), 1);
+        assert_eq!(pushed[0]["ok"], false);
+        assert_eq!(pushed[0]["error"], "publish-failed");
+        assert!(pushed[0].get("eventId").is_none());
+    }
 }
 
 #[test]

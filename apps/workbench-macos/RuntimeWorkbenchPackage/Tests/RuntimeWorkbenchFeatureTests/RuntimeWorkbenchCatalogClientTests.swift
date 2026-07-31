@@ -30,7 +30,7 @@ private func searchPage(
         "reference":
             "5cc6f85dca4a3db7ef63ce7d44f7bc18d2a233744e82bd3c2c4ac4b2e883685f",
         "kehto":
-            "8070424a466a98c729ddf1885a3a76b8ae8f50d16b89e636e4f23b10de79c603",
+            "5b2b45e1d0cfde2ab0038ce5754c1940c1689434edf53f72ee455aa4da46c338",
     ]
 
     for (name, expectedDigest) in expected {
@@ -79,7 +79,7 @@ private func searchPage(
         page.entries.contains {
             $0.id
                 == "kehto:feed:"
-                + "8a146f7511a4fc887cecc0f29ccbf4871234bc56"
+                + "99343d9020f4b25b5b8c784db1e2b0d5c802ceb4"
         }
     )
 }
@@ -91,17 +91,20 @@ private func searchPage(
         query: "resource"
     )
 
-    // #223 removed the hardcoded "Good Morning Protocol" from
-    // `publishedRecord` and derives every catalog title from the fixture's own
-    // name via `displayCatalogTitle`, exactly as the neighbouring
-    // "Resource Demo" entry already was. So "good-morning" reads as
-    // "Good Morning"; the product is right and this assertion was stale.
-    #expect(page.entries.map(\.title) == ["Good Morning", "Resource Demo"])
+    // Good Morning and three Kehto entries declare or require resource.
+    #expect(page.entries.map(\.title) == [
+        "Good Morning", "Feed", "Profile Viewer", "Resource Demo",
+    ])
     #expect(page.evidence.scope == .offlineFixture)
     #expect(page.evidence.queryWasLocalFilter)
-    #expect(page.evidence.locallyFilteredRows == 18)
+    #expect(page.evidence.projectedRows == 4)
+    #expect(page.evidence.locallyFilteredRows == 16)
     let demo = try #require(
         page.entries.first(where: { $0.title == "Resource Demo" })
+    )
+    #expect(
+        demo.publisher.displayName
+            == "jodobear/kehto-web @ 62241de0b452"
     )
     guard case let .incompatible(reason) = demo.compatibility else {
         Issue.record("Expected Kehto source entry to be incompatible")
@@ -156,6 +159,11 @@ private func searchPage(
             == [.incompatible, .unavailable, .unavailable]
     )
     #expect(review.warnings.map(\.severity) == [.caution, .caution, .blocking])
+    let baselineWarning = try #require(
+        review.warnings.first { $0.id == "baseline-unratified" }
+    )
+    #expect(baselineWarning.message.contains("native-runtime-compat-v2"))
+    #expect(!baselineWarning.message.contains("native-runtime-compat-v1"))
     #expect(!review.canInstall)
 }
 

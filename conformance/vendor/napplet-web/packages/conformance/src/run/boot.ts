@@ -15,7 +15,11 @@
  */
 
 import { NAP_DOMAINS } from '@napplet/core';
-import { createReferenceShell, type RecordedEnvelope } from '../shell/reference-shell.js';
+import {
+  createReferenceShell,
+  type RecordedEnvelope,
+  type ReferenceDeliveryState,
+} from '../shell/reference-shell.js';
 import type { BootObservation } from './context.js';
 
 const INTERNAL_BOOT_ERROR = '__nappletConformance.error';
@@ -28,8 +32,12 @@ export interface BootCollection {
   bootError: string | null;
   /** Envelopes emitted under a fully-capable runtime. */
   emitted: RecordedEnvelope[];
+  /** Bounded retained-delivery occupancy and refusal evidence from the primary boot. */
+  deliveryState: ReferenceDeliveryState;
   /** Observation from the no-domain degraded boot, or `null`. */
   degraded: BootObservation | null;
+  /** Retained-delivery evidence from the degraded boot, or `null`. */
+  degradedDeliveryState: ReferenceDeliveryState | null;
 }
 
 /** Options for {@link bootAndCollect}. */
@@ -54,6 +62,7 @@ interface SingleBoot {
   installedGlobal: boolean;
   bootError: string | null;
   emitted: RecordedEnvelope[];
+  deliveryState: ReferenceDeliveryState;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -241,7 +250,12 @@ async function bootOnce(
     /* best-effort cleanup */
   }
 
-  return { installedGlobal: bootError === null, bootError, emitted: [...shell.records] };
+  return {
+    installedGlobal: bootError === null,
+    bootError,
+    emitted: [...shell.records],
+    deliveryState: shell.deliveryState,
+  };
 }
 
 /**
@@ -260,15 +274,19 @@ export async function bootAndCollect(options: BootOptions): Promise<BootCollecti
   const primary = await bootOnce(NAP_DOMAINS, resolved, doc, win);
 
   let degraded: BootObservation | null = null;
+  let degradedDeliveryState: ReferenceDeliveryState | null = null;
   if (options.runDegraded ?? true) {
     const d = await bootOnce([], resolved, doc, win);
     degraded = { bootError: d.bootError, emitted: d.emitted };
+    degradedDeliveryState = d.deliveryState;
   }
 
   return {
     installedGlobal: primary.installedGlobal,
     bootError: primary.bootError,
     emitted: primary.emitted,
+    deliveryState: primary.deliveryState,
     degraded,
+    degradedDeliveryState,
   };
 }

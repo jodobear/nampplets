@@ -13,7 +13,10 @@ mod provider;
 mod registry;
 
 pub use activity::{ActivityOutcome, ActivitySink, MemoryActivitySink, ProviderActivity};
-pub use call::{ProviderCall, ProviderOperation, ProviderWriteCompletion, ProviderWriteProposal};
+pub use call::{
+    ProviderCall, ProviderOperation, ProviderWriteCompletion, ProviderWriteProposal,
+    ProviderWriteRefusal,
+};
 pub use envelope::{BridgeLimits, Envelope, SessionContext};
 pub use error::{BridgeCensus, BridgeError, DispatchOutcome};
 pub use outbound::{

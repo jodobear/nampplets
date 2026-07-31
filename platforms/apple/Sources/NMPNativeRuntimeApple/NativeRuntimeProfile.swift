@@ -9,7 +9,7 @@ typealias PlatformAppearanceSource = IOSAppearanceSource
 typealias PlatformSettingsExecutor = IOSSettingsExecutor
 #endif
 
-// MARK: - Profile lifecycle: open, observation start, and close
+// MARK: - Profile lifecycle: open and observation start
 
 /// One application trust profile owns exactly one Rust runtime controller,
 /// NMP engine, runtime store, artifact cache, and observation stream.
@@ -83,12 +83,17 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
     let appearanceSource: PlatformAppearanceSource
     let settingsExecutor: PlatformSettingsExecutor
     let incActionExecutor: MacOSIncActionExecutor
-    private let intentActivationExecutor: MacOSIntentActivationExecutor
+    let intentActivationExecutor: MacOSIntentActivationExecutor
     let accountVault: (any NativeAccountVault)?
     let lock = NSLock()
     let accountLock = NSLock()
     var observation: RuntimeObservation?
     var sessions: [UInt64: WeakSession] = [:]
+    /// Strongly retains only sessions whose Rust Stop terminal frame has not
+    /// yet been handed to their response sink. Launch admission bounds the
+    /// active/stopping union plus in-flight reservations.
+    var stoppingSessions: [UInt64: StoppingSession] = [:]
+    var sessionLaunchReservations = 0
     var activityObservers: [UUID: ActivityObserverEntry] = [:]
     var libraryObservers: [UUID: LibraryObserverEntry] = [:]
     var catalogObservers: [UUID: CatalogObserverEntry] = [:]
@@ -247,57 +252,6 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
         lock.lock()
         self.observation = observation
         lock.unlock()
-    }
-
-    public func close() {
-        accountLock.lock()
-        lock.lock()
-        guard !isClosed else {
-            lock.unlock()
-            accountLock.unlock()
-            return
-        }
-        isClosed = true
-        let observation = observation
-        self.observation = nil
-        let activeSessions = sessions.values.compactMap(\.value)
-        sessions.removeAll()
-        activityObservers.removeAll()
-        libraryObservers.removeAll()
-        catalogObservers.removeAll()
-        pendingWriteObservers.removeAll()
-        receiptObservers.removeAll()
-        lock.unlock()
-        // Released here, for the same reason `lock` is released above.
-        //
-        // `accountLock` is a plain `NSLock`. Every call below can block until
-        // an in-flight runtime callback returns, and a callback that reaches
-        // any account method -- `accountSnapshot()` and its siblings all take
-        // this lock -- would then wait on a lock this thread is still holding.
-        // Neither side can proceed. It presents as a teardown that is instant
-        // whenever no callback happens to be in flight and never returns when
-        // one is.
-        //
-        // `isClosed` is already true under `lock`, so a second `close()` still
-        // returns at the guard above.
-        accountLock.unlock()
-
-        observation?.stop()
-        for session in activeSessions {
-            session.profileDidClose()
-        }
-        appearanceSource.close()
-        settingsExecutor.close()
-        incActionExecutor.close()
-        intentActivationExecutor.close()
-
-        // Retaken only around the controller, which is the single thing this
-        // lock exists to serialise: an account call either completes before
-        // the controller closes or begins after, never during. Nothing below
-        // this line invokes an application callback.
-        accountLock.lock()
-        controller.close()
-        accountLock.unlock()
     }
 
     /// Installs or removes the application-owned NAP-INC action handler.

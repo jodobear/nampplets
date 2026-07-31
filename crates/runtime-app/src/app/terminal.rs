@@ -58,12 +58,29 @@ impl RuntimeApp {
             return;
         }
         let reason = AppTerminalReason::SectionRevisionExhausted { section };
+
+        // Complete retained provider writes while their mapped sessions and
+        // the platform event boundary are still observable. Latching the
+        // terminal reason first makes `push_event` reject these correlated
+        // system-refusal envelopes, and closing sessions first removes the
+        // only native sinks that can deliver them to the caller.
+        let now = self.clock.now_millis();
+        for (_, operation) in std::mem::take(&mut state.operations) {
+            self.cancel_provider_operation(
+                state,
+                operation,
+                Arc::from("runtime section revision exhausted"),
+                now,
+            );
+        }
+        // A refusal projection can itself discover exhaustion at the event or
+        // error boundary. That nested terminal transition owns teardown.
+        if state.terminal_reason.is_some() {
+            return;
+        }
+
         state.closed = true;
         state.terminal_reason = Some(reason.clone());
-
-        for (_, operation) in std::mem::take(&mut state.operations) {
-            operation.cancel(Arc::from("runtime section revision exhausted"));
-        }
         for (session_id, mut entry) in std::mem::take(&mut state.sessions) {
             self.shell_provider.close_session(session_id);
             self.bridge

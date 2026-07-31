@@ -5,7 +5,7 @@ use nmp_native_runtime_core::BoundedJson;
 use serde_json::{Map, Value, json};
 
 use crate::{
-    DOMAIN, ListsProviderLimits, SUPPORTED_LISTS, validate::ListRefusal, write::ListsAction,
+    DOMAIN, ListsProviderLimits, SUPPORTED_LISTS, request::ListRefusal, write::ListsAction,
 };
 
 pub(crate) fn correlation_id(
@@ -41,6 +41,27 @@ pub(crate) fn exact_payload<'a>(
         return Err(invalid_payload(
             request,
             format!("expected exactly these fields: {}", allowed.join(", ")),
+        ));
+    }
+    Ok(payload)
+}
+
+pub(crate) fn mutation_payload(
+    request: &ProviderRequest,
+) -> Result<&Map<String, Value>, ProviderError> {
+    let payload = request
+        .payload
+        .as_object()
+        .ok_or_else(|| invalid_payload(request, "payload must be a flat object"))?;
+    if !payload.contains_key("list")
+        || !payload.contains_key("items")
+        || payload
+            .keys()
+            .any(|key| !["list", "items", "options"].contains(&key.as_str()))
+    {
+        return Err(invalid_payload(
+            request,
+            "expected list, items, and optional options fields",
         ));
     }
     Ok(payload)
@@ -92,27 +113,52 @@ pub(crate) fn completed(
     )?)))
 }
 
+pub(crate) fn completed_refusal(
+    action: ListsAction,
+    id: &str,
+    refusal: &ListRefusal,
+    limits: ListsProviderLimits,
+    request_action: &str,
+) -> Result<ProviderCall, ProviderError> {
+    completed(
+        &refusal_result(action, id, refusal, true),
+        limits,
+        request_action,
+    )
+    .or_else(|_| {
+        completed(
+            &refusal_result(action, id, refusal, false),
+            limits,
+            request_action,
+        )
+    })
+}
+
 /// The whole answer to `lists.supported`, projected from the pinned catalog.
-pub(crate) fn supported_result(id: &str) -> Value {
-    let lists = SUPPORTED_LISTS
+fn list_supports() -> Vec<Value> {
+    SUPPORTED_LISTS
         .iter()
         .map(|list| {
             json!({
                 "kind": list.kind,
-                "name": list.name,
-                "parameterized": list.parameterized,
-                "itemTypes": list
+                "type": list.list_type,
+                "addressable": list.addressable,
+                "supportedItemTypes": list
                     .item_types
                     .iter()
-                    .map(|tag| tag.wire())
+                    .map(|tag| crate::semantic_item_type(*tag))
                     .collect::<Vec<_>>(),
+                "privateItems": false,
             })
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+}
+
+pub(crate) fn supported_result(id: &str) -> Value {
     json!({
         "type": "lists.supported.result",
         "id": id,
-        "lists": lists,
+        "lists": list_supports(),
     })
 }
 
@@ -129,8 +175,33 @@ pub(crate) fn mutation_result(
 
 /// A refused mutation. The counts stay present and zero so a napplet reading
 /// them unconditionally cannot mistake a refusal for a partial success.
-pub(crate) fn refusal_result(action: ListsAction, id: &str, refusal: &ListRefusal) -> Value {
-    mutation_envelope(action, id, false, 0, 0, Some(refusal.to_string()))
+fn refusal_result(
+    action: ListsAction,
+    id: &str,
+    refusal: &ListRefusal,
+    include_reason: bool,
+) -> Value {
+    let mut envelope = mutation_envelope(action, id, false, 0, 0, Some(refusal.code().to_owned()));
+    let object = envelope
+        .as_object_mut()
+        .expect("mutation envelope is an object");
+    if include_reason {
+        object.insert("reason".to_owned(), Value::from(refusal.to_string()));
+    }
+    if refusal.include_supported() {
+        object.insert("supported".to_owned(), Value::from(list_supports()));
+    }
+    envelope
+}
+
+pub(crate) fn minimum_catalog_response_bytes(maximum_correlation_id_bytes: usize) -> Option<usize> {
+    let escaped_id_bytes = maximum_correlation_id_bytes.checked_mul(6)?;
+    let mut largest = serde_json::to_vec(&supported_result("")).ok()?.len();
+    for action in [ListsAction::Add, ListsAction::Remove] {
+        let response = refusal_result(action, "", &ListRefusal::UnsupportedKind(u16::MAX), true);
+        largest = largest.max(serde_json::to_vec(&response).ok()?.len());
+    }
+    largest.checked_add(escaped_id_bytes)
 }
 
 fn mutation_envelope(

@@ -466,8 +466,25 @@ fn unsafe_source_values_are_bounded_before_crossing_the_bridge() {
 #[test]
 fn compiled_contract_matches_the_pinned_inventory_and_tarball_hash() {
     let lock = include_str!("../../../compatibility.lock");
-    assert!(lock.contains("nap = \"0.28.0\""));
-    assert!(lock.contains(&format!("nap = \"{PINNED_NPM_TARBALL_SHA256}\"")));
+    let package_versions = lock
+        .split_once("[napplet_packages]")
+        .unwrap()
+        .1
+        .split_once("[napplet_packages.source_trees]")
+        .unwrap()
+        .0;
+    assert!(package_versions.contains("nap = \"0.29.0\""));
+    let package_digests = lock
+        .split_once("[napplet_packages.npm_sha256]")
+        .unwrap()
+        .1
+        .split_once("[kehto]")
+        .unwrap()
+        .0;
+    assert!(
+        package_digests.contains(&format!("nap = \"{PINNED_NPM_TARBALL_SHA256}\"")),
+        "compiled digest {PINNED_NPM_TARBALL_SHA256} is absent from {package_digests}"
+    );
 
     let inventory: Value = serde_json::from_str(include_str!(
         "../../../conformance/envelopes/inventory.json"

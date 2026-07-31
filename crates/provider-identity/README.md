@@ -1,11 +1,11 @@
 # Identity provider
 
 This crate implements the exact flat-envelope identity contract exported by
-`@napplet/nap` 0.28.0. The npm tarball used as the executable contract is:
+`@napplet/nap` 0.29.0. The npm tarball used as the executable contract is:
 
 ```text
-@napplet/nap@0.28.0
-sha256 ff51a33cd35e06b5067b09407fb3e381c6bfe4ef229ce8c082b3beb156ebd5b6
+@napplet/nap@0.29.0
+sha256 5e3e086bbb83335efb1d35c68cc0cd88780ab60e2bc7db3bd9daac88f72909f
 ```
 
 The provider covers every pinned request:

@@ -26,6 +26,61 @@ fn malformed_app_snapshot(controller: &RuntimeController, id: &str) -> AppSnapsh
     snapshot
 }
 
+#[test]
+fn observation_cut_captures_snapshot_before_a_stop_terminal_batch() {
+    let temp = TempDir::new().unwrap();
+    let controller = controller(&temp);
+    let (_, session) = install_and_launch(&controller, &[]);
+    let observer = controller.app.observe();
+    let cursor = controller.app.events_after(0).newest_available;
+
+    let terminal = controller
+        .capture_app_observation_after_snapshot(&observer, cursor, || controller.stop(session));
+    let RuntimeSnapshotProjection::Snapshot { snapshot } = &terminal.snapshot else {
+        panic!("valid pre-stop snapshot was refused");
+    };
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|candidate| candidate.id == session)
+    );
+    let terminal_event = terminal
+        .events
+        .iter()
+        .find(|event| {
+            event.kind == "session-changed"
+                && event.session_id == Some(session)
+                && event.detail == "stopped"
+        })
+        .expect("Stop terminal marker must follow the retained-session snapshot cut");
+    assert!(
+        terminal.events.iter().all(|event| {
+            event.kind != "envelope-handled" || event.sequence < terminal_event.sequence
+        }),
+        "Stop responses must precede its terminal marker"
+    );
+
+    let after = controller.capture_app_observation_after_snapshot(
+        &observer,
+        terminal.newest_available_event,
+        || {},
+    );
+    let RuntimeSnapshotProjection::Snapshot { snapshot } = &after.snapshot else {
+        panic!("valid post-stop snapshot was refused");
+    };
+    assert!(
+        !snapshot
+            .sessions
+            .iter()
+            .any(|candidate| candidate.id == session)
+    );
+    assert!(
+        after.events.is_empty(),
+        "terminal events were already covered"
+    );
+}
+
 fn expect_workspace_refusal(projection: RuntimeSnapshotProjection, id: &str) -> RuntimeRefusal {
     match projection {
         RuntimeSnapshotProjection::Refused {

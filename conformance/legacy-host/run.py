@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -17,6 +16,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from playwright_environment import resolve_playwright_environment
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -165,18 +166,6 @@ def package_environment(
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(source, destination)
     return root / "node_modules" / "@napplet" / "conformance" / "dist" / "index.js"
-
-
-def playwright_environment() -> dict[str, str]:
-    result = bounded_run(["npm", "root", "-g"], cwd=ROOT)
-    if result.returncode != 0:
-        raise RunnerError("playwright-module-root-unavailable")
-    module_root = result.stdout.decode("utf-8").strip()
-    if not (Path(module_root) / "playwright").is_dir():
-        raise RunnerError("playwright-module-unavailable")
-    environment = os.environ.copy()
-    environment["NODE_PATH"] = module_root
-    return environment
 
 
 def verify_fixture_bytes(
@@ -361,6 +350,11 @@ def main() -> int:
     )
     parser.add_argument("--browser-channel", default="chrome")
     parser.add_argument("--package-cache", type=Path)
+    parser.add_argument(
+        "--playwright-module-root",
+        type=Path,
+        help="node_modules directory containing an exact Playwright installation",
+    )
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     arguments = parser.parse_args()
 
@@ -376,7 +370,12 @@ def main() -> int:
             arguments.allow_package_download,
             temporary_root / "packages",
         )
-        environment = playwright_environment()
+        environment = resolve_playwright_environment(
+            arguments.playwright_module_root,
+            root=ROOT,
+            bounded_run=bounded_run,
+            error_type=RunnerError,
+        )
         records = fixture_records(
             lock,
             engine,

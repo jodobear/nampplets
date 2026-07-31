@@ -1970,6 +1970,7 @@ dependencies = [
  "hex",
  "nmp-native-artifact",
  "nmp-native-nap-bridge",
+ "nmp-native-nmp-adapter",
  "nmp-native-providers",
  "nmp-native-runtime-core",
  "nmp-native-runtime-store",

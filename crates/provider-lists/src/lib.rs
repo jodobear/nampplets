@@ -1,4 +1,4 @@
-//! Exact `@napplet/nap` 0.28.0 `lists` provider contract.
+//! Exact `@napplet/nap` 0.29.0 `lists` provider contract.
 //!
 //! The domain is *runtime-mediated NIP-51 list mutation*. Rust owns the whole
 //! decision: which lists exist, which item types each accepts, whether a
@@ -12,15 +12,17 @@
 //! receipt, never optimistically.
 
 pub const DOMAIN: &str = "lists";
-pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.28.0";
+pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.29.0";
 
 mod catalog;
 mod provider;
+mod request;
 mod session;
 mod types;
 mod validate;
 mod wire;
 mod write;
+mod write_terminal;
 
 pub use catalog::*;
 pub use provider::*;

@@ -12,7 +12,7 @@ use nmp_native_runtime_core::{BoundedJson, Capability, Principal, SessionId, Wor
 use parking_lot::Mutex;
 use serde_json::{Map, Value};
 
-use crate::PINNED_NAP_PROTOCOL;
+use crate::SUPPORTED_INTENT_PROTOCOL;
 
 pub const INTENT_DOMAIN: &str = "intent";
 
@@ -89,7 +89,7 @@ impl IntentProvider {
             limits,
             descriptor: ProviderDescriptor {
                 domain: Capability::new(INTENT_DOMAIN).expect("static intent capability is valid"),
-                protocol_versions: BTreeSet::from([Arc::from(PINNED_NAP_PROTOCOL)]),
+                protocol_versions: BTreeSet::from([Arc::from(SUPPORTED_INTENT_PROTOCOL)]),
                 actions: ["invoke", "available", "handlers"]
                     .into_iter()
                     .map(Arc::from)

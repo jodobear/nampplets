@@ -9,6 +9,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+LEGACY_HOST = ROOT / "conformance" / "legacy-host"
+sys.path.insert(0, str(LEGACY_HOST))
 
 
 def load_module(name: str, relative: str):
@@ -41,7 +43,7 @@ class LegacyHostRunnerTests(unittest.TestCase):
         self.assertNotIn("shell", package_domains)
         self.assertEqual(
             lock["domain_versions"]["shell_handshake"],
-            "NAP-SHELL@6461e4b37c29",
+            "NAP-SHELL@5ac0490461ca",
         )
 
     def test_reference_and_published_fixture_bytes_are_verified(self) -> None:
@@ -90,10 +92,30 @@ class LegacyHostRunnerTests(unittest.TestCase):
         self.assertIn('"--frozen-lockfile"', source)
         self.assertIn('"./apps/playground/napplets/**"', source)
 
+    def test_kehto_runner_clones_the_lock_repository_only(self) -> None:
+        self.assertEqual(
+            kehto.github_remote("jodobear/kehto-web"),
+            "https://github.com/jodobear/kehto-web.git",
+        )
+        for invalid in ("kehto", "https://github.com/kehto/web", "kehto/web/extra"):
+            with self.assertRaisesRegex(
+                kehto.KehtoRunnerError,
+                "invalid-github-repository",
+            ):
+                kehto.github_remote(invalid)
+
+    def test_legacy_runner_accepts_an_explicit_playwright_module_root(self) -> None:
+        runner_source = (LEGACY_HOST / "run.py").read_text(encoding="utf-8")
+        helper_source = (LEGACY_HOST / "playwright_environment.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"--playwright-module-root"', runner_source)
+        self.assertIn('module_root / "playwright"', helper_source)
+
     def test_verified_package_cache_refuses_wrong_digest_offline(self) -> None:
         pin = legacy.PackagePin(
             name="@napplet/conformance",
-            version="0.13.0",
+            version="0.14.0",
             sha256="0" * 64,
         )
         with tempfile.TemporaryDirectory() as temporary:

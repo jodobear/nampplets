@@ -43,8 +43,9 @@ impl ProviderWriteCompletion for TestWriteCompletion {
         Arc::new(ProposalReceiptSink)
     }
 
-    fn refused(self: Box<Self>, _reason: Arc<str>) {
+    fn refused(self: Box<Self>, _refusal: ProviderWriteRefusal) -> Option<BoundedJson> {
         self.refused.fetch_add(1, Ordering::Relaxed);
+        None
     }
 }
 
@@ -121,9 +122,11 @@ fn write_proposal_refusal_is_typed_and_releases_work() {
         work,
     );
 
-    call.take_write_proposal()
+    let response = call
+        .take_write_proposal()
         .unwrap()
-        .refuse(Arc::from("not approved"));
+        .refuse_system(Arc::from("not approved"));
+    assert!(response.is_none());
     assert_eq!(resources.census().admitted, 0);
     assert_eq!(converted.load(Ordering::Relaxed), 0);
     assert_eq!(refused.load(Ordering::Relaxed), 1);

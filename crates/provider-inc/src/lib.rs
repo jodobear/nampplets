@@ -1,4 +1,4 @@
-//! Exact, bounded `@napplet/nap` 0.28.0 NAP-INC provider.
+//! Exact, bounded `@napplet/nap` 0.29.0 NAP-INC provider.
 //!
 //! Routing identity is always derived from the trusted mapped session supplied
 //! by `nap-bridge`. Component envelopes cannot select a principal, session,
@@ -22,7 +22,7 @@ use serde_json::{Map, Value, json};
 use thiserror::Error;
 
 pub const DOMAIN: &str = "inc";
-pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.28.0";
+pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.29.0";
 
 const CHANNEL_ID_ATTEMPTS: usize = 8;
 const REASON_PEER_DESTROYED: &str = "peer destroyed";

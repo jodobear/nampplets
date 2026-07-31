@@ -8,7 +8,7 @@ use std::{
 };
 
 use nmp_native_runtime_core::{
-    Capability, ExecutionProfile, GrantLedger, Principal, ResourceTracker, SessionId,
+    BoundedJson, Capability, ExecutionProfile, GrantLedger, Principal, ResourceTracker, SessionId,
 };
 use parking_lot::Mutex;
 
@@ -108,6 +108,15 @@ impl ProviderRegistry {
         })
     }
 
+    /// Applies the bridge-owned response bound to output produced after the
+    /// initial provider call, including host-delivered write refusals.
+    pub fn validate_response(&self, response: &BoundedJson) -> Result<(), BridgeError> {
+        if response.byte_len() > self.limits.maximum_response_bytes {
+            return Err(BridgeError::ResponseTooLarge);
+        }
+        Ok(())
+    }
+
     /// Registration is the advertisement boundary. An unavailable or
     /// non-conformant implementation must not be registered.
     pub fn register(&mut self, provider: Arc<dyn Provider>) -> Result<(), BridgeError> {
@@ -160,13 +169,48 @@ impl ProviderRegistry {
             .collect()
     }
 
+    /// Returns the revoked capability and every registered provider whose
+    /// direct or transitive dependency closure contains it.
+    pub fn revocation_scope(&self, capability: &Capability) -> BTreeSet<Capability> {
+        let mut affected = BTreeSet::from([capability.clone()]);
+        for _ in 0..self.providers.len() {
+            let prior = affected.len();
+            for (domain, provider) in &self.providers {
+                if !provider.descriptor().dependencies.is_disjoint(&affected) {
+                    affected.insert(domain.clone());
+                }
+            }
+            if affected.len() == prior {
+                break;
+            }
+        }
+        affected
+    }
+
     pub fn negotiate(
         &self,
         principal: &Principal,
         profile: ExecutionProfile,
         required: &BTreeSet<Capability>,
     ) -> Result<InjectionPlan, BridgeError> {
-        let domains = self
+        let domains = self.admitted_domains(principal, profile);
+        let missing = required.difference(&domains).cloned().collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(BridgeError::MissingRequiredDomains { missing });
+        }
+        Ok(InjectionPlan {
+            principal: principal.clone(),
+            profile,
+            domains,
+        })
+    }
+
+    fn admitted_domains(
+        &self,
+        principal: &Principal,
+        profile: ExecutionProfile,
+    ) -> BTreeSet<Capability> {
+        let mut domains = self
             .providers
             .keys()
             .filter(|domain| profile_allows(profile, domain))
@@ -179,15 +223,18 @@ impl ProviderRegistry {
             })
             .cloned()
             .collect::<BTreeSet<_>>();
-        let missing = required.difference(&domains).cloned().collect::<Vec<_>>();
-        if !missing.is_empty() {
-            return Err(BridgeError::MissingRequiredDomains { missing });
+        for _ in 0..self.providers.len() {
+            let admitted = domains.clone();
+            domains.retain(|domain| {
+                self.providers
+                    .get(domain)
+                    .is_some_and(|provider| provider.descriptor().dependencies.is_subset(&admitted))
+            });
+            if domains.len() == admitted.len() {
+                break;
+            }
         }
-        Ok(InjectionPlan {
-            principal: principal.clone(),
-            profile,
-            domains,
-        })
+        domains
     }
 
     pub fn census(&self) -> BridgeCensus {

@@ -20,16 +20,20 @@ fn supported_answers_from_the_pinned_catalog_without_touching_the_source() {
 }
 
 #[test]
-fn every_advertised_list_names_its_kind_item_types_and_addressing() {
+fn every_advertised_list_uses_the_exact_package_support_shape() {
     let (provider, _) = provider_with(Vec::new());
     let answer = response(&provider, "supported", json!({}));
 
     for list in answer["lists"].as_array().unwrap() {
         let kind = u16::try_from(list["kind"].as_u64().unwrap()).unwrap();
         let pinned = supported_list(kind).expect("advertised kind is in the catalog");
-        assert_eq!(list["name"], pinned.name);
-        assert_eq!(list["parameterized"], pinned.parameterized);
-        let advertised = list["itemTypes"]
+        assert_eq!(list["type"], pinned.list_type);
+        assert_eq!(list["addressable"], pinned.addressable);
+        assert_eq!(list["privateItems"], false);
+        assert!(list.get("name").is_none());
+        assert!(list.get("parameterized").is_none());
+        assert!(list.get("itemTypes").is_none());
+        let advertised = list["supportedItemTypes"]
             .as_array()
             .unwrap()
             .iter()
@@ -38,7 +42,7 @@ fn every_advertised_list_names_its_kind_item_types_and_addressing() {
         let pinned_types = pinned
             .item_types
             .iter()
-            .map(|tag| tag.wire().to_owned())
+            .map(|tag| semantic_item_type(*tag).to_owned())
             .collect::<Vec<_>>();
         assert_eq!(advertised, pinned_types);
         assert!(
@@ -53,7 +57,7 @@ fn parameterized_addressing_matches_the_replaceable_kind_range() {
     for list in SUPPORTED_LISTS {
         let expected = (30_000..40_000).contains(&list.kind);
         assert_eq!(
-            list.parameterized, expected,
+            list.addressable, expected,
             "kind {} addressing disagrees with its replaceable range",
             list.kind
         );
@@ -104,7 +108,22 @@ fn the_descriptor_advertises_exactly_the_pinned_action_set() {
         nmp_native_nap_bridge::ProviderPlatformAvailability::Available
     );
     assert_eq!(descriptor.domain.as_str(), DOMAIN);
-    assert!(descriptor.dependencies.is_empty());
+    assert_eq!(
+        descriptor
+            .protocol_versions
+            .iter()
+            .map(|version| version.as_ref())
+            .collect::<Vec<_>>(),
+        vec![PINNED_NAP_PROTOCOL]
+    );
+    assert_eq!(
+        descriptor
+            .dependencies
+            .iter()
+            .map(|dependency| dependency.as_str())
+            .collect::<Vec<_>>(),
+        vec!["identity", "relay"]
+    );
 }
 
 #[test]
@@ -122,13 +141,81 @@ fn zero_limits_are_refused_at_construction() {
     assert_eq!(error, ListsProviderBuildError::InvalidLimits);
 }
 
+fn terminal_fallback_limits() -> (String, usize, ListsProviderLimits) {
+    let maximum_id_bytes = 32;
+    let id = "\u{0001}".repeat(maximum_id_bytes);
+    let success = json!({
+        "type": "lists.remove.result",
+        "id": &id,
+        "ok": true,
+        "removed": 1,
+        "skipped": 1,
+    });
+    let failure = json!({
+        "type": "lists.remove.result",
+        "id": &id,
+        "ok": false,
+        "removed": 0,
+        "skipped": 0,
+        "error": "list-unavailable",
+    });
+    let minimum = [success, failure]
+        .iter()
+        .map(|value| serde_json::to_vec(value).unwrap().len())
+        .max()
+        .unwrap();
+    let limits = ListsProviderLimits {
+        maximum_correlation_id_bytes: maximum_id_bytes,
+        maximum_request_items: 1,
+        ..ListsProviderLimits::default()
+    };
+    (id, minimum, limits)
+}
+
+#[test]
+fn oversized_system_refusal_preserves_the_exact_terminal_semantics() {
+    let (id, minimum, limits) = terminal_fallback_limits();
+    let source: Arc<dyn ListsDataPlane> = FakeSource::new(vec![entry("b")]);
+    let provider = ListsProvider::new(source, limits).unwrap();
+    let (_registry, _observer) = opened_session(provider.clone());
+    let mut request = request(
+        "remove",
+        json!({"list": follows(), "items": [p(&pubkey("b"))]}),
+    );
+    request.correlation_id = Some(Arc::from(id.as_str()));
+    let mut result = provider.call(request).unwrap();
+    let response = result
+        .take_write_proposal()
+        .unwrap()
+        .refuse_system(Arc::from(
+            "upstream failure ".repeat(limits.maximum_response_bytes),
+        ))
+        .expect("admitted terminal bound always carries the typed refusal");
+    assert_eq!(response.byte_len(), minimum);
+    assert_eq!(
+        response.decode().unwrap(),
+        json!({
+            "type": "lists.remove.result",
+            "id": id,
+            "ok": false,
+            "removed": 0,
+            "skipped": 0,
+            "error": "list-unavailable",
+        })
+    );
+}
+
 /// The catalog is a compatibility surface: a napplet matches on these names.
 #[test]
-fn catalog_names_and_kinds_are_unique() {
+fn catalog_types_and_kinds_are_unique() {
     let mut kinds = std::collections::BTreeSet::new();
-    let mut names = std::collections::BTreeSet::new();
+    let mut list_types = std::collections::BTreeSet::new();
     for list in SUPPORTED_LISTS {
         assert!(kinds.insert(list.kind), "duplicate kind {}", list.kind);
-        assert!(names.insert(list.name), "duplicate name {}", list.name);
+        assert!(
+            list_types.insert(list.list_type),
+            "duplicate type {}",
+            list.list_type
+        );
     }
 }

@@ -50,23 +50,35 @@ pub(super) fn validate_invocation(
     // `intent.open(archetype, payload, { protocol })` sugar spreads `opts`
     // directly onto the wire request) sends it as `protocol`. Accept either
     // spelling so real-world napplets built against that SDK aren't rejected.
-    let convention = optional_text(request, object, "convention", limits.maximum_text_bytes)?.or(
-        optional_text(request, object, "protocol", limits.maximum_text_bytes)?,
-    );
-    if convention
-        .as_deref()
-        .is_some_and(|value| !value.starts_with("napplet:"))
-    {
+    let named_convention = optional_text(request, object, "convention", limits.maximum_text_bytes)?;
+    let protocol_alias = optional_text(request, object, "protocol", limits.maximum_text_bytes)?;
+    if matches!(
+        (&named_convention, &protocol_alias),
+        (Some(convention), Some(protocol)) if convention != protocol
+    ) {
         return Err(invalid(
             request,
-            "`convention` must use the napplet: namespace",
+            "`convention` and its `protocol` alias must agree",
         ));
     }
-    let handler_request = match object.get("handler").and_then(Value::as_str) {
-        None | Some("default") => IntentHandlerRequest::Default,
-        Some("choose") => IntentHandlerRequest::Choose,
-        Some(value) if valid_text(value, limits.maximum_text_bytes) => {
-            IntentHandlerRequest::Specific(Arc::from(value))
+    let expected_convention = format!("napplet:{archetype}/{action}");
+    let convention = named_convention
+        .or(protocol_alias)
+        .unwrap_or_else(|| Arc::from(expected_convention.as_str()));
+    // In 0.28 an explicit convention is independent handler routing identity,
+    // not a value derived from the request's archetype/action pair.
+    if !valid_queryless_convention(&convention, limits.maximum_text_bytes) {
+        return Err(invalid(
+            request,
+            "intent convention must be a stable queryless napplet convention",
+        ));
+    }
+    let handler_request = match object.get("handler") {
+        None => IntentHandlerRequest::Default,
+        Some(Value::String(value)) if value == "default" => IntentHandlerRequest::Default,
+        Some(Value::String(value)) if value == "choose" => IntentHandlerRequest::Choose,
+        Some(Value::String(value)) if valid_text(value, limits.maximum_text_bytes) => {
+            IntentHandlerRequest::Specific(Arc::from(value.as_str()))
         }
         _ => return Err(invalid(request, "`handler` is invalid")),
     };
@@ -86,7 +98,7 @@ pub(super) fn validate_invocation(
     Ok(ValidatedInvocation {
         archetype,
         action,
-        convention,
+        convention: Some(convention),
         payload,
         handler_request,
         behavior,
@@ -153,8 +165,27 @@ pub(super) fn valid_declaration(
         && declaration.actions.len() <= limits.maximum_actions_per_handler
         && declaration.actions.iter().all(|action| valid_slug(action))
         && declaration.conventions.len() <= limits.maximum_conventions_per_handler
-        && declaration.conventions.iter().all(|convention| {
-            valid_text(convention, limits.maximum_text_bytes) && convention.starts_with("napplet:")
+        && declaration
+            .conventions
+            .iter()
+            .all(|convention| valid_queryless_convention(convention, limits.maximum_text_bytes))
+}
+
+fn valid_queryless_convention(value: &str, maximum_bytes: usize) -> bool {
+    let Some(path) = value.strip_prefix("napplet:") else {
+        return false;
+    };
+    let Some((subject, action)) = path.split_once('/') else {
+        return false;
+    };
+    valid_text(value, maximum_bytes)
+        && !subject.is_empty()
+        && !action.is_empty()
+        && !action.contains('/')
+        && [subject, action].into_iter().all(|component| {
+            !component
+                .chars()
+                .any(|character| character.is_whitespace() || matches!(character, '?' | '#'))
         })
 }
 

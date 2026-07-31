@@ -4,12 +4,12 @@ use super::*;
 
 /// End-to-end proof that NAP-INTENT dispatch is real, not hardcoded: an
 /// installed-but-never-launched handler napplet gets launched by the
-/// dispatcher itself in reaction to a caller's `intent.invoke`, and once
+/// dispatcher itself for an archetype-only legacy `intent.invoke`, and once
 /// the (test-simulated) handler subscribes to its declared convention
 /// topic, receives the invocation payload as a real `inc.event` push and
 /// the caller receives a matching `ok:true` `intent.invoke.result`.
 #[test]
-fn intent_invoke_launches_a_registered_handler_and_delivers_the_payload_via_inc() {
+fn archetype_only_intent_defaults_identity_before_runtime_dispatch() {
     let temp = TempDir::new().unwrap();
     let (handler_event, handler_author, handler_digest) = signed_manifest_event(
         "nip29-chat-test",
@@ -98,7 +98,6 @@ fn intent_invoke_launches_a_registered_handler_and_delivers_the_payload_via_inc(
             "id": "invoke-1",
             "request": {
                 "archetype": "nip29-group",
-                "convention": "napplet:nip29-group/open",
                 "payload": {"group": "abc"}
             }
         }))
@@ -201,6 +200,7 @@ fn intent_invoke_launches_a_registered_handler_and_delivers_the_payload_via_inc(
     assert_eq!(result["result"]["ok"], true);
     assert_eq!(result["result"]["handled"], true);
     assert_eq!(result["result"]["archetype"], "nip29-group");
+    assert_eq!(result["result"]["convention"], "napplet:nip29-group/open");
 }
 
 /// Regression test for the defect this integration fixed: an intent launch

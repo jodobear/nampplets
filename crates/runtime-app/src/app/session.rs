@@ -267,7 +267,12 @@ impl RuntimeApp {
             .collect::<Vec<_>>();
         for operation_id in operation_ids {
             if let Some(operation) = state.operations.remove(&operation_id) {
-                operation.cancel(Arc::from("provider operation cancelled"));
+                self.cancel_provider_operation(
+                    state,
+                    operation,
+                    Arc::from("provider operation cancelled"),
+                    now,
+                );
             }
         }
         self.shell_provider.close_session(session_id);

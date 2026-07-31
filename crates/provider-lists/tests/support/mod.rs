@@ -6,14 +6,11 @@
 
 #![allow(dead_code)]
 
-use std::{
-    collections::BTreeSet,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+mod bridge;
+mod dependency_provider;
 
-use nmp_native_nap_bridge::{
-    BridgeLimits, MemoryActivitySink, ProviderRegistry, SessionContext, SourceWindowId,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 // Re-exported so every test target gets the same vocabulary from one `use
 // support::*;` rather than repeating bridge imports per file.
 pub use nmp_native_nap_bridge::{Provider, ProviderCall, ProviderPushObserver, ProviderRequest};
@@ -21,13 +18,13 @@ pub use nmp_native_runtime_core::{
     AccountRef, BoundedJson, Cancellation, Principal, ReceiptSnapshot, WriteReceiptId,
 };
 use nmp_native_runtime_core::{
-    Capability, ExecutionProfile, GrantDecision, GrantLedger, GrantLimits, ResourceClass,
-    ResourceLimits, ResourceTracker, Sensitivity, SessionId,
+    Capability, ResourceClass, ResourceLimits, ResourceTracker, SessionId,
 };
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 pub use std::sync::Arc;
 
+pub use bridge::opened_session;
 use nmp_native_provider_lists::*;
 
 /// A list source that records exactly what the provider asked it to do, so a
@@ -36,6 +33,7 @@ use nmp_native_provider_lists::*;
 #[derive(Debug)]
 pub struct FakeSource {
     account: Mutex<Option<AccountRef>>,
+    account_error: Mutex<Option<ListsDataError>>,
     snapshot: Mutex<ListSnapshot>,
     reads: AtomicUsize,
     drafts: Mutex<Vec<Vec<ListEntry>>>,
@@ -48,6 +46,7 @@ impl FakeSource {
     pub fn new(entries: Vec<ListEntry>) -> Arc<Self> {
         Arc::new(Self {
             account: Mutex::new(Some(AccountRef(Arc::from("a".repeat(64))))),
+            account_error: Mutex::new(None),
             snapshot: Mutex::new(ListSnapshot {
                 exists: true,
                 entries,
@@ -67,8 +66,22 @@ impl FakeSource {
         self.snapshot.lock().entries = entries;
     }
 
+    pub fn set_exists(&self, exists: bool) {
+        self.snapshot.lock().exists = exists;
+    }
+
+    pub fn set_retained_content(&self, content: &str) {
+        self.snapshot.lock().retained =
+            BoundedJson::from_value(&json!({"content": content, "otherTags": []}), 4096)
+                .expect("retained fixture fits");
+    }
+
     pub fn sign_out(&self) {
         *self.account.lock() = None;
+    }
+
+    pub fn fail_account_freeze(&self, error: ListsDataError) {
+        *self.account_error.lock() = Some(error);
     }
 
     pub fn fail_reads(&self, error: ListsDataError) {
@@ -99,6 +112,9 @@ fn retained() -> BoundedJson {
 
 impl ListsDataPlane for FakeSource {
     fn freeze_account(&self) -> Result<Option<AccountRef>, ListsDataError> {
+        if let Some(error) = self.account_error.lock().clone() {
+            return Err(error);
+        }
         Ok(self.account.lock().clone())
     }
 
@@ -156,48 +172,6 @@ pub fn provider_with(entries: Vec<ListEntry>) -> (Arc<ListsProvider>, Arc<FakeSo
     (provider, source)
 }
 
-/// Registers the provider on a real bridge so session binding, grants and the
-/// outbound lane are the production ones rather than a test double.
-pub fn opened_session(provider: Arc<ListsProvider>) -> (ProviderRegistry, ProviderPushObserver) {
-    let resources = Arc::new(ResourceTracker::new(ResourceLimits::default()).unwrap());
-    let grants =
-        Arc::new(GrantLedger::new(GrantLimits::default(), Arc::clone(&resources)).unwrap());
-    let activity = Arc::new(MemoryActivitySink::bounded(32));
-    let mut registry = ProviderRegistry::new(
-        BridgeLimits::default(),
-        resources,
-        Arc::clone(&grants),
-        activity,
-    )
-    .unwrap();
-    grants
-        .set(
-            principal(),
-            Capability::new(DOMAIN).unwrap(),
-            Sensitivity::Sensitive,
-            GrantDecision::AllowExactBuild,
-        )
-        .unwrap();
-    registry.register(provider).unwrap();
-    let context = SessionContext {
-        id: SessionId(7),
-        principal: principal(),
-        profile: ExecutionProfile::Legacy,
-    };
-    let plan = registry
-        .negotiate(
-            &context.principal,
-            context.profile,
-            &BTreeSet::from([Capability::new(DOMAIN).unwrap()]),
-        )
-        .unwrap();
-    let observer = registry
-        .open_session_bound(&context, &plan, SourceWindowId(11), 0)
-        .unwrap();
-    registry.mark_session_ready(context.id).unwrap();
-    (registry, observer)
-}
-
 pub fn request(action: &str, payload: Value) -> ProviderRequest {
     let resources = ResourceTracker::new(ResourceLimits::default()).unwrap();
     let work = resources
@@ -241,7 +215,7 @@ pub fn drain(observer: &ProviderPushObserver) -> Vec<Value> {
 }
 
 pub fn p(value: &str) -> Value {
-    json!({"type": "p", "value": value})
+    json!({"itemType": "pubkey", "value": value})
 }
 
 pub fn pubkey(seed: &str) -> String {
@@ -258,8 +232,16 @@ pub fn entry(seed: &str) -> ListEntry {
 
 /// One NMP receipt frame in the given delivery state.
 pub fn receipt(state: &str) -> ReceiptSnapshot {
+    let mut value = json!({"state": state});
+    if matches!(state, "delivered" | "partial_delivery") {
+        value["eventId"] = Value::String("e".repeat(64));
+    }
+    receipt_value(value)
+}
+
+pub fn receipt_value(value: Value) -> ReceiptSnapshot {
     ReceiptSnapshot {
         receipt_id: WriteReceiptId(Arc::from("receipt-1")),
-        state: BoundedJson::from_value(&json!({"state": state}), 1024).unwrap(),
+        state: BoundedJson::from_value(&value, 1024).unwrap(),
     }
 }

@@ -104,12 +104,43 @@ impl ProviderWriteProposal {
         (write, completion, work)
     }
 
-    pub fn refuse(mut self, reason: Arc<str>) {
-        if let Some(completion) = self.completion.take() {
-            completion.refused(reason);
-        }
+    pub fn refuse_user(mut self, reason: Arc<str>) -> Option<BoundedJson> {
+        let response = self
+            .completion
+            .take()
+            .and_then(|completion| completion.refused(ProviderWriteRefusal::UserDenied(reason)));
         if let Some(work) = self.work.take() {
             work.cancellation().cancel();
+        }
+        response
+    }
+
+    pub fn refuse_system(mut self, reason: Arc<str>) -> Option<BoundedJson> {
+        let response = self.completion.take().and_then(|completion| {
+            completion.refused(ProviderWriteRefusal::SystemUnavailable(reason))
+        });
+        if let Some(work) = self.work.take() {
+            work.cancellation().cancel();
+        }
+        response
+    }
+}
+
+/// Why a retained provider write was refused before it reached NMP.
+///
+/// User denial is intentionally distinct from runtime capacity, lifecycle,
+/// and ownership failures so providers never blame a person for a system
+/// refusal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProviderWriteRefusal {
+    UserDenied(Arc<str>),
+    SystemUnavailable(Arc<str>),
+}
+
+impl ProviderWriteRefusal {
+    pub fn into_reason(self) -> Arc<str> {
+        match self {
+            Self::UserDenied(reason) | Self::SystemUnavailable(reason) => reason,
         }
     }
 }
@@ -129,7 +160,10 @@ impl Drop for ProviderWriteProposal {
 /// projection and the provider's protocol result through one observation.
 pub trait ProviderWriteCompletion: Send + Sync + fmt::Debug {
     fn into_receipt_sink(self: Box<Self>) -> Arc<dyn ReceiptEventSink>;
-    fn refused(self: Box<Self>, reason: Arc<str>);
+    /// Completes a refused write. A returned envelope is host-owned terminal
+    /// output that must be delivered directly rather than through a provider
+    /// lane that may be revoked by the same decision.
+    fn refused(self: Box<Self>, refusal: ProviderWriteRefusal) -> Option<BoundedJson>;
 }
 
 /// The lifecycle owner for one active provider operation.

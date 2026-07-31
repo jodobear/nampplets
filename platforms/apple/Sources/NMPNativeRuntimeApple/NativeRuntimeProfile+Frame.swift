@@ -11,7 +11,13 @@ extension NativeRuntimeProfile {
             return
         }
         sessions = sessions.filter { $0.value.value != nil }
-        let activeSessions = sessions.values.compactMap(\.value)
+        var activeSessionsByID = stoppingSessions.mapValues(\.session)
+        for (sessionID, session) in sessions {
+            if let value = session.value {
+                activeSessionsByID[sessionID] = value
+            }
+        }
+        let activeSessions = Array(activeSessionsByID.values)
         let previousActivityRevision = lastActivityRevision
         let previousLibraryRevision = lastLibraryRevision
         let previousCatalogRevision = lastCatalogSnapshot.revision
@@ -25,20 +31,27 @@ extension NativeRuntimeProfile {
         let snapshot: RuntimeSnapshot?
         switch snapshotProjection {
         case let .snapshot(accepted):
-            snapshot = accepted
-            lastAcceptedSnapshot = accepted
-            lastActivityRevision = max(
-                lastActivityRevision,
-                accepted.revision
-            )
-            lastPendingWriteRevision = max(
-                lastPendingWriteRevision,
-                accepted.revision
-            )
-            lastReceiptRevision = max(
-                lastReceiptRevision,
-                accepted.revision
-            )
+            if accepted.revision >= lastAcceptedSnapshot.revision {
+                snapshot = accepted
+                lastAcceptedSnapshot = accepted
+                lastActivityRevision = max(
+                    lastActivityRevision,
+                    accepted.revision
+                )
+                lastPendingWriteRevision = max(
+                    lastPendingWriteRevision,
+                    accepted.revision
+                )
+                lastReceiptRevision = max(
+                    lastReceiptRevision,
+                    accepted.revision
+                )
+            } else {
+                // Synchronous commands may pull a newer Rust snapshot before
+                // an older observer callback arrives. Never let that callback
+                // resurrect lifecycle state already absent from Rust.
+                snapshot = nil
+            }
         case .refused:
             snapshot = nil
         }
@@ -212,8 +225,21 @@ extension NativeRuntimeProfile {
                 )
             )
         }
+        let acceptedSessionIDs = snapshot.map { accepted in
+            Set(accepted.sessions.map(\.id))
+        }
         for session in activeSessions {
-            session.deliver(frame: frame)
+            session.deliver(
+                frame: frame,
+                acceptedSnapshotRetainsSession: acceptedSessionIDs.map {
+                    $0.contains(session.sessionID)
+                }
+            )
+        }
+        recordStopTerminalEvidence()
+        if let snapshot {
+            completeStopsAfterDelivery(snapshot: snapshot)
+            retireRustTerminatedSessionsAfterDelivery(snapshot: snapshot)
         }
         if let snapshot,
            snapshot.revision > previousActivityRevision

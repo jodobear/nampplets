@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::collections::BTreeSet;
 
-use nmp_native_runtime_core::{GrantBatchError, Principal};
+use nmp_native_runtime_core::{Capability, GrantBatchError, Principal};
 
 use super::{AppState, RuntimeApp, validate::ValidatedPermissionChanges};
 use crate::{
@@ -49,25 +49,11 @@ impl RuntimeApp {
             }
         }
 
+        let mut revoked_domains = BTreeSet::<Capability>::new();
         for decision in &validated.decisions {
             let prior = validated.previous[&decision.capability];
             if prior.allows_without_prompt() && !decision.decision.allows_without_prompt() {
-                self.bridge
-                    .cancel_capability_work(&principal, &decision.capability);
-                let operations = state
-                    .operations
-                    .iter()
-                    .filter_map(|(id, operation)| {
-                        (operation.principal == principal
-                            && operation.domain == decision.capability)
-                            .then_some(*id)
-                    })
-                    .collect::<Vec<_>>();
-                for id in operations {
-                    if let Some(operation) = state.operations.remove(&id) {
-                        operation.cancel(Arc::from("permission revoked"));
-                    }
-                }
+                revoked_domains.extend(self.bridge.revocation_scope(&decision.capability));
             }
             self.record_activity(
                 state,
@@ -77,6 +63,10 @@ impl RuntimeApp {
                 super::super::grant_outcome(decision.decision),
                 now,
             );
+        }
+        self.cancel_provider_operations_for_domains(state, &principal, &revoked_domains, now);
+        for domain in revoked_domains {
+            self.bridge.cancel_capability_work(&principal, &domain);
         }
         self.push_event(
             state,
