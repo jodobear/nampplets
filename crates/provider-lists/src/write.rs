@@ -47,7 +47,7 @@ pub(crate) struct ListsWriteCompletion {
 }
 
 impl ListsWriteCompletion {
-    fn into_sink(self: Box<Self>) -> ListsReceiptSink {
+    fn into_sink(self) -> ListsReceiptSink {
         ListsReceiptSink {
             action: self.action,
             id: self.id,
@@ -73,11 +73,12 @@ impl fmt::Debug for ListsWriteCompletion {
 
 impl ProviderWriteCompletion for ListsWriteCompletion {
     fn into_receipt_sink(self: Box<Self>) -> Arc<dyn ReceiptEventSink> {
-        Arc::new(self.into_sink())
+        Arc::new((*self).into_sink())
     }
 
     fn refused(self: Box<Self>, reason: Arc<str>) {
-        self.into_sink()
+        (*self)
+            .into_sink()
             .deliver(false, Some("user-denied"), Some(reason.to_string()));
     }
 }
