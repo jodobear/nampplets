@@ -168,11 +168,27 @@ fn remove_without_visibility_refuses_when_private_items_cannot_be_decrypted() {
     let answer = response(
         &provider,
         "remove",
-        json!({"list": follows(), "items": [p(&pubkey("b"))]}),
+        json!({"list": {"kind": 10_000}, "items": [p(&pubkey("b"))]}),
     );
 
     assert_eq!(answer["error"], "decrypt-failed");
     assert!(source.drafted().is_empty());
+}
+
+#[test]
+fn nip_02_relay_map_content_is_not_treated_as_encrypted_private_items() {
+    let (provider, source) = provider_with(vec![entry("b")]);
+    source.set_retained_content(r#"{"wss://relay.example":{"read":true,"write":false}}"#);
+    let (_registry, _observer) = opened_session(provider.clone());
+
+    let mut result = call(
+        &provider,
+        "remove",
+        json!({"list": follows(), "items": [p(&pubkey("b"))]}),
+    );
+
+    assert!(result.take_write_proposal().is_some());
+    assert_eq!(source.drafted().len(), 1);
 }
 
 #[test]

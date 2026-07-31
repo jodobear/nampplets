@@ -42,6 +42,7 @@ use publish_completion::NapPublishReceiptSink;
 pub const OUTBOX_DOMAIN: &str = "outbox";
 pub const RELAY_DOMAIN: &str = "relay";
 const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.29.0";
+const PUBLISH_REFUSAL_FIXED_HEADROOM_BYTES: usize = 192;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NapNostrProviderLimits {
@@ -919,6 +920,17 @@ struct QueryProjection {
 }
 
 fn validate_limits(limits: NapNostrProviderLimits) -> Result<(), ProviderError> {
+    // A correlation id can expand to six JSON bytes per input byte (for
+    // escaped controls). Reserve enough room for that id plus the fixed
+    // publish-refusal envelope so an admitted provider can always report an
+    // oversized system reason through the bounded fallback.
+    let publish_refusal_fits = limits
+        .maximum_correlation_id_bytes
+        .checked_mul(6)
+        .and_then(|escaped_id_bytes| {
+            escaped_id_bytes.checked_add(PUBLISH_REFUSAL_FIXED_HEADROOM_BYTES)
+        })
+        .is_some_and(|minimum| limits.maximum_response_bytes >= minimum);
     let finite = [
         limits.maximum_sessions,
         limits.maximum_subscriptions_per_session,
@@ -937,14 +949,17 @@ fn validate_limits(limits: NapNostrProviderLimits) -> Result<(), ProviderError> 
     .all(|value| value > 0)
         && limits.default_query_timeout_millis > 0
         && limits.default_query_timeout_millis <= limits.maximum_query_timeout_millis
-        && limits.receipt_event_lookup_timeout_millis > 0;
+        && limits.receipt_event_lookup_timeout_millis > 0
+        && publish_refusal_fits;
     if finite {
         Ok(())
     } else {
         Err(ProviderError::Failed {
             domain: Arc::from("outbox"),
             action: Arc::from("provider.build"),
-            reason: Arc::from("NAP Nostr provider limits must be finite and non-zero"),
+            reason: Arc::from(
+                "NAP Nostr provider limits must be finite, non-zero, and able to encode publish refusals",
+            ),
         })
     }
 }
@@ -2146,6 +2161,19 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn provider_build_refuses_a_response_bound_that_cannot_encode_publish_refusals() {
+        let limits = NapNostrProviderLimits {
+            maximum_response_bytes: PUBLISH_REFUSAL_FIXED_HEADROOM_BYTES,
+            ..NapNostrProviderLimits::default()
+        };
+
+        assert!(matches!(
+            validate_limits(limits),
+            Err(ProviderError::Failed { .. })
+        ));
+    }
 
     struct NapRig {
         plane: Arc<NmpDataPlane>,

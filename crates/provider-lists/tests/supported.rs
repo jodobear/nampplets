@@ -116,7 +116,14 @@ fn the_descriptor_advertises_exactly_the_pinned_action_set() {
             .collect::<Vec<_>>(),
         vec![PINNED_NAP_PROTOCOL]
     );
-    assert!(descriptor.dependencies.is_empty());
+    assert_eq!(
+        descriptor
+            .dependencies
+            .iter()
+            .map(|dependency| dependency.as_str())
+            .collect::<Vec<_>>(),
+        vec!["identity", "relay"]
+    );
 }
 
 #[test]

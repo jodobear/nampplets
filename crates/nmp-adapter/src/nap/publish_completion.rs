@@ -16,6 +16,8 @@ use serde_json::{Map, Value, json};
 
 use super::{CachedEventLookup, NapDomain, cached_event_by_id, push_value};
 
+const OVERSIZED_REFUSAL_ERROR: &str = "provider refusal exceeded configured response bound";
+
 pub(super) struct NapPublishCompletion {
     domain: NapDomain,
     id: Arc<str>,
@@ -56,17 +58,30 @@ impl NapPublishCompletion {
     }
 
     fn refusal_message(&self, reason: &str) -> Option<BoundedJson> {
+        bounded_refusal_message(self.domain, &self.id, reason, self.maximum_response_bytes)
+    }
+}
+
+fn bounded_refusal_message(
+    domain: NapDomain,
+    id: &str,
+    reason: &str,
+    maximum_response_bytes: usize,
+) -> Option<BoundedJson> {
+    let response = |error: &str| {
         BoundedJson::from_value(
             &json!({
-                "type": format!("{}.publish.result", self.domain.name()),
-                "id": self.id,
+                "type": format!("{}.publish.result", domain.name()),
+                "id": id,
                 "ok": false,
-                "error": reason,
+                "error": error,
             }),
-            self.maximum_response_bytes,
+            maximum_response_bytes,
         )
+    };
+    response(reason)
+        .or_else(|_| response(OVERSIZED_REFUSAL_ERROR))
         .ok()
-    }
 }
 
 impl fmt::Debug for NapPublishCompletion {
@@ -251,5 +266,35 @@ impl ReceiptEventSink for NapPublishReceiptSink {
             self.maximum_response_bytes,
             Some(&self.id),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oversized_system_refusal_keeps_a_typed_bounded_result() {
+        let fallback = bounded_refusal_message(
+            NapDomain::Outbox,
+            "request-1",
+            OVERSIZED_REFUSAL_ERROR,
+            usize::MAX,
+        )
+        .expect("fallback is serializable");
+
+        let response = bounded_refusal_message(
+            NapDomain::Outbox,
+            "request-1",
+            &"upstream failure ".repeat(128),
+            fallback.byte_len(),
+        )
+        .expect("validated response bound retains the typed fallback");
+
+        let value = response.decode().expect("fallback is valid JSON");
+        assert_eq!(value["type"], "outbox.publish.result");
+        assert_eq!(value["id"], "request-1");
+        assert_eq!(value["ok"], false);
+        assert_eq!(value["error"], OVERSIZED_REFUSAL_ERROR);
     }
 }

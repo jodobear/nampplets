@@ -65,7 +65,10 @@ impl ListsProvider {
                 // Follow, mute and block membership is social-graph data, and
                 // these actions change it under the user's own key.
                 sensitive: true,
-                dependencies: BTreeSet::new(),
+                dependencies: BTreeSet::from([
+                    Capability::new("identity").expect("static identity capability is valid"),
+                    Capability::new("relay").expect("static relay capability is valid"),
+                ]),
                 platform_availability: ProviderPlatformAvailability::Available,
             },
             state: Mutex::new(ListsState::default()),
@@ -166,7 +169,7 @@ impl ListsProvider {
             return refuse(&ListRefusal::ListNotFound);
         }
         if action == ListsAction::Remove && items.remove_private_matches {
-            match snapshot_has_encrypted_content(&snapshot) {
+            match snapshot_has_encrypted_content(&selector, &snapshot) {
                 Ok(true) | Err(_) => return refuse(&ListRefusal::DecryptFailed),
                 Ok(false) => {}
             }
@@ -249,7 +252,15 @@ impl ListsProvider {
     }
 }
 
-fn snapshot_has_encrypted_content(snapshot: &ListSnapshot) -> Result<bool, ()> {
+fn snapshot_has_encrypted_content(
+    selector: &ListSelector,
+    snapshot: &ListSnapshot,
+) -> Result<bool, ()> {
+    // Kind 3 content is the public NIP-02 relay-usage map. It is metadata for
+    // the follow list, never encrypted private list items.
+    if selector.kind == 3 {
+        return Ok(false);
+    }
     let retained = snapshot.retained.decode().map_err(|_| ())?;
     let content = retained.get("content").and_then(Value::as_str).ok_or(())?;
     Ok(!content.is_empty())
