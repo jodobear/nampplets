@@ -162,6 +162,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
                 allowedLocalRelayHosts: configuration.allowedLocalRelayHosts,
                 maximumNmpRelays: 64,
                 maximumBridgeWorkers: 12,
+                maximumProviderPushEnvelopeBytes: 256 * 1_024,
+                maximumProviderPushPendingBytes: 512 * 1_024,
                 maximumObservers: 4,
                 maximumBoundaryEvents: 256,
                 maximumConfigItems: 64,
