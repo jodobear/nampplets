@@ -3,32 +3,53 @@ import NMPNativeRuntime
 // MARK: - Stop terminal-response completion
 
 extension NativeRuntimeProfile {
+    enum StopTerminalEvidence: Equatable {
+        case pending
+        case delivered
+        /// Rust reported that events were evicted before native delivery.
+        /// The count is evidence of loss, never a claim that the original
+        /// correlation-bearing responses reached their sink.
+        case deliveryLost(lostBeforeBatch: UInt64)
+    }
+
     struct StoppingSession {
         let session: RustRuntimeNappletSession
         let minimumTerminalRevision: UInt64
         /// Rust emits this session's final stopped event after every terminal
-        /// response. Completion waits until that ordered marker was delivered.
-        var terminalBatchDelivered = false
+        /// response. Completion waits for that delivery watermark or explicit
+        /// Rust event-loss evidence plus an accepted absent-session snapshot.
+        var terminalEvidence: StopTerminalEvidence = .pending
     }
 
     enum StopFrameDisposition: Equatable {
         case wait
-        case complete
+        case completeDelivered
+        case completeDeliveryLost(lostBeforeBatch: UInt64)
+        case completeRuntimeClosed
     }
 
     static func stopFrameDisposition(
         snapshotRevision: UInt64,
         minimumTerminalRevision: UInt64,
+        snapshotClosed: Bool,
         snapshotRetainsSession: Bool,
-        terminalBatchDelivered: Bool
+        terminalEvidence: StopTerminalEvidence
     ) -> StopFrameDisposition {
-        guard snapshotRevision >= minimumTerminalRevision,
-              !snapshotRetainsSession,
-              terminalBatchDelivered
-        else {
+        guard snapshotRevision >= minimumTerminalRevision else {
             return .wait
         }
-        return .complete
+        if snapshotClosed {
+            return .completeRuntimeClosed
+        }
+        guard !snapshotRetainsSession else { return .wait }
+        switch terminalEvidence {
+        case .pending:
+            return .wait
+        case .delivered:
+            return .completeDelivered
+        case let .deliveryLost(lostBeforeBatch):
+            return .completeDeliveryLost(lostBeforeBatch: lostBeforeBatch)
+        }
     }
 
     /// Called only after every event in the frame has been handed to session
@@ -36,22 +57,34 @@ extension NativeRuntimeProfile {
     /// responses for the same Stop, so a loss-free batch makes it an exact
     /// delivery watermark. A stale batch can retain the marker after evicting
     /// an earlier terminal response.
-    func recordDeliveredStopTerminalEvents(_ frame: RuntimeObservationFrame) {
-        guard !frame.eventCursorWasStale, frame.lostBeforeBatch == 0 else {
-            return
-        }
-        let terminalSessionIDs = Set(
-            frame.events.compactMap { event in
-                event.kind == "session-changed" && event.detail == "stopped"
-                    ? event.sessionId
-                    : nil
-            }
+    func recordStopTerminalEvidence(_ frame: RuntimeObservationFrame) {
+        let lossWasReported = frame.eventCursorWasStale
+            || frame.lostBeforeBatch > 0
+        let terminalSessionIDs: Set<UInt64> = lossWasReported
+            ? []
+            : Set(
+                frame.events.compactMap { event in
+                    event.kind == "session-changed"
+                        && event.detail == "stopped"
+                        ? event.sessionId
+                        : nil
+                }
         )
-        guard !terminalSessionIDs.isEmpty else { return }
+        guard lossWasReported || !terminalSessionIDs.isEmpty else { return }
         lock.lock()
-        for sessionID in terminalSessionIDs {
+        for sessionID in Array(stoppingSessions.keys) {
             guard var stopping = stoppingSessions[sessionID] else { continue }
-            stopping.terminalBatchDelivered = true
+            if terminalSessionIDs.contains(sessionID) {
+                stopping.terminalEvidence = .delivered
+            } else if lossWasReported,
+                      stopping.terminalEvidence == .pending
+            {
+                stopping.terminalEvidence = .deliveryLost(
+                    lostBeforeBatch: frame.lostBeforeBatch
+                )
+            } else {
+                continue
+            }
             stoppingSessions[sessionID] = stopping
         }
         lock.unlock()
@@ -66,10 +99,11 @@ extension NativeRuntimeProfile {
                 disposition: Self.stopFrameDisposition(
                     snapshotRevision: snapshot.revision,
                     minimumTerminalRevision: stopping.minimumTerminalRevision,
+                    snapshotClosed: snapshot.closed,
                     snapshotRetainsSession: retainedSessionIDs.contains(
                         stopping.session.sessionID
                     ),
-                    terminalBatchDelivered: stopping.terminalBatchDelivered
+                    terminalEvidence: stopping.terminalEvidence
                 )
             )
         }
@@ -81,8 +115,8 @@ extension NativeRuntimeProfile {
         _ stopFrames: [(session: RustRuntimeNappletSession, disposition: StopFrameDisposition)]
     ) {
         let completedStops = stopFrames.compactMap { candidate in
-            candidate.disposition == .complete
-                && candidate.session.completeStopAfterTerminalDelivery()
+            candidate.disposition != .wait
+                && candidate.session.completeStopAfterTerminalEvidence()
                 ? candidate.session
                 : nil
         }

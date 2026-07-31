@@ -234,7 +234,10 @@ extension NativeRuntimeProfile {
     func stopSession(_ session: RustRuntimeNappletSession) {
         let sessionID = session.sessionID
         lock.lock()
-        let shouldStop = !isClosed && sessions[sessionID]?.value === session
+        let isRegistered = sessions[sessionID]?.value === session
+        let rustRetainsSession = !lastAcceptedSnapshot.closed
+            && lastAcceptedSnapshot.sessions.contains { $0.id == sessionID }
+        let shouldStop = !isClosed && isRegistered && rustRetainsSession
         if shouldStop {
             // Rust dispatch and observation are asynchronous. Retain the
             // borrowed session until update(frame:) hands off the terminal
@@ -245,6 +248,13 @@ extension NativeRuntimeProfile {
                     ? UInt64.max
                     : lastAcceptedSnapshot.revision + 1
             )
+        } else if isRegistered {
+            // The wrapper is weak native presentation state. An accepted Rust
+            // snapshot that already removed the session is authoritative: do
+            // not send Stop for an unknown ID or retain an immortal terminal
+            // sink waiting for a marker Rust cannot emit.
+            sessions.removeValue(forKey: sessionID)
+            stoppingSessions.removeValue(forKey: sessionID)
         }
         lock.unlock()
         if shouldStop {

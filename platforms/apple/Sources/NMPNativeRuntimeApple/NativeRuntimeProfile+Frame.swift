@@ -31,20 +31,27 @@ extension NativeRuntimeProfile {
         let snapshot: RuntimeSnapshot?
         switch snapshotProjection {
         case let .snapshot(accepted):
-            snapshot = accepted
-            lastAcceptedSnapshot = accepted
-            lastActivityRevision = max(
-                lastActivityRevision,
-                accepted.revision
-            )
-            lastPendingWriteRevision = max(
-                lastPendingWriteRevision,
-                accepted.revision
-            )
-            lastReceiptRevision = max(
-                lastReceiptRevision,
-                accepted.revision
-            )
+            if accepted.revision >= lastAcceptedSnapshot.revision {
+                snapshot = accepted
+                lastAcceptedSnapshot = accepted
+                lastActivityRevision = max(
+                    lastActivityRevision,
+                    accepted.revision
+                )
+                lastPendingWriteRevision = max(
+                    lastPendingWriteRevision,
+                    accepted.revision
+                )
+                lastReceiptRevision = max(
+                    lastReceiptRevision,
+                    accepted.revision
+                )
+            } else {
+                // Synchronous commands may pull a newer Rust snapshot before
+                // an older observer callback arrives. Never let that callback
+                // resurrect lifecycle state already absent from Rust.
+                snapshot = nil
+            }
         case .refused:
             snapshot = nil
         }
@@ -221,7 +228,7 @@ extension NativeRuntimeProfile {
         for session in activeSessions {
             session.deliver(frame: frame)
         }
-        recordDeliveredStopTerminalEvents(frame)
+        recordStopTerminalEvidence(frame)
         if let snapshot {
             completeStopsAfterDelivery(snapshot: snapshot)
         }

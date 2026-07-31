@@ -28,8 +28,8 @@ final class RuntimeSessionStopEvidenceTests: RuntimeNappletSessionTestCase {
         fixture.profile.update(frame: frameCapturedBeforeStop)
         XCTAssertEqual(
             stoppingSession(in: fixture.profile, id: fixture.session.sessionID)?
-                .terminalBatchDelivered,
-            false
+                .terminalEvidence,
+            .deliveryLost(lostBeforeBatch: 1)
         )
 
         fixture.profile.update(
@@ -53,17 +53,18 @@ final class RuntimeSessionStopEvidenceTests: RuntimeNappletSessionTestCase {
         )
         XCTAssertEqual(
             stoppingSession(in: fixture.profile, id: fixture.session.sessionID)?
-                .terminalBatchDelivered,
-            true
+                .terminalEvidence,
+            .delivered
         )
         XCTAssertEqual(
             NativeRuntimeProfile.stopFrameDisposition(
                 snapshotRevision: fixture.snapshot.revision,
                 minimumTerminalRevision: fixture.snapshot.revision,
+                snapshotClosed: false,
                 snapshotRetainsSession: false,
-                terminalBatchDelivered: true
+                terminalEvidence: .delivered
             ),
-            .complete
+            .completeDelivered
         )
     }
 
@@ -90,17 +91,18 @@ final class RuntimeSessionStopEvidenceTests: RuntimeNappletSessionTestCase {
         )
         XCTAssertEqual(
             stoppingSession(in: fixture.profile, id: fixture.session.sessionID)?
-                .terminalBatchDelivered,
-            false
+                .terminalEvidence,
+            .deliveryLost(lostBeforeBatch: 1)
         )
         XCTAssertEqual(
             NativeRuntimeProfile.stopFrameDisposition(
                 snapshotRevision: fixture.snapshot.revision,
                 minimumTerminalRevision: fixture.snapshot.revision,
+                snapshotClosed: false,
                 snapshotRetainsSession: false,
-                terminalBatchDelivered: false
+                terminalEvidence: .deliveryLost(lostBeforeBatch: 1)
             ),
-            .wait
+            .completeDeliveryLost(lostBeforeBatch: 1)
         )
     }
 
@@ -135,18 +137,19 @@ final class RuntimeSessionStopEvidenceTests: RuntimeNappletSessionTestCase {
             )
             XCTAssertEqual(
                 stoppingSession(in: fixture.profile, id: fixture.session.sessionID)?
-                    .terminalBatchDelivered,
-                false
+                    .terminalEvidence,
+                .deliveryLost(lostBeforeBatch: 1)
             )
         }
         XCTAssertEqual(
             NativeRuntimeProfile.stopFrameDisposition(
                 snapshotRevision: fixture.snapshot.revision,
                 minimumTerminalRevision: fixture.snapshot.revision,
+                snapshotClosed: false,
                 snapshotRetainsSession: false,
-                terminalBatchDelivered: false
+                terminalEvidence: .deliveryLost(lostBeforeBatch: 1)
             ),
-            .wait
+            .completeDeliveryLost(lostBeforeBatch: 1)
         )
     }
 

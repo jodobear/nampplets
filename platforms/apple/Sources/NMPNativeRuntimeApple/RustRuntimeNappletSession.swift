@@ -180,9 +180,10 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
         lock.unlock()
     }
 
-    /// Called only after an accepted frame no longer contains this session and
-    /// all session-scoped events in that same frame have been handed to sinks.
-    func completeStopAfterTerminalDelivery() -> Bool {
+    /// Called only after an accepted frame proves this session ended or the
+    /// whole Rust runtime closed. Native has either handed off the ordered
+    /// terminal batch or preserved Rust's explicit event-loss/closure fact.
+    func completeStopAfterTerminalEvidence() -> Bool {
         lock.lock()
         guard isStopping && !isStopped else {
             lock.unlock()
