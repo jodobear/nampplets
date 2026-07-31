@@ -164,6 +164,15 @@ extension NativeRuntimeProfile {
 
     func reserveSessionLaunch() -> SessionLaunchAdmission {
         lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            return .profileClosed
+        }
+        let acceptedSnapshot = lastAcceptedSnapshot
+        lock.unlock()
+        retireRustTerminatedSessionsAfterDelivery(snapshot: acceptedSnapshot)
+
+        lock.lock()
         defer { lock.unlock() }
         guard !isClosed else { return .profileClosed }
         sessions = sessions.filter { $0.value.value != nil }

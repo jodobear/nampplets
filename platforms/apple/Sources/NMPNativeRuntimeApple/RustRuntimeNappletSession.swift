@@ -238,6 +238,26 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
         return true
     }
 
+    /// Retires a wrapper whose Rust-owned session ended without a native Stop.
+    /// The profile calls this only after delivering the accepted terminal frame,
+    /// so clearing the sinks cannot discard a correlation-bearing response.
+    func completeRustTerminationAfterDelivery(runtimeClosed: Bool) -> Bool {
+        lock.lock()
+        guard !isStopping,
+              !isStopped,
+              runtimeClosed || terminalEvidence != .pending
+        else {
+            lock.unlock()
+            return false
+        }
+        isStopped = true
+        responseSink = nil
+        diagnosticSink = nil
+        profile = nil
+        lock.unlock()
+        return true
+    }
+
     deinit {
         profile?.abandonSession(sessionID)
     }

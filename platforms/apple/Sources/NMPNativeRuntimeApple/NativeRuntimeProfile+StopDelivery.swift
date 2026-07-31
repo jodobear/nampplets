@@ -160,6 +160,31 @@ extension NativeRuntimeProfile {
         completeStopsWithTerminalEvidence(stopFrames)
     }
 
+    /// Rust may terminate a session while its UI keeps the native wrapper and
+    /// never calls Stop. Retire that wrapper only after its terminal batch was
+    /// delivered (or loss/closure was explicit), then release launch capacity.
+    func retireRustTerminatedSessionsAfterDelivery(snapshot: RuntimeSnapshot) {
+        let retainedSessionIDs = Set(snapshot.sessions.map(\.id))
+        lock.lock()
+        let candidates = sessions.compactMap { sessionID, weakSession in
+            guard stoppingSessions[sessionID] == nil,
+                  snapshot.closed || !retainedSessionIDs.contains(sessionID)
+            else { return nil }
+            return weakSession.value
+        }
+        lock.unlock()
+
+        let retired = candidates.filter {
+            $0.completeRustTerminationAfterDelivery(runtimeClosed: snapshot.closed)
+        }
+        guard !retired.isEmpty else { return }
+        lock.lock()
+        for session in retired where sessions[session.sessionID]?.value === session {
+            sessions.removeValue(forKey: session.sessionID)
+        }
+        lock.unlock()
+    }
+
     private func completeStopsWithTerminalEvidence(
         _ stopFrames: [(session: RustRuntimeNappletSession, disposition: StopFrameDisposition)]
     ) {

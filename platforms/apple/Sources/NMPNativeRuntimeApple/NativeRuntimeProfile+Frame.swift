@@ -239,6 +239,7 @@ extension NativeRuntimeProfile {
         recordStopTerminalEvidence()
         if let snapshot {
             completeStopsAfterDelivery(snapshot: snapshot)
+            retireRustTerminatedSessionsAfterDelivery(snapshot: snapshot)
         }
         if let snapshot,
            snapshot.revision > previousActivityRevision
