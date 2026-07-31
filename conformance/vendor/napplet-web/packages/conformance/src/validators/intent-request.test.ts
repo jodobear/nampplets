@@ -34,6 +34,19 @@ describe('intent.invoke request validation', () => {
     })).ok).toBe(true);
   });
 
+  it('accepts an agreeing legacy protocol alias without changing explicit routing identity', () => {
+    expect(validateEnvelope(intentInvoke({
+      archetype: 'note',
+      action: 'open',
+      protocol: 'napplet:article/read',
+    })).ok).toBe(true);
+    expect(validateEnvelope(intentInvoke({
+      archetype: 'note',
+      convention: 'napplet:article/read',
+      protocol: 'napplet:article/read',
+    })).ok).toBe(true);
+  });
+
   it('rejects missing, malformed, and caller-forged fields', () => {
     const malformedRequest = validateEnvelope(intentInvoke([]));
     expect(malformedRequest.errors).toContainEqual(expect.objectContaining({
@@ -46,6 +59,7 @@ describe('intent.invoke request validation', () => {
       [{ archetype: 1 }, 'request.archetype'],
       [{ archetype: 'note', action: 1 }, 'request.action'],
       [{ archetype: 'note', convention: false }, 'request.convention'],
+      [{ archetype: 'note', protocol: false }, 'request.protocol'],
       [{ archetype: 'note', handler: false }, 'request.handler'],
       [{ archetype: 'note', sender: 'forged-source' }, 'request.sender'],
     ] as const) {
@@ -67,5 +81,26 @@ describe('intent.invoke request validation', () => {
           field: 'request.convention',
         }));
     }
+    expect(validateEnvelope(intentInvoke({
+      archetype: 'note',
+      protocol: 'napplet:note/open?draft=true',
+    })).errors).toContainEqual(expect.objectContaining({
+      code: 'invalid-intent-request',
+      field: 'request.protocol',
+    }));
+  });
+
+  it('rejects conflicting convention and legacy protocol aliases', () => {
+    expect(validateEnvelope(intentInvoke({
+      archetype: 'note',
+      convention: 'napplet:note/open',
+      protocol: 'napplet:article/read',
+    }))).toMatchObject({
+      ok: false,
+      errors: [expect.objectContaining({
+        code: 'invalid-intent-request',
+        field: 'request.protocol',
+      })],
+    });
   });
 });

@@ -42,6 +42,63 @@ describe('reference intent resolution', () => {
     }]);
   });
 
+  it('routes the legacy protocol alias as the same explicit convention identity', () => {
+    const shell = createReferenceShell();
+
+    expect(shell.handleFrom(authenticatedSource, {
+      type: 'intent.invoke',
+      id: 'intent-protocol-alias',
+      request: {
+        archetype: 'note',
+        action: 'open',
+        protocol: 'napplet:article/read',
+      },
+    })).toEqual([{
+      type: 'intent.invoke.result',
+      id: 'intent-protocol-alias',
+      result: {
+        ok: true,
+        handled: true,
+        archetype: 'note',
+        action: 'open',
+        convention: 'napplet:article/read',
+        handler: 'reference-handler',
+      },
+    }]);
+    expect(shell.takeDeliveries('reference-handler')).toEqual([{
+      type: 'intent.deliver',
+      delivery: {
+        sender: 'authenticated-source',
+        archetype: 'note',
+        action: 'open',
+        convention: 'napplet:article/read',
+      },
+    }]);
+  });
+
+  it('rejects conflicting convention aliases before queuing any delivery', () => {
+    const shell = createReferenceShell();
+
+    expect(shell.handleFrom(authenticatedSource, {
+      type: 'intent.invoke',
+      id: 'intent-conflicting-aliases',
+      request: {
+        archetype: 'note',
+        action: 'open',
+        convention: 'napplet:note/open',
+        protocol: 'napplet:article/read',
+      },
+    })).toEqual([]);
+    expect(shell.records.at(-1)?.verdict).toMatchObject({
+      ok: false,
+      errors: [expect.objectContaining({
+        code: 'invalid-intent-request',
+        field: 'request.protocol',
+      })],
+    });
+    expect(shell.takeDeliveries('reference-handler')).toEqual([]);
+  });
+
   it('refuses an unavailable explicit handler without accepting or queuing delivery', () => {
     const shell = createReferenceShell();
 

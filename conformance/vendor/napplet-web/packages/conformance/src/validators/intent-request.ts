@@ -4,7 +4,7 @@ const STABLE_CONVENTION = /^napplet:[^/?#\s]+\/[^/?#\s]+$/;
 
 function optionalString(
   request: Record<string, unknown>,
-  field: 'action' | 'convention' | 'handler',
+  field: 'action' | 'convention' | 'protocol' | 'handler',
   errors: EnvelopeError[],
 ): void {
   const value = request[field];
@@ -39,7 +39,7 @@ export function validateIntentInvokeRequest(
     });
   }
 
-  for (const field of ['action', 'convention', 'handler'] as const) {
+  for (const field of ['action', 'convention', 'protocol', 'handler'] as const) {
     optionalString(normalized, field, errors);
   }
 
@@ -51,14 +51,26 @@ export function validateIntentInvokeRequest(
     });
   }
 
+  for (const field of ['convention', 'protocol'] as const) {
+    const convention = normalized[field];
+    if (typeof convention === 'string' && !STABLE_CONVENTION.test(convention)) {
+      errors.push({
+        code: 'invalid-intent-request',
+        message: 'Intent convention must be a stable queryless napplet convention',
+        field: `request.${field}`,
+      });
+    }
+  }
+
   if (
     typeof normalized.convention === 'string'
-    && !STABLE_CONVENTION.test(normalized.convention)
+    && typeof normalized.protocol === 'string'
+    && normalized.convention !== normalized.protocol
   ) {
     errors.push({
       code: 'invalid-intent-request',
-      message: 'Intent convention must be a stable queryless napplet convention',
-      field: 'request.convention',
+      message: 'Intent convention and its legacy protocol alias must agree',
+      field: 'request.protocol',
     });
   }
 }

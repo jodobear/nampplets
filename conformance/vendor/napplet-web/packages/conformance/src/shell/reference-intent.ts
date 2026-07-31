@@ -74,7 +74,16 @@ export function handleIntentInvoke(
     return unavailableIntent(env.id, archetype, action, 'requested intent handler is unavailable');
   }
 
-  const convention = normalized.convention ?? REFERENCE_CONVENTION;
+  const namedConvention = normalized.convention;
+  const protocolAlias = normalized.protocol;
+  if (
+    typeof namedConvention === 'string'
+    && typeof protocolAlias === 'string'
+    && namedConvention !== protocolAlias
+  ) {
+    return unavailableIntent(env.id, archetype, action, 'intent convention aliases conflict');
+  }
+  const convention = namedConvention ?? protocolAlias ?? REFERENCE_CONVENTION;
   if (typeof convention !== 'string') {
     return unavailableIntent(env.id, archetype, action, 'intent convention must be a string');
   }
