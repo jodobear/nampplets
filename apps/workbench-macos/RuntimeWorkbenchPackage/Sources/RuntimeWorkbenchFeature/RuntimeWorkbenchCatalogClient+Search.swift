@@ -230,7 +230,7 @@ extension RuntimeWorkbenchCatalogClient {
                     CatalogWarning(
                         id: "baseline-unratified",
                         severity: .caution,
-                        message: "The native-runtime-compat-v1 baseline is "
+                        message: "The native-runtime-compat-v2 baseline is "
                             + "unratified and its overall legacy-host report is "
                             + "incomplete."
                     ),

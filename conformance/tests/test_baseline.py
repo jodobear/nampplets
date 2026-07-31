@@ -116,6 +116,18 @@ class BaselineTests(unittest.TestCase):
             {"inc.channel.opened": "explicit-unsupported"},
         )
 
+    def test_falsifier_matrix_is_bound_to_the_lock(self) -> None:
+        lock = verify_baseline.load_lock()
+        matrix = verify_baseline.load_json("conformance/bdd/falsifiers.json")
+        matrix["baseline"] = "native-runtime-compat-v1"
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=matrix):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "falsifier baseline mismatch",
+            ):
+                verify_baseline.verify_falsifiers(lock)
+
     def test_upgrade_report_is_bound_to_the_lock(self) -> None:
         lock = verify_baseline.load_lock()
         self.assertEqual(

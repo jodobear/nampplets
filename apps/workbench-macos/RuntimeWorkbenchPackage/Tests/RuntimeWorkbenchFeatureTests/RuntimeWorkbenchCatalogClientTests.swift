@@ -160,6 +160,11 @@ private func searchPage(
             == [.incompatible, .unavailable, .unavailable]
     )
     #expect(review.warnings.map(\.severity) == [.caution, .caution, .blocking])
+    let baselineWarning = try #require(
+        review.warnings.first { $0.id == "baseline-unratified" }
+    )
+    #expect(baselineWarning.message.contains("native-runtime-compat-v2"))
+    #expect(!baselineWarning.message.contains("native-runtime-compat-v1"))
     #expect(!review.canInstall)
 }
 

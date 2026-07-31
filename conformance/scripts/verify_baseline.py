@@ -362,9 +362,11 @@ def verify_corpus(lock: dict[str, Any]) -> tuple[int, int, int]:
     )
 
 
-def verify_falsifiers() -> int:
+def verify_falsifiers(lock: dict[str, Any]) -> int:
     feature = (CONFORMANCE / "bdd" / "core.feature").read_text(encoding="utf-8")
     matrix = load_json("conformance/bdd/falsifiers.json")
+    if matrix.get("baseline") != lock["baseline"]["name"]:
+        raise BaselineError("falsifier baseline mismatch")
     entries = matrix["entries"]
     invariants = {entry["invariant"] for entry in entries}
     expected = {f"I-{index:02d}" for index in range(1, 11)}
@@ -505,7 +507,7 @@ def verify() -> dict[str, Any]:
     envelopes = verify_envelopes(lock)
     upgrade = verify_upgrade_report(lock)
     reference, kehto, published = verify_corpus(lock)
-    falsifiers = verify_falsifiers()
+    falsifiers = verify_falsifiers(lock)
     relay, blob, signer = verify_service_scenarios()
     return {
         "baseline": lock["baseline"]["name"],

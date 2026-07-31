@@ -36,7 +36,7 @@ import Testing
             id: "macos",
             platform: "macOS",
             status: .incompatible,
-            detail: "native-runtime-compat-v1 rejected this exact aggregate"
+            detail: "native-runtime-compat-v2 rejected this exact aggregate"
         ),
     ])
 

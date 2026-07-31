@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline": "native-runtime-compat-v1",
+  "baseline": "native-runtime-compat-v2",
   "entries": [
     {
       "invariant": "I-01",
