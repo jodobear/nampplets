@@ -79,9 +79,12 @@ still accepted by the Rust provider. The stricter 0.29 web binding emits the
 normalized form. This tolerance is one-way; the runtime never emits a forged
 sender or converts a 0.29 carrier back into caller-controlled identity.
 
-No platform advertises a domain at M0. Promoting `intent` requires a separate
-provider change that implements and tests independent target delivery; changing
-the compatibility pin alone does not make that lifecycle complete.
+No platform advertises a domain at M0. The executable package evidence pins
+intent 0.29, but the current Rust intent provider descriptor remains on 0.28
+because its dispatcher still uses the older INC subscription carrier. Promoting
+that descriptor to 0.29 requires a separate provider change that implements and
+tests independent `intent.deliver` target delivery; changing the compatibility
+pin alone does not make that lifecycle complete.
 
 ## Acceptance state
 

@@ -16,6 +16,36 @@ const intentInvoke = (id: string) => ({
 });
 
 describe('reference shell retained deliveries', () => {
+  it('defaults an archetype-only intent to open and its reference convention', () => {
+    const shell = createReferenceShell();
+
+    expect(shell.handle({
+      type: 'intent.invoke',
+      id: 'legacy-defaults',
+      request: { archetype: 'note' },
+    })).toEqual([{
+      type: 'intent.invoke.result',
+      id: 'legacy-defaults',
+      result: {
+        ok: true,
+        handled: true,
+        archetype: 'note',
+        action: 'open',
+        convention: 'napplet:note/open',
+        handler: 'reference-handler',
+      },
+    }]);
+    expect(shell.takeDeliveries('reference-handler')).toEqual([{
+      type: 'intent.deliver',
+      delivery: {
+        sender: 'reference-source',
+        archetype: 'note',
+        action: 'open',
+        convention: 'napplet:note/open',
+      },
+    }]);
+  });
+
   it('reports handled true on delivery and handled false on refusal', () => {
     const shell = createReferenceShell();
 

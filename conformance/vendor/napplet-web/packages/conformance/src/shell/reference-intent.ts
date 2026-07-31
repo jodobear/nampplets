@@ -42,16 +42,21 @@ export function handleIntentInvoke(
   }
 
   const normalized = request as Record<string, unknown>;
-  const { archetype, action, convention } = normalized;
-  if (typeof archetype !== 'string' || typeof action !== 'string' || typeof convention !== 'string') {
+  const archetype = normalized.archetype;
+  const action = normalized.action ?? 'open';
+  if (typeof archetype !== 'string' || typeof action !== 'string') {
     return unavailableIntent(
       env.id,
       archetype,
       action,
-      'intent request must carry normalized identity',
+      'intent request must carry a valid archetype and optional action',
     );
   }
 
+  const convention = normalized.convention ?? `napplet:${archetype}/${action}`;
+  if (typeof convention !== 'string') {
+    return unavailableIntent(env.id, archetype, action, 'intent convention must be a string');
+  }
   const parsed = /^napplet:([^/?#\s]+)\/([^/?#\s]+)$/.exec(convention);
   if (!parsed || parsed[1] !== archetype || parsed[2] !== action) {
     return unavailableIntent(env.id, archetype, action, 'intent request conflicts with its convention');

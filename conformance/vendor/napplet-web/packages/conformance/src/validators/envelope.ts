@@ -351,7 +351,7 @@ function validateIntentInvokeRequest(request: unknown, errors: EnvelopeError[]):
   if (typeof request !== 'object' || request === null || Array.isArray(request)) return;
 
   const normalized = request as Record<string, unknown>;
-  for (const field of ['archetype', 'action', 'convention'] as const) {
+  for (const field of ['archetype'] as const) {
     const value = normalized[field];
     if (value === undefined) {
       errors.push({
@@ -368,6 +368,17 @@ function validateIntentInvokeRequest(request: unknown, errors: EnvelopeError[]):
     }
   }
 
+  for (const field of ['action', 'convention'] as const) {
+    const value = normalized[field];
+    if (value !== undefined && typeof value !== 'string') {
+      errors.push({
+        code: 'wrong-type',
+        message: `Intent request field "${field}" must be a string`,
+        field: `request.${field}`,
+      });
+    }
+  }
+
   if ('sender' in normalized) {
     errors.push({
       code: 'forbidden-field',
@@ -376,8 +387,10 @@ function validateIntentInvokeRequest(request: unknown, errors: EnvelopeError[]):
     });
   }
 
-  const { archetype, action, convention } = normalized;
-  if (typeof archetype !== 'string' || typeof action !== 'string' || typeof convention !== 'string') return;
+  const { archetype, convention } = normalized;
+  const action = normalized.action ?? 'open';
+  if (typeof archetype !== 'string' || typeof action !== 'string' || convention === undefined) return;
+  if (typeof convention !== 'string') return;
 
   const parsed = /^napplet:([^/?#\s]+)\/([^/?#\s]+)$/.exec(convention);
   if (!parsed || parsed[1] !== archetype || parsed[2] !== action) {
