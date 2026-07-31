@@ -2,6 +2,8 @@ import type { EnvelopeError } from './envelope.js';
 
 const STABLE_CONVENTION = /^napplet:[^/?#\s]+\/[^/?#\s]+$/;
 const INTENT_SLUG = /^[a-z0-9._-]{1,256}$/;
+const MAXIMUM_INTENT_TEXT_BYTES = 1_024;
+const ASCII_CONTROL = /[\x00-\x1f\x7f]/;
 const INTENT_REQUEST_FIELDS = new Set([
   'archetype',
   'action',
@@ -12,6 +14,12 @@ const INTENT_REQUEST_FIELDS = new Set([
   'behavior',
 ]);
 const INTENT_BEHAVIOR_FIELDS = new Set(['focus', 'newWindow', 'reuse']);
+
+function validRuntimeText(value: string): boolean {
+  return value.length > 0
+    && !ASCII_CONTROL.test(value)
+    && new TextEncoder().encode(value).byteLength <= MAXIMUM_INTENT_TEXT_BYTES;
+}
 
 function optionalString(
   request: Record<string, unknown>,
@@ -96,6 +104,14 @@ export function validateIntentInvokeRequest(
     optionalString(normalized, field, errors);
   }
   validateBehavior(normalized.behavior, errors);
+
+  if (typeof normalized.handler === 'string' && !validRuntimeText(normalized.handler)) {
+    errors.push({
+      code: 'invalid-intent-request',
+      message: 'Intent request field "handler" must be nonempty bounded control-free text',
+      field: 'request.handler',
+    });
+  }
 
   if (typeof normalized.action === 'string' && !INTENT_SLUG.test(normalized.action)) {
     errors.push({

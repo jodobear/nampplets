@@ -97,6 +97,20 @@ describe('intent.invoke request validation', () => {
     }
   });
 
+  it('matches the runtime handler text boundary', () => {
+    expect(validateEnvelope(intentInvoke({
+      archetype: 'note',
+      handler: 'note-viewer',
+    })).ok).toBe(true);
+    for (const handler of ['', '\0', 'note\nviewer', '\x7f', 'ö'.repeat(513)]) {
+      expect(validateEnvelope(intentInvoke({ archetype: 'note', handler })).errors)
+        .toContainEqual(expect.objectContaining({
+          code: 'invalid-intent-request',
+          field: 'request.handler',
+        }));
+    }
+  });
+
   it('rejects archetypes outside the runtime lowercase slug boundary', () => {
     for (const archetype of ['', 'Note', 'note\nopen', 'nöt', 'a'.repeat(257)]) {
       expect(validateEnvelope(intentInvoke({ archetype })).errors).toContainEqual(

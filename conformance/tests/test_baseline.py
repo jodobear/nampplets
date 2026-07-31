@@ -59,6 +59,16 @@ class BaselineTests(unittest.TestCase):
         self.assertEqual(result["falsifiers"], 10)
         self.assertGreaterEqual(result["corpus"]["published"], 1)
 
+    def test_nip_5d_snapshot_is_bound_to_its_lock_hash(self) -> None:
+        lock = verify_baseline.load_lock()
+        lock["nip_5d"]["document_sha256"] = "0" * 64
+
+        with self.assertRaisesRegex(
+            verify_baseline.BaselineError,
+            "authority snapshot drifted: conformance/vendor/nip-5d/5D.md",
+        ):
+            verify_baseline.verify_lock(lock)
+
     def test_one_byte_fixture_mutation_fails_hash(self) -> None:
         index = json.loads(
             (

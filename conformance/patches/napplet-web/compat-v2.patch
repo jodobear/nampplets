@@ -1525,10 +1525,10 @@ index 570d2106005014fb9d20cc02571a7a4770ce14a2..339520b3c367c8914e4c0319fb32dd17
   *
 diff --git a/packages/conformance/src/validators/intent-request.test.ts b/packages/conformance/src/validators/intent-request.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..8af84595bbf2bba8fb06fc246ed6759022be0c37
+index 0000000000000000000000000000000000000000..84330cbab5e6575d18712520c7fe0f61794e7618
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.test.ts
-@@ -0,0 +1,156 @@
+@@ -0,0 +1,170 @@
 +import { describe, expect, it } from 'vitest';
 +
 +import { validateEnvelope } from './envelope.js';
@@ -1628,6 +1628,20 @@ index 0000000000000000000000000000000000000000..8af84595bbf2bba8fb06fc246ed67590
 +    }
 +  });
 +
++  it('matches the runtime handler text boundary', () => {
++    expect(validateEnvelope(intentInvoke({
++      archetype: 'note',
++      handler: 'note-viewer',
++    })).ok).toBe(true);
++    for (const handler of ['', '\0', 'note\nviewer', '\x7f', 'ö'.repeat(513)]) {
++      expect(validateEnvelope(intentInvoke({ archetype: 'note', handler })).errors)
++        .toContainEqual(expect.objectContaining({
++          code: 'invalid-intent-request',
++          field: 'request.handler',
++        }));
++    }
++  });
++
 +  it('rejects archetypes outside the runtime lowercase slug boundary', () => {
 +    for (const archetype of ['', 'Note', 'note\nopen', 'nöt', 'a'.repeat(257)]) {
 +      expect(validateEnvelope(intentInvoke({ archetype })).errors).toContainEqual(
@@ -1687,14 +1701,16 @@ index 0000000000000000000000000000000000000000..8af84595bbf2bba8fb06fc246ed67590
 +});
 diff --git a/packages/conformance/src/validators/intent-request.ts b/packages/conformance/src/validators/intent-request.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..d22b76ad4ee9af7f8d542e66374cd07b2596ca28
+index 0000000000000000000000000000000000000000..9676831bd40f17a2e68ddc2def076dd731ed7b3b
 --- /dev/null
 +++ b/packages/conformance/src/validators/intent-request.ts
-@@ -0,0 +1,138 @@
+@@ -0,0 +1,154 @@
 +import type { EnvelopeError } from './envelope.js';
 +
 +const STABLE_CONVENTION = /^napplet:[^/?#\s]+\/[^/?#\s]+$/;
 +const INTENT_SLUG = /^[a-z0-9._-]{1,256}$/;
++const MAXIMUM_INTENT_TEXT_BYTES = 1_024;
++const ASCII_CONTROL = /[\x00-\x1f\x7f]/;
 +const INTENT_REQUEST_FIELDS = new Set([
 +  'archetype',
 +  'action',
@@ -1705,6 +1721,12 @@ index 0000000000000000000000000000000000000000..d22b76ad4ee9af7f8d542e66374cd07b
 +  'behavior',
 +]);
 +const INTENT_BEHAVIOR_FIELDS = new Set(['focus', 'newWindow', 'reuse']);
++
++function validRuntimeText(value: string): boolean {
++  return value.length > 0
++    && !ASCII_CONTROL.test(value)
++    && new TextEncoder().encode(value).byteLength <= MAXIMUM_INTENT_TEXT_BYTES;
++}
 +
 +function optionalString(
 +  request: Record<string, unknown>,
@@ -1789,6 +1811,14 @@ index 0000000000000000000000000000000000000000..d22b76ad4ee9af7f8d542e66374cd07b
 +    optionalString(normalized, field, errors);
 +  }
 +  validateBehavior(normalized.behavior, errors);
++
++  if (typeof normalized.handler === 'string' && !validRuntimeText(normalized.handler)) {
++    errors.push({
++      code: 'invalid-intent-request',
++      message: 'Intent request field "handler" must be nonempty bounded control-free text',
++      field: 'request.handler',
++    });
++  }
 +
 +  if (typeof normalized.action === 'string' && !INTENT_SLUG.test(normalized.action)) {
 +    errors.push({

@@ -57,6 +57,7 @@ def verify_lock(lock: dict[str, Any]) -> None:
         raise BaselineError("napplet/web compatibility patch digest mismatch")
 
     source_snapshots = {
+        "conformance/vendor/nip-5d/5D.md": lock["nip_5d"]["document_sha256"],
         "conformance/vendor/nap-lists/naps/NAP-LISTS.md": lock["nap_lists"][
             "document_sha256"
         ],
@@ -66,7 +67,7 @@ def verify_lock(lock: dict[str, Any]) -> None:
     }
     for relative, expected in source_snapshots.items():
         if sha256_file(ROOT / relative) != expected:
-            raise BaselineError(f"NAP-LISTS authority snapshot drifted: {relative}")
+            raise BaselineError(f"authority snapshot drifted: {relative}")
 
     if lock["nip_5d"]["manifest_kinds"] != [5129, 15129, 35129]:
         raise BaselineError("manifest kind baseline drifted")
