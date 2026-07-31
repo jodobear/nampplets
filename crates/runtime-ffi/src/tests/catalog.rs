@@ -32,6 +32,14 @@ fn catalog_coordinates_are_parsed_only_at_the_rust_boundary() {
         parse_catalog_coordinate(&format!("nostr:{naddr}")).unwrap(),
         ManifestCoordinate::Named { .. }
     ));
+    assert!(matches!(
+        parse_catalog_coordinate(&format!("NOSTR:{naddr}")).unwrap(),
+        ManifestCoordinate::Named { .. }
+    ));
+    assert!(matches!(
+        parse_catalog_coordinate(&format!("NoStR:{naddr}")).unwrap(),
+        ManifestCoordinate::Named { .. }
+    ));
     let wrong_kind = format!("30023:{author}:article")
         .parse::<Coordinate>()
         .unwrap()
