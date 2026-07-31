@@ -1,6 +1,6 @@
 # Compatibility baseline report
 
-Baseline `native-runtime-compat-v2` was captured on 2026-07-28. It is
+Baseline `native-runtime-compat-v2` was captured on 2026-07-31. It is
 machine-readable in [`compatibility.lock`](../compatibility.lock) and remains
 **unratified**. Product-owner direction is recorded as `pablof7z`;
 compatibility, security, and NMP-boundary review remain unsigned.

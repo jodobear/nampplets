@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "baseline": "native-runtime-compat-v2",
-  "captured_at": "2026-07-28",
+  "captured_at": "2026-07-31",
   "status": "unratified",
   "authorities": {
     "nip_5d": "eb45dfd7335b7f88cb53781984c553581d2b4c34",
