@@ -4,7 +4,7 @@
 [baseline]
 schema = 1
 name = "native-runtime-compat-v2"
-created_at = "2026-07-28"
+created_at = "2026-07-31"
 status = "unratified"
 
 [nip_5d]
@@ -43,6 +43,20 @@ shim = "bbb3047f045020c1b48d93bc91d118640d8c39be48921197cb9be63e5b1e2704"
 sdk = "99d30e312d7acf9c79d1f9c3d36cfc1e8e45cc455d653c1d2c3f6a3ad2061653"
 nap = "5e3e086bbb83335efb1d35c68cc0cd88780ab60e2bc7dbb3bd9daac88f72909f"
 conformance = "889c72e3f36401018bee1c8eae10536812ac54d80f5ee07bee8408b97fc62ab4"
+
+[nap_lists]
+repository = "napplet/naps"
+source_branch_or_pr = "pull/68"
+semantic_commit = "2c244b57051285178bcbb72e75ab2cbc8a3f8785"
+document = "naps/NAP-LISTS.md"
+document_sha256 = "bd71192ee419db43105163d700c187eb56d5fb1164f1e3e225ae58bcd1730b96"
+package_repository = "napplet/web"
+package_pull_request = "pull/85"
+package_merge_commit = "086f36e40d2df86349ece181dbe52660ba49090e"
+nip_51_repository = "nostr-protocol/nips"
+nip_51_commit = "375160536f1ea9fac88708b9fd8464a60e3e7ad8"
+nip_51_document = "51.md"
+nip_51_document_sha256 = "469f031eeca39fe3c5932233747d580fdcba8e7effb2464020e58669a7080519"
 
 [kehto]
 repository = "jodobear/kehto-web"

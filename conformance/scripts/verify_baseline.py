@@ -70,11 +70,26 @@ def verify_lock(lock: dict[str, Any]) -> None:
         lock["nip_5d"]["commit"],
         lock["nap_registry"]["commit"],
         lock["napplet_packages"]["commit"],
+        lock["nap_lists"]["semantic_commit"],
+        lock["nap_lists"]["package_merge_commit"],
+        lock["nap_lists"]["nip_51_commit"],
         lock["kehto"]["commit"],
         lock["nmp"]["commit"],
     )
     if any(not re.fullmatch(r"[0-9a-f]{40}", commit) for commit in required_commits):
         raise BaselineError("every upstream commit must be exact 40-hex")
+
+    source_snapshots = {
+        "conformance/vendor/nap-lists/naps/NAP-LISTS.md": lock["nap_lists"][
+            "document_sha256"
+        ],
+        "conformance/vendor/nip-51/51.md": lock["nap_lists"][
+            "nip_51_document_sha256"
+        ],
+    }
+    for relative, expected in source_snapshots.items():
+        if sha256_file(ROOT / relative) != expected:
+            raise BaselineError(f"NAP-LISTS authority snapshot drifted: {relative}")
 
     if lock["nip_5d"]["manifest_kinds"] != [5129, 15129, 35129]:
         raise BaselineError("manifest kind baseline drifted")
@@ -282,11 +297,13 @@ def verify_upgrade_report(lock: dict[str, Any]) -> dict[str, int]:
             "independent-intent-delivery",
             "strict-child-csp-guidance",
             "kehto-artifacts-without-modulepreload-fetch",
+            "released-nap-lists-wire-schema",
         ],
         "rejected": [
             "caller-supplied-inc-sender",
             "malformed-or-conflicting-normalized-intent-identity",
             "kehto-artifacts-with-modulepreload-fetch",
+            "raw-nip51-list-item-wire",
         ],
         "explicitly_unsupported": ["registry-only-inc.channel.opened"],
         "migration": {

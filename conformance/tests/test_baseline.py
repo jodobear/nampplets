@@ -120,7 +120,7 @@ class BaselineTests(unittest.TestCase):
         lock = verify_baseline.load_lock()
         self.assertEqual(
             verify_baseline.verify_upgrade_report(lock),
-            {"accepted": 6, "rejected": 3, "explicitly_unsupported": 1},
+            {"accepted": 7, "rejected": 4, "explicitly_unsupported": 1},
         )
 
     def test_upgrade_report_rejects_accepted_decision_drift(self) -> None:

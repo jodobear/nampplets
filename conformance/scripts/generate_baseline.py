@@ -212,6 +212,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--nip5d", type=Path, required=True)
     parser.add_argument("--naps", type=Path, required=True)
+    parser.add_argument("--nap-lists", type=Path, required=True)
+    parser.add_argument("--nip51", type=Path, required=True)
     parser.add_argument("--napplet-web", type=Path, required=True)
     parser.add_argument("--kehto", type=Path, required=True)
     arguments = parser.parse_args()
@@ -222,6 +224,12 @@ def main() -> int:
     require_commit(arguments.nip5d, lock["nip_5d"]["commit"], "NIP-5D")
     require_commit(arguments.naps, lock["nap_registry"]["commit"], "NAP registry")
     require_commit(
+        arguments.nap_lists,
+        lock["nap_lists"]["semantic_commit"],
+        "NAP-LISTS",
+    )
+    require_commit(arguments.nip51, lock["nap_lists"]["nip_51_commit"], "NIP-51")
+    require_commit(
         arguments.napplet_web, lock["napplet_packages"]["commit"], "napplet/web"
     )
     require_commit(arguments.kehto, lock["kehto"]["commit"], "Kehto")
@@ -229,6 +237,8 @@ def main() -> int:
     vendor = CONFORMANCE / "vendor"
     nip_destination = vendor / "nip-5d"
     nap_destination = vendor / "nap-registry"
+    nap_lists_destination = vendor / "nap-lists"
+    nip51_destination = vendor / "nip-51"
     web_destination = vendor / "napplet-web"
 
     copy_exact(arguments.nip5d, "5D.md", nip_destination)
@@ -244,6 +254,9 @@ def main() -> int:
     ):
         copy_exact(arguments.naps, relative, nap_destination)
 
+    copy_exact(arguments.nap_lists, "naps/NAP-LISTS.md", nap_lists_destination)
+    copy_exact(arguments.nip51, "51.md", nip51_destination)
+
     for package in ("core", "shim", "sdk", "nap", "conformance"):
         copy_exact(
             arguments.napplet_web,
@@ -252,6 +265,9 @@ def main() -> int:
         )
     for relative in (
         "packages/core/src/envelope.ts",
+        "packages/core/src/types/lists.ts",
+        "packages/nap/src/lists/shim.ts",
+        "packages/nap/src/lists/types.ts",
         "packages/shim/src/prelude.ts",
         "packages/conformance/src/validators/envelope.ts",
         "packages/conformance/src/validators/manifest.ts",

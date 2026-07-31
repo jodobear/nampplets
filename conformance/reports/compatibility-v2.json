@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "baseline": "native-runtime-compat-v2",
-  "captured_at": "2026-07-28",
+  "captured_at": "2026-07-31",
   "status": "unratified",
   "source_repositories": {
     "kehto": "jodobear/kehto-web",
@@ -25,12 +25,14 @@
     "normalized-intent-request",
     "independent-intent-delivery",
     "strict-child-csp-guidance",
-    "kehto-artifacts-without-modulepreload-fetch"
+    "kehto-artifacts-without-modulepreload-fetch",
+    "released-nap-lists-wire-schema"
   ],
   "rejected": [
     "caller-supplied-inc-sender",
     "malformed-or-conflicting-normalized-intent-identity",
-    "kehto-artifacts-with-modulepreload-fetch"
+    "kehto-artifacts-with-modulepreload-fetch",
+    "raw-nip51-list-item-wire"
   ],
   "explicitly_unsupported": [
     "registry-only-inc.channel.opened"
