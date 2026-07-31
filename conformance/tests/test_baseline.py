@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -121,6 +122,48 @@ class BaselineTests(unittest.TestCase):
             verify_baseline.verify_upgrade_report(lock),
             {"accepted": 6, "rejected": 3, "explicitly_unsupported": 1},
         )
+
+    def test_upgrade_report_rejects_accepted_decision_drift(self) -> None:
+        lock = verify_baseline.load_lock()
+        report = verify_baseline.load_json(
+            "conformance/reports/compatibility-v2.json"
+        )
+        report["accepted"][0] = "caller-selected-inc-sender"
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=report):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "accepted decisions drifted",
+            ):
+                verify_baseline.verify_upgrade_report(lock)
+
+    def test_upgrade_report_rejects_rejected_decision_drift(self) -> None:
+        lock = verify_baseline.load_lock()
+        report = verify_baseline.load_json(
+            "conformance/reports/compatibility-v2.json"
+        )
+        report["rejected"].append("strict-child-csp-guidance")
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=report):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "rejected decisions drifted",
+            ):
+                verify_baseline.verify_upgrade_report(lock)
+
+    def test_upgrade_report_rejects_migration_decision_drift(self) -> None:
+        lock = verify_baseline.load_lock()
+        report = verify_baseline.load_json(
+            "conformance/reports/compatibility-v2.json"
+        )
+        report["migration"]["platform_domains_advertised"] = ["inc"]
+
+        with mock.patch.object(verify_baseline, "load_json", return_value=report):
+            with self.assertRaisesRegex(
+                verify_baseline.BaselineError,
+                "migration decisions drifted",
+            ):
+                verify_baseline.verify_upgrade_report(lock)
 
     def test_m0_advertises_no_domains(self) -> None:
         lock = verify_baseline.load_lock()

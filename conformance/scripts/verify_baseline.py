@@ -274,10 +274,30 @@ def verify_upgrade_report(lock: dict[str, Any]) -> dict[str, int]:
         "kehto_upstream": lock["kehto"]["upstream_repository"],
     }:
         raise BaselineError("upgrade report source repository mismatch")
-    if report["explicitly_unsupported"] != [
-        "registry-only-inc.channel.opened"
-    ]:
-        raise BaselineError("upgrade report unsupported behavior mismatch")
+    expected_decisions = {
+        "accepted": [
+            "runtime-attested-inc-sender",
+            "queryless-convention-transposition",
+            "normalized-intent-request",
+            "independent-intent-delivery",
+            "strict-child-csp-guidance",
+            "kehto-artifacts-without-modulepreload-fetch",
+        ],
+        "rejected": [
+            "caller-supplied-inc-sender",
+            "malformed-or-conflicting-normalized-intent-identity",
+            "kehto-artifacts-with-modulepreload-fetch",
+        ],
+        "explicitly_unsupported": ["registry-only-inc.channel.opened"],
+        "migration": {
+            "legacy_intent_protocol_alias": "accepted-at-rust-provider-boundary",
+            "legacy_optional_intent_fields": "accepted-at-rust-provider-boundary",
+            "platform_domains_advertised": [],
+        },
+    }
+    for decision, expected in expected_decisions.items():
+        if report.get(decision) != expected:
+            raise BaselineError(f"upgrade report {decision} decisions drifted")
     return {
         "accepted": len(report["accepted"]),
         "rejected": len(report["rejected"]),
