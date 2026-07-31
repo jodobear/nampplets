@@ -23,7 +23,15 @@ fn an_unsupported_kind_is_named_rather_than_attempted() {
     );
 
     assert_eq!(answer["ok"], false);
-    assert_eq!(answer["error"], "this runtime does not service list kind 1");
+    assert_eq!(answer["error"], "unsupported-list");
+    assert_eq!(
+        answer["reason"],
+        "this runtime does not service list kind 1"
+    );
+    assert_eq!(
+        answer["supported"].as_array().unwrap().len(),
+        SUPPORTED_LISTS.len()
+    );
     assert_eq!(reads, 0, "an unserviceable list is never read");
 }
 
@@ -35,8 +43,9 @@ fn a_parameterized_list_without_an_identifier_is_refused() {
     );
 
     assert_eq!(answer["ok"], false);
+    assert_eq!(answer["error"], "missing-identifier");
     assert_eq!(
-        answer["error"],
+        answer["reason"],
         "list kind 30000 is addressed by a d identifier, which is missing"
     );
     assert_eq!(reads, 0);
@@ -49,7 +58,8 @@ fn a_non_parameterized_list_with_an_identifier_is_refused() {
         json!({"list": {"kind": 3, "identifier": "friends"}, "items": [p(&pubkey("b"))]}),
     );
 
-    assert_eq!(answer["error"], "list kind 3 takes no d identifier");
+    assert_eq!(answer["error"], "invalid-list-ref");
+    assert_eq!(answer["reason"], "list kind 3 takes no d identifier");
 }
 
 #[test]
@@ -78,10 +88,11 @@ fn an_item_type_the_list_does_not_hold_is_refused() {
     // A follow list holds public keys; an event id is not a follow.
     let (answer, reads) = refusal(
         Vec::new(),
-        json!({"list": follows(), "items": [{"type": "e", "value": pubkey("b")}]}),
+        json!({"list": follows(), "items": [{"itemType": "event", "value": pubkey("b")}]}),
     );
 
-    assert_eq!(answer["error"], "list kind 3 does not accept e items");
+    assert_eq!(answer["error"], "unsupported-item");
+    assert_eq!(answer["reason"], "list kind 3 does not accept e items");
     assert_eq!(reads, 0);
 }
 
@@ -90,7 +101,7 @@ fn a_malformed_public_key_is_refused_before_it_reaches_a_relay() {
     for value in ["", "not-hex", &"A".repeat(64), &"a".repeat(63)] {
         let (answer, reads) = refusal(Vec::new(), json!({"list": follows(), "items": [p(value)]}));
         assert_eq!(
-            answer["error"], "a p value must be 64 lowercase hex characters",
+            answer["reason"], "a p value must be 64 lowercase hex characters",
             "accepted {value:?}"
         );
         assert_eq!(reads, 0);
@@ -111,7 +122,7 @@ fn an_empty_item_list_is_refused_rather_than_treated_as_a_no_op() {
 
     assert_eq!(answer["ok"], false);
     assert!(
-        answer["error"]
+        answer["reason"]
             .as_str()
             .unwrap()
             .starts_with("items must hold 1..=")
@@ -139,20 +150,21 @@ fn the_same_item_twice_in_one_request_is_refused() {
     );
 
     assert_eq!(
-        answer["error"],
+        answer["reason"],
         "the same item appears more than once in one request"
     );
     assert_eq!(reads, 0);
 }
 
 #[test]
-fn an_item_carrying_unknown_fields_is_refused() {
+fn a_package_relay_hint_is_typed_unsupported() {
     let (answer, _) = refusal(
         Vec::new(),
-        json!({"list": follows(), "items": [{"type": "p", "value": pubkey("b"), "relay": "wss://x"}]}),
+        json!({"list": follows(), "items": [{"itemType": "pubkey", "value": pubkey("b"), "relay": "wss://x"}]}),
     );
 
     assert_eq!(answer["ok"], false);
+    assert_eq!(answer["error"], "unsupported-item");
 }
 
 #[test]
@@ -163,8 +175,8 @@ fn a_selector_carrying_unknown_fields_is_refused() {
     );
 
     assert_eq!(
-        answer["error"],
-        "list must be an object with a numeric kind"
+        answer["reason"],
+        "list must contain exactly one of kind or type"
     );
 }
 
@@ -185,7 +197,7 @@ fn a_change_that_would_cross_the_entry_bound_is_refused_whole() {
 
     assert_eq!(answer["ok"], false);
     assert!(
-        answer["error"]
+        answer["reason"]
             .as_str()
             .unwrap()
             .contains("would exceed its")
@@ -201,7 +213,7 @@ fn a_hashtag_with_whitespace_or_a_leading_hash_is_refused() {
     for value in ["", "two words", "#nostr"] {
         let (answer, _) = refusal(
             Vec::new(),
-            json!({"list": {"kind": 10015}, "items": [{"type": "t", "value": value}]}),
+            json!({"list": {"kind": 10015}, "items": [{"itemType": "hashtag", "value": value}]}),
         );
         assert_eq!(answer["ok"], false, "accepted {value:?}");
     }
@@ -215,7 +227,7 @@ fn a_well_formed_hashtag_is_accepted() {
     let mut result = call(
         &provider,
         "add",
-        json!({"list": {"kind": 10015}, "items": [{"type": "t", "value": "nostr"}]}),
+        json!({"list": {"kind": 10015}, "items": [{"itemType": "hashtag", "value": "nostr"}]}),
     );
 
     assert!(result.take_write_proposal().is_some());
@@ -230,7 +242,7 @@ fn a_replaceable_address_must_be_kind_pubkey_identifier() {
     for value in ["30023", "30023:short:x", &format!("x:{}:slug", pubkey("b"))] {
         let (answer, _) = refusal(
             Vec::new(),
-            json!({"list": {"kind": 10003}, "items": [{"type": "a", "value": value}]}),
+            json!({"list": {"kind": 10003}, "items": [{"itemType": "address", "value": value}]}),
         );
         assert_eq!(answer["ok"], false, "accepted {value:?}");
     }
@@ -242,7 +254,7 @@ fn a_replaceable_address_must_be_kind_pubkey_identifier() {
         "add",
         json!({
             "list": {"kind": 10003},
-            "items": [{"type": "a", "value": format!("30023:{}:slug", pubkey("b"))}],
+            "items": [{"itemType": "address", "value": format!("30023:{}:slug", pubkey("b"))}],
         }),
     );
     assert!(result.take_write_proposal().is_some());

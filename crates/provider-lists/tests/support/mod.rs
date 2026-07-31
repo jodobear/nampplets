@@ -67,6 +67,16 @@ impl FakeSource {
         self.snapshot.lock().entries = entries;
     }
 
+    pub fn set_exists(&self, exists: bool) {
+        self.snapshot.lock().exists = exists;
+    }
+
+    pub fn set_retained_content(&self, content: &str) {
+        self.snapshot.lock().retained =
+            BoundedJson::from_value(&json!({"content": content, "otherTags": []}), 4096)
+                .expect("retained fixture fits");
+    }
+
     pub fn sign_out(&self) {
         *self.account.lock() = None;
     }
@@ -241,7 +251,7 @@ pub fn drain(observer: &ProviderPushObserver) -> Vec<Value> {
 }
 
 pub fn p(value: &str) -> Value {
-    json!({"type": "p", "value": value})
+    json!({"itemType": "pubkey", "value": value})
 }
 
 pub fn pubkey(seed: &str) -> String {

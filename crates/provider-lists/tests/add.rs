@@ -87,7 +87,8 @@ fn a_failed_write_reports_zero_added_rather_than_the_requested_count() {
     assert_eq!(pushed.len(), 1);
     assert_eq!(pushed[0]["ok"], false);
     assert_eq!(pushed[0]["added"], 0);
-    assert!(pushed[0]["error"].is_string());
+    assert_eq!(pushed[0]["error"], "publish-failed");
+    assert!(pushed[0]["reason"].is_string());
 }
 
 #[test]
@@ -108,7 +109,8 @@ fn a_refused_write_still_answers_the_napplet() {
     let pushed = drain(&observer);
     assert_eq!(pushed.len(), 1);
     assert_eq!(pushed[0]["ok"], false);
-    assert_eq!(pushed[0]["error"], "the user declined");
+    assert_eq!(pushed[0]["error"], "user-denied");
+    assert_eq!(pushed[0]["reason"], "the user declined");
 }
 
 #[test]
@@ -195,8 +197,9 @@ fn signing_out_refuses_the_change_instead_of_writing_under_another_key() {
 
     assert_eq!(answer["ok"], false);
     assert_eq!(answer["added"], 0);
+    assert_eq!(answer["error"], "not-signed-in");
     assert_eq!(
-        answer["error"],
+        answer["reason"],
         "no account is connected, so there is no list to change"
     );
     assert_eq!(source.reads(), 0, "no list is read without an account");

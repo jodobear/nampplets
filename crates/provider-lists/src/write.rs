@@ -46,6 +46,20 @@ pub(crate) struct ListsWriteCompletion {
     pub(crate) maximum_response_bytes: usize,
 }
 
+impl ListsWriteCompletion {
+    fn into_sink(self: Box<Self>) -> ListsReceiptSink {
+        ListsReceiptSink {
+            action: self.action,
+            id: self.id,
+            changed: self.changed,
+            skipped: self.skipped,
+            outbound: self.outbound,
+            maximum_response_bytes: self.maximum_response_bytes,
+            delivered: AtomicBool::new(false),
+        }
+    }
+}
+
 impl fmt::Debug for ListsWriteCompletion {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -59,20 +73,12 @@ impl fmt::Debug for ListsWriteCompletion {
 
 impl ProviderWriteCompletion for ListsWriteCompletion {
     fn into_receipt_sink(self: Box<Self>) -> Arc<dyn ReceiptEventSink> {
-        Arc::new(ListsReceiptSink {
-            action: self.action,
-            id: self.id,
-            changed: self.changed,
-            skipped: self.skipped,
-            outbound: self.outbound,
-            maximum_response_bytes: self.maximum_response_bytes,
-            delivered: AtomicBool::new(false),
-        })
+        Arc::new(self.into_sink())
     }
 
     fn refused(self: Box<Self>, reason: Arc<str>) {
-        let sink = self.into_receipt_sink();
-        sink.close(Some(reason));
+        self.into_sink()
+            .deliver(false, Some("user-denied"), Some(reason.to_string()));
     }
 }
 
@@ -100,7 +106,7 @@ impl fmt::Debug for ListsReceiptSink {
 impl ListsReceiptSink {
     /// Emits exactly one result for this mutation, whatever path gets here
     /// first.
-    fn deliver(&self, ok: bool, error: Option<String>) {
+    fn deliver(&self, ok: bool, error: Option<&str>, reason: Option<String>) {
         if self.delivered.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -118,6 +124,9 @@ impl ListsReceiptSink {
         );
         if let Some(error) = error {
             envelope.insert("error".to_owned(), Value::from(error));
+        }
+        if let Some(reason) = reason {
+            envelope.insert("reason".to_owned(), Value::from(reason));
         }
         let Ok(message) =
             BoundedJson::from_value(&Value::Object(envelope), self.maximum_response_bytes)
@@ -150,25 +159,21 @@ impl ReceiptEventSink for ListsReceiptSink {
             // the napplet is told nothing before then.
             _ => return Ok(()),
         };
-        let error = (!ok).then(|| {
+        let reason = (!ok).then(|| {
             value
                 .get("failure")
                 .and_then(Value::as_str)
                 .unwrap_or("NMP did not durably write the list change")
                 .to_owned()
         });
-        self.deliver(ok, error);
+        self.deliver(ok, (!ok).then_some("publish-failed"), reason);
         Ok(())
     }
 
     fn close(&self, reason: Option<Arc<str>>) {
-        self.deliver(
-            false,
-            Some(
-                reason
-                    .map(|reason| reason.to_string())
-                    .unwrap_or_else(|| "the list change was not accepted".to_owned()),
-            ),
-        );
+        let reason = reason
+            .map(|reason| reason.to_string())
+            .unwrap_or_else(|| "the list change was not accepted".to_owned());
+        self.deliver(false, Some("publish-failed"), Some(reason));
     }
 }

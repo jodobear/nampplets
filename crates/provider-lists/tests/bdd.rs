@@ -204,14 +204,18 @@ fn then_skipped(world: &mut ListsWorld, expected: usize) {
 fn then_not_ok(world: &mut ListsWorld) {
     let result = world.result();
     assert_eq!(result["ok"], false);
-    assert!(result["error"].is_string(), "a refusal must say why");
+    assert!(
+        result["error"].is_string(),
+        "a refusal needs a machine code"
+    );
+    assert!(result["reason"].is_string(), "a refusal must say why");
 }
 
 #[then(regex = r#"^the napplet is told "([^"]+)"$"#)]
 fn then_told_reason(world: &mut ListsWorld, reason: String) {
     let result = world.result();
     assert_eq!(result["ok"], false);
-    assert_eq!(result["error"], reason);
+    assert_eq!(result["reason"], reason);
 }
 
 #[then("the list was never read")]

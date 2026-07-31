@@ -9,18 +9,17 @@ use nmp_native_nap_bridge::{
 };
 use nmp_native_runtime_core::{AccountRef, ApprovedWrite, Capability, Principal, SessionId};
 use parking_lot::Mutex;
+use serde_json::Value;
 use thiserror::Error;
 
 use crate::{
     DOMAIN, ListMutation, ListReadLimits, ListSelector, ListSnapshot, ListsDataError,
     ListsDataPlane, ListsProviderLimits, PINNED_NAP_PROTOCOL,
-    validate::{
-        ListRefusal, apply_add, apply_remove, parse_items, parse_selector, selector_value,
-        validate_limits,
-    },
+    request::{ListRefusal, parse_items, parse_options, parse_selector},
+    validate::{apply_add, apply_remove, selector_value, validate_limits},
     wire::{
-        completed, correlation_id, denied, exact_payload, failed, mutation_result, refusal_result,
-        supported_result,
+        completed, correlation_id, denied, exact_payload, failed, mutation_payload,
+        mutation_result, refusal_result, supported_result,
     },
     write::{ListsAction, ListsWriteCompletion},
 };
@@ -117,7 +116,7 @@ impl ListsProvider {
     ) -> Result<ProviderCall, ProviderError> {
         let id = correlation_id(&request, self.limits)?;
         let outbound = self.session_outbound(&request)?;
-        let payload = exact_payload(&request, &["list", "items"])?;
+        let payload = mutation_payload(&request)?;
 
         let refuse = |refusal: &ListRefusal| {
             completed(
@@ -131,7 +130,11 @@ impl ListsProvider {
             Ok(parsed) => parsed,
             Err(refusal) => return refuse(&refusal),
         };
-        let items = match parse_items(payload.get("items"), supported, self.limits) {
+        let options = match parse_options(payload.get("options")) {
+            Ok(options) => options,
+            Err(refusal) => return refuse(&refusal),
+        };
+        let items = match parse_items(payload.get("items"), supported, self.limits, action) {
             Ok(items) => items,
             Err(refusal) => return refuse(&refusal),
         };
@@ -155,12 +158,21 @@ impl ListsProvider {
             Ok(snapshot) => snapshot,
             Err(error) => return Err(failed(&request.action, error.to_string())),
         };
+        if !snapshot.exists && options.create == Some(false) {
+            return refuse(&ListRefusal::ListNotFound);
+        }
+        if action == ListsAction::Remove && items.remove_private_matches {
+            match snapshot_has_encrypted_content(&snapshot) {
+                Ok(true) | Err(_) => return refuse(&ListRefusal::DecryptFailed),
+                Ok(false) => {}
+            }
+        }
         let mutation = match action {
-            ListsAction::Add => match apply_add(&snapshot.entries, &items, self.limits) {
+            ListsAction::Add => match apply_add(&snapshot.entries, &items.entries, self.limits) {
                 Ok(mutation) => mutation,
                 Err(refusal) => return refuse(&refusal),
             },
-            ListsAction::Remove => apply_remove(&snapshot.entries, &items),
+            ListsAction::Remove => apply_remove(&snapshot.entries, &items.entries),
         };
         if mutation.is_noop() {
             // Nothing changes, so nothing is written. Republishing an
@@ -226,6 +238,12 @@ impl ListsProvider {
             request.work,
         ))
     }
+}
+
+fn snapshot_has_encrypted_content(snapshot: &ListSnapshot) -> Result<bool, ()> {
+    let retained = snapshot.retained.decode().map_err(|_| ())?;
+    let content = retained.get("content").and_then(Value::as_str).ok_or(())?;
+    Ok(!content.is_empty())
 }
 
 /// Names the approval after the exact list it changes, so a native reviewer

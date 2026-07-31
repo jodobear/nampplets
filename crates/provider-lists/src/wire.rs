@@ -5,7 +5,7 @@ use nmp_native_runtime_core::BoundedJson;
 use serde_json::{Map, Value, json};
 
 use crate::{
-    DOMAIN, ListsProviderLimits, SUPPORTED_LISTS, validate::ListRefusal, write::ListsAction,
+    DOMAIN, ListsProviderLimits, SUPPORTED_LISTS, request::ListRefusal, write::ListsAction,
 };
 
 pub(crate) fn correlation_id(
@@ -41,6 +41,27 @@ pub(crate) fn exact_payload<'a>(
         return Err(invalid_payload(
             request,
             format!("expected exactly these fields: {}", allowed.join(", ")),
+        ));
+    }
+    Ok(payload)
+}
+
+pub(crate) fn mutation_payload(
+    request: &ProviderRequest,
+) -> Result<&Map<String, Value>, ProviderError> {
+    let payload = request
+        .payload
+        .as_object()
+        .ok_or_else(|| invalid_payload(request, "payload must be a flat object"))?;
+    if !payload.contains_key("list")
+        || !payload.contains_key("items")
+        || payload
+            .keys()
+            .any(|key| !["list", "items", "options"].contains(&key.as_str()))
+    {
+        return Err(invalid_payload(
+            request,
+            "expected list, items, and optional options fields",
         ));
     }
     Ok(payload)
@@ -93,26 +114,30 @@ pub(crate) fn completed(
 }
 
 /// The whole answer to `lists.supported`, projected from the pinned catalog.
-pub(crate) fn supported_result(id: &str) -> Value {
-    let lists = SUPPORTED_LISTS
+fn list_supports() -> Vec<Value> {
+    SUPPORTED_LISTS
         .iter()
         .map(|list| {
             json!({
                 "kind": list.kind,
-                "name": list.name,
-                "parameterized": list.parameterized,
-                "itemTypes": list
+                "type": list.list_type,
+                "addressable": list.addressable,
+                "supportedItemTypes": list
                     .item_types
                     .iter()
-                    .map(|tag| tag.wire())
+                    .map(|tag| crate::semantic_item_type(*tag))
                     .collect::<Vec<_>>(),
+                "privateItems": false,
             })
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+}
+
+pub(crate) fn supported_result(id: &str) -> Value {
     json!({
         "type": "lists.supported.result",
         "id": id,
-        "lists": lists,
+        "lists": list_supports(),
     })
 }
 
@@ -130,7 +155,15 @@ pub(crate) fn mutation_result(
 /// A refused mutation. The counts stay present and zero so a napplet reading
 /// them unconditionally cannot mistake a refusal for a partial success.
 pub(crate) fn refusal_result(action: ListsAction, id: &str, refusal: &ListRefusal) -> Value {
-    mutation_envelope(action, id, false, 0, 0, Some(refusal.to_string()))
+    let mut envelope = mutation_envelope(action, id, false, 0, 0, Some(refusal.code().to_owned()));
+    let object = envelope
+        .as_object_mut()
+        .expect("mutation envelope is an object");
+    object.insert("reason".to_owned(), Value::from(refusal.to_string()));
+    if refusal.include_supported() {
+        object.insert("supported".to_owned(), Value::from(list_supports()));
+    }
+    envelope
 }
 
 fn mutation_envelope(

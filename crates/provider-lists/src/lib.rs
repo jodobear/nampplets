@@ -16,6 +16,7 @@ pub const PINNED_NAP_PROTOCOL: &str = "napplet-web@0.29.0";
 
 mod catalog;
 mod provider;
+mod request;
 mod session;
 mod types;
 mod validate;
