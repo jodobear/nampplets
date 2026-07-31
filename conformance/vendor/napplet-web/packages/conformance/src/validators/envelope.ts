@@ -18,6 +18,7 @@
 
 import { NAP_DOMAINS } from '@napplet/core';
 import { validateIntentInvokeRequest } from './intent-request.js';
+import { validateListsMutationRequest } from './lists-request.js';
 
 /** Direction of an envelope relative to the napplet. */
 export type EnvelopeDirection = 'out' | 'in';
@@ -300,7 +301,7 @@ export const ENVELOPE_SPECS: Record<string, EnvelopeSpec> = {
 
 /** A single problem found while validating an envelope. */
 export interface EnvelopeError {
-  /** Machine-readable code: not-an-object | missing-type | malformed-type | unknown-domain | unknown-type | inbound-type-emitted | missing-field | wrong-type | invalid-intent-request */
+  /** Machine-readable validation code. */
   code:
     | 'not-an-object'
     | 'missing-type'
@@ -311,7 +312,8 @@ export interface EnvelopeError {
     | 'missing-field'
     | 'wrong-type'
     | 'forbidden-field'
-    | 'invalid-intent-request';
+    | 'invalid-intent-request'
+    | 'invalid-lists-request';
   /** Human-readable explanation. */
   message: string;
   /** Field name, when the error concerns a specific field. */
@@ -434,6 +436,9 @@ export function validateEnvelope(message: unknown): EnvelopeVerdict {
 
   if (type === 'intent.invoke') {
     validateIntentInvokeRequest(record.request, errors);
+  }
+  if (type === 'lists.add' || type === 'lists.remove') {
+    validateListsMutationRequest(record, errors);
   }
 
   return { ok: errors.length === 0, type, domain, direction: 'out', errors };
