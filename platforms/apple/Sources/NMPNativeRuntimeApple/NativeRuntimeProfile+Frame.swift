@@ -225,10 +225,18 @@ extension NativeRuntimeProfile {
                 )
             )
         }
-        for session in activeSessions {
-            session.deliver(frame: frame)
+        let acceptedSessionIDs = snapshot.map { accepted in
+            Set(accepted.sessions.map(\.id))
         }
-        recordStopTerminalEvidence(frame)
+        for session in activeSessions {
+            session.deliver(
+                frame: frame,
+                acceptedSnapshotRetainsSession: acceptedSessionIDs.map {
+                    $0.contains(session.sessionID)
+                }
+            )
+        }
+        recordStopTerminalEvidence()
         if let snapshot {
             completeStopsAfterDelivery(snapshot: snapshot)
         }

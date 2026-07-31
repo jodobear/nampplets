@@ -34,6 +34,8 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
     private var responseSink:
         (owner: UUID, receive: @Sendable (Data) -> Void)?
     private var diagnosticSink: (@Sendable (String, String) -> Void)?
+    private var terminalEvidence: NativeRuntimeProfile.StopTerminalEvidence = .pending
+    private var possibleTerminalLoss: UInt64?
     private var isStopping = false
     private var isStopped = false
 
@@ -113,7 +115,10 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
         profile?.mappedEnvelope(sessionID: sessionID, bytes: bytes)
     }
 
-    func deliver(frame: RuntimeObservationFrame) {
+    func deliver(
+        frame: RuntimeObservationFrame,
+        acceptedSnapshotRetainsSession: Bool?
+    ) {
         lock.lock()
         let sink = responseSink?.receive
         let diagnostics = diagnosticSink
@@ -143,6 +148,41 @@ final class RustRuntimeNappletSession: TrustedNappletRuntimeSession, @unchecked 
                 continue
             }
         }
+
+        let lossWasReported = frame.eventCursorWasStale
+            || frame.lostBeforeBatch > 0
+        let deliveredTerminalMarker = !lossWasReported
+            && frame.events.contains { event in
+                event.sessionId == sessionID
+                    && event.kind == "session-changed"
+                    && (event.detail == "stopped" || event.detail == "crashed")
+            }
+        lock.lock()
+        if !isStopped {
+            if deliveredTerminalMarker {
+                // Rust orders this marker after every correlation-bearing
+                // terminal response. We only latch it after calling the sink.
+                terminalEvidence = .delivered
+                possibleTerminalLoss = nil
+            } else if lossWasReported, terminalEvidence == .pending {
+                possibleTerminalLoss = frame.lostBeforeBatch
+            }
+            if acceptedSnapshotRetainsSession == false,
+               terminalEvidence == .pending,
+               let lostBeforeBatch = possibleTerminalLoss
+            {
+                terminalEvidence = .deliveryLost(
+                    lostBeforeBatch: lostBeforeBatch
+                )
+            }
+        }
+        lock.unlock()
+    }
+
+    func stopTerminalEvidence() -> NativeRuntimeProfile.StopTerminalEvidence {
+        lock.lock()
+        defer { lock.unlock() }
+        return terminalEvidence
     }
 
     func stop() {

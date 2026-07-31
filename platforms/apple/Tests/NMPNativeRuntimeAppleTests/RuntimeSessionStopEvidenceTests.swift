@@ -29,7 +29,7 @@ final class RuntimeSessionStopEvidenceTests: RuntimeNappletSessionTestCase {
         XCTAssertEqual(
             stoppingSession(in: fixture.profile, id: fixture.session.sessionID)?
                 .terminalEvidence,
-            .deliveryLost(lostBeforeBatch: 1)
+            .pending
         )
 
         fixture.profile.update(

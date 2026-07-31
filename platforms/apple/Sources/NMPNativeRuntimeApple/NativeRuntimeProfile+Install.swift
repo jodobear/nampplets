@@ -233,32 +233,52 @@ extension NativeRuntimeProfile {
 
     func stopSession(_ session: RustRuntimeNappletSession) {
         let sessionID = session.sessionID
+        let terminalEvidence = session.stopTerminalEvidence()
         lock.lock()
         let isRegistered = sessions[sessionID]?.value === session
-        let rustRetainsSession = !lastAcceptedSnapshot.closed
-            && lastAcceptedSnapshot.sessions.contains { $0.id == sessionID }
-        let shouldStop = !isClosed && isRegistered && rustRetainsSession
+        let acceptedSnapshot = lastAcceptedSnapshot
+        let profileClosed = isClosed || acceptedSnapshot.closed
+        let rustRetainsSession = acceptedSnapshot.sessions.contains {
+            $0.id == sessionID
+        }
+        let shouldStop = !profileClosed && isRegistered && rustRetainsSession
+        let shouldAwaitExistingTerminal = !profileClosed
+            && isRegistered
+            && !rustRetainsSession
         if shouldStop {
             // Rust dispatch and observation are asynchronous. Retain the
             // borrowed session until update(frame:) hands off the terminal
             // refusal emitted by Stop.
             stoppingSessions[sessionID] = StoppingSession(
                 session: session,
-                minimumTerminalRevision: lastAcceptedSnapshot.revision == UInt64.max
+                minimumTerminalRevision: acceptedSnapshot.revision == UInt64.max
                     ? UInt64.max
-                    : lastAcceptedSnapshot.revision + 1
+                    : acceptedSnapshot.revision + 1,
+                terminalEvidence: terminalEvidence
+            )
+        } else if shouldAwaitExistingTerminal {
+            // Rust already ended the session, so a second Stop would produce
+            // only UnknownSession. Keep the sink until its already-queued
+            // stopped/crashed marker, explicit event loss, or runtime closure.
+            stoppingSessions[sessionID] = StoppingSession(
+                session: session,
+                minimumTerminalRevision: acceptedSnapshot.revision,
+                terminalEvidence: terminalEvidence
             )
         } else if isRegistered {
-            // The wrapper is weak native presentation state. An accepted Rust
-            // snapshot that already removed the session is authoritative: do
-            // not send Stop for an unknown ID or retain an immortal terminal
-            // sink waiting for a marker Rust cannot emit.
             sessions.removeValue(forKey: sessionID)
             stoppingSessions.removeValue(forKey: sessionID)
         }
         lock.unlock()
+        if shouldStop || shouldAwaitExistingTerminal {
+            // Close the race where an observer handed off the marker between
+            // the evidence read above and insertion into stoppingSessions.
+            recordStopTerminalEvidence()
+        }
         if shouldStop {
             controller.stop(sessionId: sessionID)
+        } else if shouldAwaitExistingTerminal {
+            completeStopsAfterDelivery(snapshot: acceptedSnapshot)
         } else {
             session.profileDidClose()
         }

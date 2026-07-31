@@ -15,7 +15,7 @@ extension NativeRuntimeProfile {
     struct StoppingSession {
         let session: RustRuntimeNappletSession
         let minimumTerminalRevision: UInt64
-        /// Rust emits this session's final stopped event after every terminal
+        /// Rust emits the final stopped/crashed event after every terminal
         /// response. Completion waits for that delivery watermark or explicit
         /// Rust event-loss evidence plus an accepted absent-session snapshot.
         var terminalEvidence: StopTerminalEvidence = .pending
@@ -52,39 +52,20 @@ extension NativeRuntimeProfile {
         }
     }
 
-    /// Called only after every event in the frame has been handed to session
-    /// sinks. Rust projects this typed stopped event after all terminal
-    /// responses for the same Stop, so a loss-free batch makes it an exact
-    /// delivery watermark. A stale batch can retain the marker after evicting
-    /// an earlier terminal response.
-    func recordStopTerminalEvidence(_ frame: RuntimeObservationFrame) {
-        let lossWasReported = frame.eventCursorWasStale
-            || frame.lostBeforeBatch > 0
-        let terminalSessionIDs: Set<UInt64> = lossWasReported
-            ? []
-            : Set(
-                frame.events.compactMap { event in
-                    event.kind == "session-changed"
-                        && event.detail == "stopped"
-                        ? event.sessionId
-                        : nil
-                }
-        )
-        guard lossWasReported || !terminalSessionIDs.isEmpty else { return }
+    /// Synchronizes evidence latched by each session only after that session
+    /// handed frame responses to its sink. Keeping the evidence on the session
+    /// also covers a Rust Stop/Crash whose marker arrived before wrapper Stop.
+    func recordStopTerminalEvidence() {
         lock.lock()
-        for sessionID in Array(stoppingSessions.keys) {
-            guard var stopping = stoppingSessions[sessionID] else { continue }
-            if terminalSessionIDs.contains(sessionID) {
-                stopping.terminalEvidence = .delivered
-            } else if lossWasReported,
-                      stopping.terminalEvidence == .pending
-            {
-                stopping.terminalEvidence = .deliveryLost(
-                    lostBeforeBatch: frame.lostBeforeBatch
-                )
-            } else {
-                continue
-            }
+        let candidates = stoppingSessions.map { ($0.key, $0.value.session) }
+        lock.unlock()
+        let evidence = candidates.map { ($0.0, $0.1, $0.1.stopTerminalEvidence()) }
+        lock.lock()
+        for (sessionID, session, terminalEvidence) in evidence {
+            guard var stopping = stoppingSessions[sessionID],
+                  stopping.session === session
+            else { continue }
+            stopping.terminalEvidence = terminalEvidence
             stoppingSessions[sessionID] = stopping
         }
         lock.unlock()
@@ -108,10 +89,10 @@ extension NativeRuntimeProfile {
             )
         }
         lock.unlock()
-        completeStopsWithDeliveredEvidence(stopFrames)
+        completeStopsWithTerminalEvidence(stopFrames)
     }
 
-    private func completeStopsWithDeliveredEvidence(
+    private func completeStopsWithTerminalEvidence(
         _ stopFrames: [(session: RustRuntimeNappletSession, disposition: StopFrameDisposition)]
     ) {
         let completedStops = stopFrames.compactMap { candidate in

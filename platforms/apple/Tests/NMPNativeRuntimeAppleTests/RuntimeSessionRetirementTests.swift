@@ -6,39 +6,6 @@ import XCTest
 // MARK: - Rust-authoritative terminal retirement
 
 final class RuntimeSessionRetirementTests: RuntimeNappletSessionTestCase {
-    func testStopAfterAcceptedRustCrashDoesNotRetainTerminalSink() throws {
-        let fixture = try makeLaunchedFixture("crash-before-wrapper-stop")
-        defer { fixture.profile.close() }
-        let liveSnapshot = try fixture.profile.snapshotForTesting
-
-        fixture.runtime.crash(reason: "deterministic accepted crash")
-        let ended = try acceptEndedSnapshot(fixture)
-        fixture.profile.update(
-            frame: observationFrame(
-                profile: fixture.profile,
-                snapshot: liveSnapshot
-            )
-        )
-        fixture.runtime.stop()
-
-        XCTAssertEqual(try fixture.profile.snapshotForTesting.revision, ended.revision)
-        assertSessionRetired(fixture)
-        assertEveryLaunchSlotAvailable(fixture.profile)
-    }
-
-    func testStopAfterAcceptedRustEndDoesNotRetainTerminalSink() throws {
-        let fixture = try makeLaunchedFixture("end-before-wrapper-stop")
-        defer { fixture.profile.close() }
-
-        fixture.profile.controller.stop(sessionId: fixture.runtime.sessionID)
-        let ended = try acceptEndedSnapshot(fixture)
-        fixture.runtime.stop()
-
-        XCTAssertEqual(try fixture.profile.snapshotForTesting.revision, ended.revision)
-        assertSessionRetired(fixture)
-        assertEveryLaunchSlotAvailable(fixture.profile)
-    }
-
     func testStopAfterAcceptedRustClosureIgnoresRetainedSnapshotRows() throws {
         let fixture = try makeLaunchedFixture(
             "closed-profile-before-wrapper-stop",
@@ -155,14 +122,6 @@ final class RuntimeSessionRetirementTests: RuntimeNappletSessionTestCase {
             grantDomains: requiredGoodMorningDomains
         )
         return (profile, try XCTUnwrap(artifact.runtimeSession as? RustRuntimeNappletSession))
-    }
-
-    private func acceptEndedSnapshot(
-        _ fixture: LaunchedFixture
-    ) throws -> RuntimeSnapshot {
-        let ended = try fixture.profile.snapshotForTesting
-        XCTAssertFalse(ended.sessions.contains { $0.id == fixture.runtime.sessionID })
-        return ended
     }
 
     private func quiesceAutomaticObservation(
