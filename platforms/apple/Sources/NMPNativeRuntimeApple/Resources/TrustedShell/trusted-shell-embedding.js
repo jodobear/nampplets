@@ -1,0 +1,248 @@
+(function trustedShellEmbedding(global) {
+  "use strict";
+
+  const PROTOCOL_VERSION = 1;
+  const MAX_PENDING_MOUNTS = 16;
+  const MAX_PARENT_MESSAGES_PER_SECOND = 256;
+  const primitiveSource = global.NMPTrustedShellPrimitives ||
+    (typeof require === "function" ? require("./trusted-shell.js") : null);
+  const hostSource = global.NMPTrustedShellHost ||
+    (typeof require === "function"
+      ? require("./trusted-shell-surface-host.js")
+      : null);
+  const contractSource = global.NMPTrustedShellEmbeddingContract ||
+    (typeof require === "function"
+      ? require("./trusted-shell-embedding-contract.js")
+      : null);
+
+  async function defaultDigestText(value) {
+    if (!global.crypto || !global.crypto.subtle) {
+      throw new Error("SHA-256 is unavailable");
+    }
+    const bytes = new TextEncoder().encode(value);
+    const digest = await global.crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  function createEmbeddingBridge(environment, dependencies = {}) {
+    const primitives = dependencies.primitives || primitiveSource;
+    const hostModule = dependencies.hostModule || hostSource;
+    const digestText = dependencies.digestText || defaultDigestText;
+    if (!primitives || !hostModule || !contractSource ||
+        !environment || !environment.document ||
+        !environment.parent || environment.parent === environment) {
+      throw new Error("The trusted shell embedding bridge is unavailable");
+    }
+    const parentWindow = environment.parent;
+    const contract = contractSource.createContract(primitives, hostModule);
+    const bindings = new Map();
+    const generations = new Map();
+    let pendingMounts = 0;
+    let disposed = false;
+    let messageWindowStartedAt = Date.now();
+    let messagesInWindow = 0;
+
+    function post(message) {
+      parentWindow.postMessage(Object.freeze(message), "*");
+    }
+
+    function currentBinding(surfaceId, session) {
+      const state = bindings.get(surfaceId);
+      return state && state.binding.session === session ? state : null;
+    }
+
+    const host = hostModule.createSurfaceHost(
+      environment,
+      primitives,
+      {
+        acceptMaterializedHTML: true,
+        forwardEnvelope(message) {
+          const state = currentBinding(message.surfaceId, message.session);
+          if (!state) return;
+          post({
+            type: "nmp.outer.napplet",
+            surfaceId: message.surfaceId,
+            session: message.session,
+            binding: state.binding,
+            envelope: message.envelope
+          });
+        }
+      }
+    );
+
+    function result(type, request, ok, error, binding = null) {
+      post({
+        type: `${type}.result`,
+        requestId: request.requestId,
+        surfaceId: request.surfaceId || null,
+        session: request.session ||
+          (request.configuration && request.configuration.session) || null,
+        ok,
+        error: error || null,
+        binding
+      });
+    }
+
+    function invalidate(surfaceId) {
+      generations.set(surfaceId, (generations.get(surfaceId) || 0) + 1);
+      bindings.delete(surfaceId);
+      host.unmount(surfaceId);
+      return generations.get(surfaceId);
+    }
+
+    async function mount(request) {
+      if (!contract.validMount(request)) return;
+      if (pendingMounts >= MAX_PENDING_MOUNTS) {
+        result(request.type, request, false, "overloaded");
+        return;
+      }
+      const configuration = request.configuration;
+      const generation = invalidate(request.surfaceId);
+      const copied = Object.freeze({
+        session: configuration.session,
+        artifactHTML: configuration.artifactHTML,
+        artifactBaseURL: configuration.artifactBaseURL,
+        domains: Object.freeze(configuration.domains.slice()),
+        title: configuration.title,
+        binding: Object.freeze({ ...configuration.binding })
+      });
+      let materialized;
+      pendingMounts += 1;
+      try {
+        materialized = primitives.materialize(
+          copied.artifactHTML,
+          copied.artifactBaseURL,
+          copied.domains
+        );
+        const [artifactDigest, materializedDigest] = await Promise.all([
+          digestText(copied.artifactHTML),
+          digestText(materialized)
+        ]);
+        if (generations.get(request.surfaceId) !== generation || disposed) return;
+        if (artifactDigest !== copied.binding.artifactDigest) {
+          result(request.type, request, false, "digest-mismatch");
+          return;
+        }
+        const sealedBinding = Object.freeze({
+          ...copied.binding,
+          materializedDigest
+        });
+        const bindingState = { binding: sealedBinding, generation };
+        const mounted = host.mount(
+          request.surfaceId,
+          environment.document.getElementById("surface"),
+          {
+            session: copied.session,
+            artifactHTML: copied.artifactHTML,
+            materializedHTML: materialized,
+            artifactBaseURL: copied.artifactBaseURL,
+            domains: copied.domains,
+            title: copied.title,
+            onReady() {
+              if (bindings.get(request.surfaceId) !== bindingState) return;
+              post({
+                type: "nmp.outer.surface.ready",
+                surfaceId: request.surfaceId,
+                session: copied.session,
+                binding: sealedBinding
+              });
+            },
+            onError(_surfaceId, detail) {
+              if (bindings.get(request.surfaceId) !== bindingState) return;
+              invalidate(request.surfaceId);
+              post({
+                type: "nmp.outer.surface.error",
+                surfaceId: request.surfaceId,
+                session: copied.session,
+                error: detail
+              });
+            }
+          }
+        );
+        if (!mounted) {
+          result(request.type, request, false, "mount-refused");
+          return;
+        }
+        bindings.set(request.surfaceId, bindingState);
+        result(request.type, request, true, null, sealedBinding);
+      } catch (_) {
+        if (generations.get(request.surfaceId) === generation) {
+          result(request.type, request, false, "materialization-refused");
+        }
+      } finally {
+        pendingMounts -= 1;
+      }
+    }
+
+    function receiveParentMessage(event) {
+      if (disposed || event.source !== parentWindow ||
+          !primitives.isPlainObject(event.data)) return;
+      const now = Date.now();
+      if (now - messageWindowStartedAt >= 1000) {
+        messageWindowStartedAt = now;
+        messagesInWindow = 0;
+      }
+      if (messagesInWindow >= MAX_PARENT_MESSAGES_PER_SECOND) return;
+      messagesInWindow += 1;
+      const request = event.data;
+      if (request.type === "nmp.outer.mount") {
+        void mount(request);
+        return;
+      }
+      if (request.type === "nmp.outer.deliver") {
+      if (!contract.exactFields(request, [
+        "envelope", "requestId", "session", "surfaceId", "type"
+        ], primitives) || !contract.validRequestId(request.requestId)) return;
+        const state = currentBinding(request.surfaceId, request.session);
+        result(request.type, request, Boolean(state) &&
+          host.receive(request.surfaceId, request.envelope), state ? null : "stale");
+      } else if (request.type === "nmp.outer.unmount") {
+        if (!contract.exactFields(request, [
+          "requestId", "session", "surfaceId", "type"
+        ], primitives) || !contract.validRequestId(request.requestId)) return;
+        const state = currentBinding(request.surfaceId, request.session);
+        const removed = Boolean(state);
+        if (removed) invalidate(request.surfaceId);
+        result(request.type, request, removed, removed ? null : "stale");
+      } else if (request.type === "nmp.outer.dispose") {
+        if (!contract.exactFields(request, ["requestId", "type"], primitives) ||
+            !contract.validRequestId(request.requestId)) return;
+        post({
+          type: "nmp.outer.dispose.result",
+          requestId: request.requestId,
+          ok: true
+        });
+        dispose();
+      }
+    }
+
+    function dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const surfaceId of Array.from(bindings.keys())) invalidate(surfaceId);
+      bindings.clear();
+      host.dispose();
+      environment.removeEventListener("message", receiveParentMessage);
+      environment.removeEventListener("pagehide", dispose);
+    }
+
+    environment.addEventListener("message", receiveParentMessage);
+    environment.addEventListener("pagehide", dispose);
+    post({ type: "nmp.outer.ready", version: PROTOCOL_VERSION });
+    return Object.freeze({ dispose });
+  }
+
+  const exported = Object.freeze({
+    PROTOCOL_VERSION,
+    MAX_PENDING_MOUNTS,
+    MAX_PARENT_MESSAGES_PER_SECOND,
+    createEmbeddingBridge
+  });
+  if (global.document && global.parent && global.parent !== global) {
+    createEmbeddingBridge(global);
+  }
+  global.NMPTrustedShellEmbedding = exported;
+  if (typeof module !== "undefined" && module.exports) module.exports = exported;
+})(typeof window === "undefined" ? globalThis : window);

@@ -112,6 +112,10 @@ def validate_legacy(
     shell_hashes = sources.get("trusted_shell_sha256", {})
     expected_shell_files = {
         "trusted-shell.css",
+        "trusted-shell-embedded.html",
+        "trusted-shell-embedded.sha256",
+        "trusted-shell-embedding-contract.js",
+        "trusted-shell-embedding.js",
         "trusted-shell.html",
         "trusted-shell-policy.js",
         "trusted-shell-prelude-domains.js",
