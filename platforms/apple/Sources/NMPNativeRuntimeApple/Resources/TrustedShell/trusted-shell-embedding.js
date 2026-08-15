@@ -39,7 +39,7 @@
     const parentWindow = environment.parent;
     const contract = contractSource.createContract(primitives, hostModule);
     const bindings = new Map();
-    const generations = new Map();
+    const pendingSurfaces = new Map();
     let pendingMounts = 0;
     let disposed = false;
     let messageWindowStartedAt = now();
@@ -88,10 +88,9 @@
     }
 
     function invalidate(surfaceId) {
-      generations.set(surfaceId, (generations.get(surfaceId) || 0) + 1);
+      pendingSurfaces.delete(surfaceId);
       bindings.delete(surfaceId);
       host.unmount(surfaceId);
-      return generations.get(surfaceId);
     }
 
     async function mount(request) {
@@ -101,7 +100,7 @@
         return;
       }
       const configuration = request.configuration;
-      const generation = invalidate(request.surfaceId);
+      invalidate(request.surfaceId);
       const copied = Object.freeze({
         session: configuration.session,
         artifactHTML: configuration.artifactHTML,
@@ -110,11 +109,13 @@
         title: configuration.title,
         binding: Object.freeze({ ...configuration.binding })
       });
+      const mountToken = Object.freeze({ session: copied.session });
+      pendingSurfaces.set(request.surfaceId, mountToken);
       let materialized;
       pendingMounts += 1;
       try {
         const artifactDigest = await digestText(copied.artifactHTML);
-        if (generations.get(request.surfaceId) !== generation || disposed) return;
+        if (pendingSurfaces.get(request.surfaceId) !== mountToken || disposed) return;
         if (artifactDigest !== copied.binding.artifactDigest) {
           result(request.type, request, false, "digest-mismatch");
           return;
@@ -125,12 +126,12 @@
           copied.domains
         );
         const materializedDigest = await digestText(materialized);
-        if (generations.get(request.surfaceId) !== generation || disposed) return;
+        if (pendingSurfaces.get(request.surfaceId) !== mountToken || disposed) return;
         const sealedBinding = Object.freeze({
           ...copied.binding,
           materializedDigest
         });
-        const bindingState = { binding: sealedBinding, generation };
+        const bindingState = { binding: sealedBinding };
         const mounted = host.mount(
           request.surfaceId,
           environment.document.getElementById("surface"),
@@ -167,13 +168,17 @@
           return;
         }
         bindings.set(request.surfaceId, bindingState);
+        pendingSurfaces.delete(request.surfaceId);
         result(request.type, request, true, null, sealedBinding);
       } catch (_) {
-        if (generations.get(request.surfaceId) === generation) {
+        if (pendingSurfaces.get(request.surfaceId) === mountToken) {
           result(request.type, request, false, "materialization-refused");
         }
       } finally {
         pendingMounts -= 1;
+        if (pendingSurfaces.get(request.surfaceId) === mountToken) {
+          pendingSurfaces.delete(request.surfaceId);
+        }
       }
     }
 
@@ -202,16 +207,32 @@
       if (request.type === "nmp.outer.deliver") {
       if (!contract.exactFields(request, [
         "envelope", "requestId", "session", "surfaceId", "type"
-        ], primitives) || !contract.validRequestId(request.requestId)) return;
+        ], primitives) || !contract.validRequestId(request.requestId) ||
+          !contract.validSurfaceId(request.surfaceId) ||
+          !contract.validSession(request.session)) return;
         const state = currentBinding(request.surfaceId, request.session);
-        result(request.type, request, Boolean(state) &&
-          host.receive(request.surfaceId, request.envelope), state ? null : "stale");
+        if (!state) {
+          result(request.type, request, false, "stale");
+        } else {
+          const delivered = host.receive(request.surfaceId, request.envelope);
+          result(
+            request.type,
+            request,
+            delivered,
+            delivered ? null : "deliver-refused"
+          );
+        }
       } else if (request.type === "nmp.outer.unmount") {
         if (!contract.exactFields(request, [
           "requestId", "session", "surfaceId", "type"
-        ], primitives) || !contract.validRequestId(request.requestId)) return;
+        ], primitives) || !contract.validRequestId(request.requestId) ||
+            !contract.validSurfaceId(request.surfaceId) ||
+            !contract.validSession(request.session)) return;
         const state = currentBinding(request.surfaceId, request.session);
-        const removed = Boolean(state);
+        const pending = pendingSurfaces.get(request.surfaceId);
+        const removed = Boolean(state) || Boolean(
+          pending && pending.session === request.session
+        );
         if (removed) invalidate(request.surfaceId);
         result(request.type, request, removed, removed ? null : "stale");
       } else if (request.type === "nmp.outer.dispose") {
@@ -229,8 +250,13 @@
     function dispose() {
       if (disposed) return;
       disposed = true;
-      for (const surfaceId of Array.from(bindings.keys())) invalidate(surfaceId);
+      const surfaceIds = new Set([
+        ...bindings.keys(),
+        ...pendingSurfaces.keys()
+      ]);
+      for (const surfaceId of surfaceIds) invalidate(surfaceId);
       bindings.clear();
+      pendingSurfaces.clear();
       host.dispose();
       environment.removeEventListener("message", receiveParentMessage);
       environment.removeEventListener("pagehide", dispose);
@@ -239,7 +265,16 @@
     environment.addEventListener("message", receiveParentMessage);
     environment.addEventListener("pagehide", dispose);
     post({ type: "nmp.outer.ready", version: PROTOCOL_VERSION });
-    return Object.freeze({ dispose });
+    return Object.freeze({
+      dispose,
+      stateCounts() {
+        return Object.freeze({
+          bindings: bindings.size,
+          pendingMounts,
+          pendingSurfaces: pendingSurfaces.size
+        });
+      }
+    });
   }
 
   const exported = Object.freeze({

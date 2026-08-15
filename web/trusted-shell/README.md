@@ -33,6 +33,16 @@ Parent rate overflow emits one fixed `nmp.outer.rate-limited` diagnostic per
 rate window. Napplet rate overflow invalidates that surface once and reports a
 fixed surface error. Neither path reflects input fields. A new window or a
 remount starts with a fresh bound counter; teardown removes the listeners.
+Pending mount tokens are retained only while their exact asynchronous mount is
+live; refusal, replacement, unmount, completion, and teardown retire them.
+This preserves stale-mount invalidation without retaining historical surface
+identifiers.
+
+Deliver and unmount requests apply the same bounded surface and session
+validators as mount requests. Invalid identifiers are ignored without
+reflection. A missing current binding returns the fixed `stale` error; a
+current binding whose typed envelope cannot be projected returns the fixed
+`deliver-refused` error.
 
 The outer document has no Tauri, Nostr, native IPC, raw network, or storage
 authority. Its parent owns the exact private-scheme GET handler, top-to-outer

@@ -20,7 +20,7 @@ function digest(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-function createHarness() {
+function createHarness(options = {}) {
   const parent = {
     posted: [],
     postMessage(message, target) { this.posted.push({ message, target }); }
@@ -78,7 +78,7 @@ function createHarness() {
   const bridge = createEmbeddingBridge(environment, {
     primitives,
     hostModule,
-    digestText: async (value) => digest(value),
+    digestText: options.digestText || (async (value) => digest(value)),
     now: () => currentTime
   });
   return {
@@ -105,8 +105,12 @@ function binding(surface, session, artifactHTML) {
   };
 }
 
-function mountRequest(harness, session, artifactHTML = "<p>verified</p>") {
-  const surfaceId = "surface-a";
+function mountRequest(
+  harness,
+  session,
+  artifactHTML = "<p>verified</p>",
+  surfaceId = "surface-a"
+) {
   const artifactBaseURL =
     "nmp-artifact://00000000-0000-4000-8000-000000000001/";
   const domains = ["shell"];
@@ -242,6 +246,123 @@ test("remount drops stale session traffic and dispose closes every listener", as
   assert.equal(harness.calls.disposed, 1);
   assert.equal(harness.listeners.has("message"), false);
   assert.equal(harness.listeners.has("pagehide"), false);
+});
+
+test("stale asynchronous mounts retire without replacing the current surface", async () => {
+  let releaseOldDigest;
+  const harness = createHarness({
+    digestText(value) {
+      if (value === "<p>old</p>") {
+        return new Promise((resolve) => {
+          releaseOldDigest = () => resolve(digest(value));
+        });
+      }
+      return Promise.resolve(digest(value));
+    }
+  });
+  const receive = harness.listeners.get("message");
+  receive({
+    source: harness.parent,
+    data: mountRequest(harness, "session-old", "<p>old</p>")
+  });
+  await dispatch(harness, mountRequest(harness, "session-new", "<p>new</p>"));
+  releaseOldDigest();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(harness.calls.mounts.map(({ configuration }) =>
+    configuration.session), ["session-new"]);
+  assert.deepEqual(harness.bridge.stateCounts(), {
+    bindings: 1,
+    pendingMounts: 0,
+    pendingSurfaces: 0
+  });
+});
+
+test("unique refused and unmounted surfaces return state to baseline", async () => {
+  const harness = createHarness();
+  for (let index = 0; index < 40; index += 1) {
+    const request = mountRequest(
+      harness,
+      `refused-${index}`,
+      `<p>refused-${index}</p>`,
+      `refused-${index}`
+    );
+    request.configuration.binding.artifactDigest = "0".repeat(64);
+    await dispatch(harness, request);
+  }
+  for (let index = 0; index < 40; index += 1) {
+    const surfaceId = `mounted-${index}`;
+    const session = `session-${index}`;
+    await dispatch(harness, mountRequest(
+      harness,
+      session,
+      `<p>mounted-${index}</p>`,
+      surfaceId
+    ));
+    await dispatch(harness, {
+      type: "nmp.outer.unmount",
+      requestId: `unmount-${index}`,
+      surfaceId,
+      session
+    });
+  }
+  assert.deepEqual(harness.bridge.stateCounts(), {
+    bindings: 0,
+    pendingMounts: 0,
+    pendingSurfaces: 0
+  });
+});
+
+test("deliver and unmount identifiers are bounded and never reflected", async () => {
+  const harness = createHarness();
+  await dispatch(harness, mountRequest(harness, "bounded-session"));
+  const invalidIdentifiers = [
+    { surfaceId: {}, session: "bounded-session" },
+    { surfaceId: "surface-a", session: [] },
+    { surfaceId: "bad\u0000surface", session: "bounded-session" },
+    { surfaceId: "surface-a", session: "bad\u0000session" },
+    { surfaceId: "s".repeat(129), session: "bounded-session" },
+    { surfaceId: "surface-a", session: "s".repeat(257) }
+  ];
+  for (const [index, identifiers] of invalidIdentifiers.entries()) {
+    for (const request of [{
+      type: "nmp.outer.deliver",
+      requestId: `invalid-deliver-${index}`,
+      ...identifiers,
+      envelope: { type: "identity.changed" }
+    }, {
+      type: "nmp.outer.unmount",
+      requestId: `invalid-unmount-${index}`,
+      ...identifiers
+    }]) {
+      const posted = harness.parent.posted.length;
+      await dispatch(harness, request);
+      assert.equal(harness.parent.posted.length, posted);
+    }
+  }
+  assert.equal(harness.calls.receives.length, 0);
+  assert.equal(harness.bridge.stateCounts().bindings, 1);
+});
+
+test("bound delivery refusal returns a fixed error", async () => {
+  const harness = createHarness();
+  await dispatch(harness, mountRequest(harness, "session-a"));
+  await dispatch(harness, {
+    type: "nmp.outer.deliver",
+    requestId: "invalid-envelope",
+    surfaceId: "surface-a",
+    session: "session-a",
+    envelope: { invalid: true }
+  });
+  assert.deepEqual(harness.parent.posted.at(-1).message, {
+    type: "nmp.outer.deliver.result",
+    requestId: "invalid-envelope",
+    surfaceId: "surface-a",
+    session: "session-a",
+    ok: false,
+    error: "deliver-refused",
+    binding: null
+  });
 });
 
 test("generated outer shell has one sealed HTML sink and pinned immutable bytes", () => {

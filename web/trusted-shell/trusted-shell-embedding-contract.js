@@ -29,6 +29,14 @@
       return validText(value, MAX_REQUEST_ID_BYTES);
     }
 
+    function validSurfaceId(value) {
+      return validText(value, MAX_SURFACE_ID_BYTES);
+    }
+
+    function validSession(value) {
+      return validText(value, MAX_SESSION_ID_BYTES);
+    }
+
     function validBinding(value, surfaceId, session) {
       return exactFields(value, [
         "aggregateHash", "artifactDigest", "dTag", "manifestAuthor",
@@ -52,8 +60,8 @@
       return exactFields(configuration, [
         "artifactBaseURL", "artifactHTML", "binding", "domains", "session", "title"
       ], primitives) &&
-        validText(request.surfaceId, MAX_SURFACE_ID_BYTES) &&
-        validText(configuration.session, MAX_SESSION_ID_BYTES) &&
+        validSurfaceId(request.surfaceId) &&
+        validSession(configuration.session) &&
         typeof configuration.artifactHTML === "string" &&
         new TextEncoder().encode(configuration.artifactHTML).byteLength <=
           hostModule.MAX_ARTIFACT_HTML_BYTES &&
@@ -67,7 +75,13 @@
         validBinding(configuration.binding, request.surfaceId, configuration.session);
     }
 
-    return Object.freeze({ exactFields, validRequestId, validMount });
+    return Object.freeze({
+      exactFields,
+      validMount,
+      validRequestId,
+      validSession,
+      validSurfaceId
+    });
   }
 
   const exported = Object.freeze({ createContract });
