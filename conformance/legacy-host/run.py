@@ -456,6 +456,10 @@ def main() -> int:
                 relative: sha256_file(ROOT / "web" / "trusted-shell" / relative)
                 for relative in (
                     "trusted-shell.css",
+                    "trusted-shell-embedded.html",
+                    "trusted-shell-embedded.sha256",
+                    "trusted-shell-embedding-contract.js",
+                    "trusted-shell-embedding.js",
                     "trusted-shell.html",
                     "trusted-shell-policy.js",
                     "trusted-shell-prelude-domains.js",

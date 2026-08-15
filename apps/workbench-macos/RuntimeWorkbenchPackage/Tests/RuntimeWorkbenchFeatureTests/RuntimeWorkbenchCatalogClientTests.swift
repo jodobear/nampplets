@@ -96,10 +96,12 @@ private func searchPage(
     // name via `displayCatalogTitle`, exactly as the neighbouring
     // "Resource Demo" entry already was. So "good-morning" reads as
     // "Good Morning"; the product is right and this assertion was stale.
-    #expect(page.entries.map(\.title) == ["Good Morning", "Resource Demo"])
+    #expect(page.entries.map(\.title) == [
+        "Good Morning", "Feed", "Profile Viewer", "Resource Demo",
+    ])
     #expect(page.evidence.scope == .offlineFixture)
     #expect(page.evidence.queryWasLocalFilter)
-    #expect(page.evidence.locallyFilteredRows == 18)
+    #expect(page.evidence.locallyFilteredRows == 16)
     let demo = try #require(
         page.entries.first(where: { $0.title == "Resource Demo" })
     )

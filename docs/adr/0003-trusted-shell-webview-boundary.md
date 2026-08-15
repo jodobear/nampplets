@@ -21,9 +21,14 @@ trusted local shell. It creates exactly one inner napplet iframe with:
 sandbox="allow-scripts"
 ```
 
-It omits `allow-same-origin`, loads verified bytes with `srcdoc` or private
-verified materialization, and injects selected `window.napplet` domains before
-all authored scripts. It never injects `window.nostr`.
+It omits `allow-same-origin`, loads verified napplet bytes with canonical
+`srcdoc`, and injects selected `window.napplet` domains before all authored
+scripts. It never injects `window.nostr`.
+
+An embedding runtime may load one immutable, digest-pinned trusted outer shell
+as an application resource below a stricter top-level document. That outer
+shell remains authority-free and preserves the same napplet `srcdoc` boundary;
+it is not an alternative transport for napplet HTML.
 
 The native script-message bridge exists only in the trusted shell. The napplet
 uses `postMessage`. The shell binds the inner `Window` reference to an opaque

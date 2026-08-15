@@ -3,7 +3,12 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { MAX_SURFACES, createSurfaceHost } = require(
+const {
+  MAX_ARTIFACT_HTML_BYTES,
+  MAX_NAPPLET_MESSAGES_PER_SECOND,
+  MAX_SURFACES,
+  createSurfaceHost
+} = require(
   "../trusted-shell-surface-host.js"
 );
 
@@ -40,11 +45,13 @@ function createHarness() {
     removeAttribute() { this.payload = null; }
   };
   const environment = {
+    TextEncoder,
     Event: class Event { constructor(type) { this.type = type; } },
     MessageChannel: TestMessageChannel,
     document: {
       documentElement: root,
       createElement() {
+        const frameListeners = new Map();
         return {
           attributes: {},
           contentWindow: {
@@ -54,6 +61,8 @@ function createHarness() {
             }
           },
           setAttribute(name, value) { this.attributes[name] = value; },
+          addEventListener(type, listener) { frameListeners.set(type, listener); },
+          emit(type) { frameListeners.get(type)(); },
           remove() { this.removed = true; }
         };
       },
@@ -196,6 +205,14 @@ test("surface count is bounded and unmount releases capacity", () => {
   assert.equal(harness.listeners.has("message"), false);
 });
 
+test("public host refuses caller-supplied materialized HTML", () => {
+  const harness = createHarness();
+  assert.equal(harness.host.mount("sealed", surface(), {
+    ...configuration("sealed"),
+    materializedHTML: "<script>unreviewed()</script>"
+  }), false);
+});
+
 test("disposing is terminal and refuses stale mounts", () => {
   const harness = createHarness();
   const target = surface();
@@ -227,4 +244,55 @@ test("remounting a surface ID removes and unmaps its previous frame", () => {
     data: { type: "shell.ready" }
   });
   assert.equal(harness.forwarded[0].payload.session, "new");
+});
+
+test("artifact bytes and napplet message rate fail closed", () => {
+  const harness = createHarness();
+  const target = surface();
+  const oversized = configuration("oversized");
+  oversized.artifactHTML = "x".repeat(MAX_ARTIFACT_HTML_BYTES + 1);
+  assert.equal(harness.host.mount("oversized", target, oversized), false);
+
+  const failures = [];
+  assert.equal(harness.host.mount("bounded", target, {
+    ...configuration("bounded"),
+    onError: (_surfaceId, detail) => failures.push(detail)
+  }), true);
+  for (let index = 0; index < MAX_NAPPLET_MESSAGES_PER_SECOND + 8; index += 1) {
+    harness.listeners.get("message")({
+      source: target.frame.contentWindow,
+      data: { type: "shell.ready", index }
+    });
+  }
+  assert.equal(harness.forwarded.length, MAX_NAPPLET_MESSAGES_PER_SECOND);
+  assert.equal(target.frame.removed, true);
+  assert.deepEqual(failures, ["message rate exceeded"]);
+
+  const replacement = surface();
+  assert.equal(harness.host.mount("bounded", replacement, {
+    ...configuration("remounted"),
+    onError: (_surfaceId, detail) => failures.push(detail)
+  }), true);
+  harness.listeners.get("message")({
+    source: replacement.frame.contentWindow,
+    data: { type: "shell.ready" }
+  });
+  assert.equal(harness.forwarded.length, MAX_NAPPLET_MESSAGES_PER_SECOND + 1);
+  harness.host.dispose();
+  assert.equal(replacement.frame.removed, true);
+  assert.equal(harness.listeners.has("message"), false);
+});
+
+test("second frame load invalidates unexpected navigation", () => {
+  const harness = createHarness();
+  const target = surface();
+  const failures = [];
+  assert.equal(harness.host.mount("navigation", target, {
+    ...configuration("navigation"),
+    onError: (_surfaceId, detail) => failures.push(detail)
+  }), true);
+  target.frame.emit("load");
+  target.frame.emit("load");
+  assert.equal(target.frame.removed, true);
+  assert.deepEqual(failures, ["unexpected navigation"]);
 });
