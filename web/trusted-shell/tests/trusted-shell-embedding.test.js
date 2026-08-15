@@ -6,7 +6,15 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
-const { createEmbeddingBridge } = require("../trusted-shell-embedding.js");
+const {
+  MAX_PARENT_MESSAGES_PER_SECOND,
+  createEmbeddingBridge
+} = require("../trusted-shell-embedding.js");
+const {
+  checkEmbeddedShell,
+  renderEmbeddedShell,
+  scriptNames
+} = require("../scripts/render-trusted-shell-embedded.js");
 
 function digest(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
@@ -19,8 +27,10 @@ function createHarness() {
   };
   const listeners = new Map();
   const calls = {
-    mounts: [], receives: [], unmounts: [], disposed: 0, materializations: 0
+    mounts: [], receives: [], unmounts: [], disposed: 0,
+    materializations: 0, srcdocAssignments: 0
   };
+  let currentTime = 1000;
   const active = new Set();
   let forwardEnvelope;
   const primitives = {
@@ -41,6 +51,7 @@ function createHarness() {
       forwardEnvelope = options.forwardEnvelope;
       return {
         mount(surfaceId, surface, configuration) {
+          calls.srcdocAssignments += 1;
           calls.mounts.push({ surfaceId, surface, configuration });
           active.add(surfaceId);
           return true;
@@ -67,10 +78,12 @@ function createHarness() {
   const bridge = createEmbeddingBridge(environment, {
     primitives,
     hostModule,
-    digestText: async (value) => digest(value)
+    digestText: async (value) => digest(value),
+    now: () => currentTime
   });
   return {
     bridge,
+    advance(milliseconds) { currentTime += milliseconds; },
     calls,
     environment,
     forward(message) { forwardEnvelope(message); },
@@ -132,20 +145,14 @@ test("embedded host binds parent, artifact digests, and napplet forwarding", asy
   assert.equal(harness.calls.mounts[0].surface, harness.surface);
   assert.equal(
     harness.calls.mounts[0].configuration.materializedHTML,
-    harness.primitives.materialize(
-      request.configuration.artifactHTML,
-      request.configuration.artifactBaseURL,
-      request.configuration.domains
-    )
+    `materialized:${request.configuration.artifactHTML}:` +
+      `${request.configuration.artifactBaseURL}:shell`
   );
   assert.equal(harness.parent.posted.at(-1).message.ok, true);
   assert.equal(
     harness.parent.posted.at(-1).message.binding.materializedDigest,
-    digest(harness.primitives.materialize(
-      request.configuration.artifactHTML,
-      request.configuration.artifactBaseURL,
-      request.configuration.domains
-    ))
+    digest(`materialized:${request.configuration.artifactHTML}:` +
+      `${request.configuration.artifactBaseURL}:shell`)
   );
 
   harness.forward({
@@ -166,6 +173,8 @@ test("one-byte mutation and type-confused launch refuse before the sealed sink",
   const request = mountRequest(harness, "session-a");
   request.configuration.artifactHTML += "x";
   await dispatch(harness, request);
+  assert.equal(harness.calls.materializations, 0);
+  assert.equal(harness.calls.srcdocAssignments, 0);
   assert.equal(harness.calls.mounts.length, 0);
   assert.equal(harness.parent.posted.at(-1).message.error, "digest-mismatch");
 
@@ -175,6 +184,30 @@ test("one-byte mutation and type-confused launch refuse before the sealed sink",
   await dispatch(harness, confused);
   assert.equal(harness.calls.mounts.length, 0);
   assert.equal(harness.parent.posted.length, count);
+});
+
+test("parent rate overflow reports once, resets, and teardown is terminal", async () => {
+  const harness = createHarness();
+  const receive = harness.listeners.get("message");
+  for (let index = 0; index < MAX_PARENT_MESSAGES_PER_SECOND + 8; index += 1) {
+    receive({ source: harness.parent, data: { type: "unknown" } });
+  }
+  assert.deepEqual(
+    harness.parent.posted.filter(({ message }) =>
+      message.type === "nmp.outer.rate-limited"
+    ).map(({ message }) => message),
+    [{ type: "nmp.outer.rate-limited", scope: "parent" }]
+  );
+
+  harness.advance(1000);
+  for (let index = 0; index < MAX_PARENT_MESSAGES_PER_SECOND + 1; index += 1) {
+    receive({ source: harness.parent, data: { type: "unknown" } });
+  }
+  assert.equal(harness.parent.posted.filter(({ message }) =>
+    message.type === "nmp.outer.rate-limited").length, 2);
+
+  harness.listeners.get("pagehide")();
+  assert.equal(harness.listeners.has("message"), false);
 });
 
 test("remount drops stale session traffic and dispose closes every listener", async () => {
@@ -221,6 +254,14 @@ test("generated outer shell has one sealed HTML sink and pinned immutable bytes"
     "utf8"
   ).trim().split(/\s+/)[0];
   const sources = `${host}\n${embedding}`;
+  assert.deepEqual(scriptNames, [
+    "trusted-shell-policy.js",
+    "trusted-shell-prelude-domains.js",
+    "trusted-shell.js",
+    "trusted-shell-surface-host.js",
+    "trusted-shell-embedding-contract.js",
+    "trusted-shell-embedding.js"
+  ]);
   assert.equal((sources.match(/\.srcdoc\s*=/g) || []).length, 1);
   assert.doesNotMatch(
     sources,
@@ -228,6 +269,8 @@ test("generated outer shell has one sealed HTML sink and pinned immutable bytes"
   );
   assert.doesNotMatch(embedding, /__TAURI|window\.nostr|fetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon|Worker\s*\(/);
   assert.equal(crypto.createHash("sha256").update(embedded).digest("hex"), recorded);
+  assert.equal(embedded.toString("utf8"), renderEmbeddedShell());
+  assert.doesNotThrow(() => checkEmbeddedShell());
   assert.match(embedded.toString("utf8"), /sandbox", "allow-scripts"/);
   assert.doesNotMatch(embedded.toString("utf8"), /allow-same-origin/);
 });

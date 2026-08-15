@@ -30,6 +30,7 @@
     const primitives = dependencies.primitives || primitiveSource;
     const hostModule = dependencies.hostModule || hostSource;
     const digestText = dependencies.digestText || defaultDigestText;
+    const now = dependencies.now || Date.now;
     if (!primitives || !hostModule || !contractSource ||
         !environment || !environment.document ||
         !environment.parent || environment.parent === environment) {
@@ -41,8 +42,9 @@
     const generations = new Map();
     let pendingMounts = 0;
     let disposed = false;
-    let messageWindowStartedAt = Date.now();
+    let messageWindowStartedAt = now();
     let messagesInWindow = 0;
+    let parentRateLimited = false;
 
     function post(message) {
       parentWindow.postMessage(Object.freeze(message), "*");
@@ -111,20 +113,19 @@
       let materialized;
       pendingMounts += 1;
       try {
-        materialized = primitives.materialize(
-          copied.artifactHTML,
-          copied.artifactBaseURL,
-          copied.domains
-        );
-        const [artifactDigest, materializedDigest] = await Promise.all([
-          digestText(copied.artifactHTML),
-          digestText(materialized)
-        ]);
+        const artifactDigest = await digestText(copied.artifactHTML);
         if (generations.get(request.surfaceId) !== generation || disposed) return;
         if (artifactDigest !== copied.binding.artifactDigest) {
           result(request.type, request, false, "digest-mismatch");
           return;
         }
+        materialized = primitives.materialize(
+          copied.artifactHTML,
+          copied.artifactBaseURL,
+          copied.domains
+        );
+        const materializedDigest = await digestText(materialized);
+        if (generations.get(request.surfaceId) !== generation || disposed) return;
         const sealedBinding = Object.freeze({
           ...copied.binding,
           materializedDigest
@@ -179,12 +180,19 @@
     function receiveParentMessage(event) {
       if (disposed || event.source !== parentWindow ||
           !primitives.isPlainObject(event.data)) return;
-      const now = Date.now();
-      if (now - messageWindowStartedAt >= 1000) {
-        messageWindowStartedAt = now;
+      const currentTime = now();
+      if (currentTime - messageWindowStartedAt >= 1000) {
+        messageWindowStartedAt = currentTime;
         messagesInWindow = 0;
+        parentRateLimited = false;
       }
-      if (messagesInWindow >= MAX_PARENT_MESSAGES_PER_SECOND) return;
+      if (messagesInWindow >= MAX_PARENT_MESSAGES_PER_SECOND) {
+        if (!parentRateLimited) {
+          parentRateLimited = true;
+          post({ type: "nmp.outer.rate-limited", scope: "parent" });
+        }
+        return;
+      }
       messagesInWindow += 1;
       const request = event.data;
       if (request.type === "nmp.outer.mount") {

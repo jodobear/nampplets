@@ -46,6 +46,7 @@
       ? options.forwardEnvelope
       : null;
     const acceptMaterializedHTML = options.acceptMaterializedHTML === true;
+    const now = typeof options.now === "function" ? options.now : Date.now;
     const surfaces = new Map();
     let disposed = false;
 
@@ -80,12 +81,17 @@
       for (const [surfaceId, state] of surfaces.entries()) {
         const envelope = primitives.mappedEnvelope(event, state.frame);
         if (envelope !== null) {
-          const now = Date.now();
-          if (now - state.messageWindowStartedAt >= 1000) {
-            state.messageWindowStartedAt = now;
+          const currentTime = now();
+          if (currentTime - state.messageWindowStartedAt >= 1000) {
+            state.messageWindowStartedAt = currentTime;
             state.messagesInWindow = 0;
           }
           if (state.messagesInWindow >= MAX_NAPPLET_MESSAGES_PER_SECOND) {
+            const onError = state.onError;
+            unmount(surfaceId);
+            try {
+              if (onError) onError(surfaceId, "message rate exceeded");
+            } catch (_) {}
             return;
           }
           state.messagesInWindow += 1;
@@ -157,7 +163,7 @@
         acknowledgement: null,
         ready: false,
         loadCount: 0,
-        messageWindowStartedAt: Date.now(),
+        messageWindowStartedAt: now(),
         messagesInWindow: 0,
         domains: Object.freeze(Array.from(new Set(
           ["shell"].concat(configuration.domains || [])

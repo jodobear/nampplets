@@ -246,7 +246,7 @@ test("remounting a surface ID removes and unmaps its previous frame", () => {
   assert.equal(harness.forwarded[0].payload.session, "new");
 });
 
-test("artifact bytes, napplet message rate, and navigation are bounded", () => {
+test("artifact bytes and napplet message rate fail closed", () => {
   const harness = createHarness();
   const target = surface();
   const oversized = configuration("oversized");
@@ -258,13 +258,39 @@ test("artifact bytes, napplet message rate, and navigation are bounded", () => {
     ...configuration("bounded"),
     onError: (_surfaceId, detail) => failures.push(detail)
   }), true);
-  for (let index = 0; index < MAX_NAPPLET_MESSAGES_PER_SECOND + 1; index += 1) {
+  for (let index = 0; index < MAX_NAPPLET_MESSAGES_PER_SECOND + 8; index += 1) {
     harness.listeners.get("message")({
       source: target.frame.contentWindow,
       data: { type: "shell.ready", index }
     });
   }
   assert.equal(harness.forwarded.length, MAX_NAPPLET_MESSAGES_PER_SECOND);
+  assert.equal(target.frame.removed, true);
+  assert.deepEqual(failures, ["message rate exceeded"]);
+
+  const replacement = surface();
+  assert.equal(harness.host.mount("bounded", replacement, {
+    ...configuration("remounted"),
+    onError: (_surfaceId, detail) => failures.push(detail)
+  }), true);
+  harness.listeners.get("message")({
+    source: replacement.frame.contentWindow,
+    data: { type: "shell.ready" }
+  });
+  assert.equal(harness.forwarded.length, MAX_NAPPLET_MESSAGES_PER_SECOND + 1);
+  harness.host.dispose();
+  assert.equal(replacement.frame.removed, true);
+  assert.equal(harness.listeners.has("message"), false);
+});
+
+test("second frame load invalidates unexpected navigation", () => {
+  const harness = createHarness();
+  const target = surface();
+  const failures = [];
+  assert.equal(harness.host.mount("navigation", target, {
+    ...configuration("navigation"),
+    onError: (_surfaceId, detail) => failures.push(detail)
+  }), true);
   target.frame.emit("load");
   target.frame.emit("load");
   assert.equal(target.frame.removed, true);
