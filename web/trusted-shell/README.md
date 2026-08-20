@@ -30,11 +30,16 @@ navigation, page teardown, and explicit disposal invalidate the old window and
 session mapping deterministically.
 
 Artifact HTML retains an 8 MiB default and a 16 MiB materialized default.
-`trusted-shell-artifact-policy.js` permits a trusted build-time constructor to
-render one exact elevated outer document under immutable 96 MiB artifact and
-100 MiB materialized hard ceilings. Elevated admission binds the exact source
-and materialized lengths and digests plus manifest author, d-tag, and aggregate
-hash. `trusted-shell-artifact-verifier.js` issues a module-private, one-use
+The optional elevated constructor path is a private bounded-execution
+mechanism, not a supported product facility. Canonical and Apple bootstraps do
+not enable it. Production activation requires a Rust-owned exact-build grant
+and native lifecycle, and remains prohibited until legacy compatibility is
+green. When an authorized host supplies the fixed policy,
+`trusted-shell-artifact-policy.js` enforces immutable 96 MiB artifact and
+100 MiB materialized hard ceilings for one exact outer document. Elevated
+admission binds the exact source and materialized lengths and digests plus
+manifest author, d-tag, and aggregate hash.
+`trusted-shell-artifact-verifier.js` issues a module-private, one-use
 receipt only after hashing both exact strings; the surface host consumes that
 receipt before its sole `srcdoc` assignment. It is exclusive to one attempt and
 one surface for that outer-document lifecycle. Limits are never read from a
