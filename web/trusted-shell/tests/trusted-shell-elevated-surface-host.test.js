@@ -6,6 +6,7 @@ const test = require("node:test");
 
 const policyModule = require("../trusted-shell-artifact-policy.js");
 const { createSurfaceHost } = require("../trusted-shell-surface-host.js");
+const NO_ENVELOPE = null;
 
 function digest(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
@@ -60,9 +61,9 @@ function primitives() {
       return value !== null && typeof value === "object" && !Array.isArray(value);
     },
     isVerifiedArtifactBaseURL(value) { return value === "nmp-artifact://verified/"; },
-    mappedEnvelope() { return null; },
+    mappedEnvelope() { return NO_ENVELOPE; },
     materialize() { throw new Error("pre-materialized input required"); },
-    projectNativeEnvelope() { return null; }
+    projectNativeEnvelope() { return NO_ENVELOPE; }
   };
 }
 
@@ -80,6 +81,7 @@ test("surface host enforces the same normalized elevated policy at srcdoc", () =
   assert.equal(host.mount("rage", target, {
     session: "rage-session",
     artifactHTML: fixture.artifactHTML,
+    artifactDigest: fixture.policy.artifactDigest,
     materializedHTML: fixture.materializedHTML,
     materializedDigest: fixture.policy.materializedDigest,
     artifactBaseURL: "nmp-artifact://verified/",
@@ -100,8 +102,14 @@ test("surface host refuses elevated byte or digest drift before srcdoc", () => {
     acceptMaterializedHTML: true,
     artifactPolicy: fixture.policy
   });
+  const sameLengthMutation = `y${fixture.artifactHTML.slice(1)}`;
   for (const configuration of [{
     artifactHTML: `${fixture.artifactHTML}x`,
+    materializedHTML: fixture.materializedHTML,
+    materializedDigest: fixture.policy.materializedDigest
+  }, {
+    artifactHTML: sameLengthMutation,
+    artifactDigest: digest(sameLengthMutation),
     materializedHTML: fixture.materializedHTML,
     materializedDigest: fixture.policy.materializedDigest
   }, {
@@ -112,6 +120,7 @@ test("surface host refuses elevated byte or digest drift before srcdoc", () => {
     const target = surface();
     assert.equal(host.mount("rage", target, {
       session: "rage-session",
+      artifactDigest: fixture.policy.artifactDigest,
       artifactBaseURL: "nmp-artifact://verified/",
       domains: ["shell"],
       title: "Rage",
@@ -119,6 +128,50 @@ test("surface host refuses elevated byte or digest drift before srcdoc", () => {
     }), false);
     assert.equal(target.frame, undefined);
   }
+});
+
+test("surface host requires preverified elevated materialization", () => {
+  const fixture = createFixture();
+  let materializations = 0;
+  const suppliedPrimitives = primitives();
+  suppliedPrimitives.materialize = () => {
+    materializations += 1;
+    return fixture.materializedHTML;
+  };
+  const target = surface();
+  const host = createSurfaceHost(createEnvironment(), suppliedPrimitives, {
+    acceptMaterializedHTML: true,
+    artifactPolicy: fixture.policy
+  });
+  assert.equal(host.mount("rage", target, {
+    session: "rage-session",
+    artifactHTML: fixture.artifactHTML,
+    artifactDigest: fixture.policy.artifactDigest,
+    artifactBaseURL: "nmp-artifact://verified/",
+    domains: ["shell"]
+  }), false);
+  assert.equal(materializations, 0);
+  assert.equal(target.frame, undefined);
+});
+
+test("surface host elevated admission cannot remount after teardown", () => {
+  const fixture = createFixture();
+  const host = createSurfaceHost(createEnvironment(), primitives(), {
+    acceptMaterializedHTML: true,
+    artifactPolicy: fixture.policy
+  });
+  const configuration = {
+    session: "rage-session",
+    artifactHTML: fixture.artifactHTML,
+    artifactDigest: fixture.policy.artifactDigest,
+    materializedHTML: fixture.materializedHTML,
+    materializedDigest: fixture.policy.materializedDigest,
+    artifactBaseURL: "nmp-artifact://verified/",
+    domains: ["shell"]
+  };
+  assert.equal(host.mount("rage", surface(), configuration), true);
+  assert.equal(host.unmount("rage"), true);
+  assert.equal(host.mount("rage", surface(), configuration), false);
 });
 
 test("surface host refuses unnormalized policy lookalikes", () => {

@@ -18,14 +18,12 @@
     artifactPolicySource.DEFAULT_MAX_ARTIFACT_HTML_BYTES;
   const MAX_MATERIALIZED_HTML_BYTES =
     artifactPolicySource.DEFAULT_MAX_MATERIALIZED_HTML_BYTES;
-
   function validText(environment, value, maximumBytes, allowEmpty = false) {
     return typeof value === "string" &&
       (allowEmpty || value.length > 0) &&
       artifactPolicySource.utf8ByteLength(value) <= maximumBytes &&
       !/[\u0000-\u001f\u007f]/.test(value);
   }
-
   function validDomains(environment, domains) {
     return typeof domains === "undefined" ||
       (Array.isArray(domains) &&
@@ -35,7 +33,6 @@
           /^[a-z][a-z0-9-]*$/.test(domain)
         ));
   }
-
   function createSurfaceHost(environment, suppliedPrimitives, options = {}) {
     const primitives = suppliedPrimitives || primitiveSource;
     if (!primitives || !environment || !environment.document) {
@@ -52,16 +49,15 @@
       : null;
     const acceptMaterializedHTML = options.acceptMaterializedHTML === true;
     const now = typeof options.now === "function" ? options.now : Date.now;
+    const admission = artifactPolicySource.createAdmission(artifactPolicy);
     const surfaces = new Map();
     let disposed = false;
-
     function closeAcknowledgement(state) {
       if (state.acknowledgement) {
         state.acknowledgement.close();
         state.acknowledgement = null;
       }
     }
-
     function forwardToNative(surfaceId, state, envelope) {
       if (forwardEnvelope) {
         forwardEnvelope(Object.freeze({
@@ -81,7 +77,6 @@
       );
       root.removeAttribute("data-nmp-native-envelope");
     }
-
     function receiveNappletMessage(event) {
       for (const [surfaceId, state] of surfaces.entries()) {
         const envelope = primitives.mappedEnvelope(event, state.frame);
@@ -105,7 +100,6 @@
         }
       }
     }
-
     function mount(surfaceId, surface, configuration) {
       if (disposed ||
           !validText(environment, surfaceId, MAX_SURFACE_ID_BYTES) ||
@@ -117,6 +111,9 @@
             artifactPolicy,
             configuration.artifactHTML
           ) ||
+          (artifactPolicy.elevated &&
+            (configuration.artifactDigest !== artifactPolicy.artifactDigest ||
+              typeof configuration.materializedHTML !== "string")) ||
           (typeof configuration.materializedHTML !== "undefined" &&
             (!acceptMaterializedHTML ||
               !artifactPolicySource.acceptsMaterializedHTML(
@@ -140,6 +137,8 @@
           (!surfaces.has(surfaceId) && surfaces.size >= MAX_SURFACES)) {
         return false;
       }
+      const admissionToken = admission.begin();
+      if (artifactPolicy.elevated && !admissionToken) return false;
       const frame = environment.document.createElement("iframe");
       if (surfaceId === "default") {
         frame.id = "napplet-frame";
@@ -155,6 +154,10 @@
           configuration.artifactBaseURL,
           configuration.domains
         );
+      if (artifactPolicy.elevated && !admission.activate(admissionToken)) {
+        admission.settle(admissionToken);
+        return false;
+      }
       surface.replaceChildren(frame);
       const previous = surfaces.get(surfaceId);
       if (previous) {
@@ -173,6 +176,7 @@
         loadCount: 0,
         messageWindowStartedAt: now(),
         messagesInWindow: 0,
+        admissionToken,
         domains: Object.freeze(Array.from(new Set(
           ["shell"].concat(configuration.domains || [])
         )).sort())
@@ -189,9 +193,9 @@
         });
       }
       surfaces.set(surfaceId, state);
+      admission.settle(admissionToken);
       return true;
     }
-
     function receive(surfaceId, envelope) {
       const state = surfaces.get(surfaceId);
       if (!state) {
@@ -233,7 +237,6 @@
       }
       return true;
     }
-
     function unmount(surfaceId) {
       const state = surfaces.get(surfaceId);
       if (!state) {
@@ -243,27 +246,26 @@
       if (typeof state.frame.remove === "function") {
         state.frame.remove();
       }
+      admission.release(state.admissionToken);
       surfaces.delete(surfaceId);
       return true;
     }
-
     function dispose() {
       if (disposed) return;
       disposed = true;
       for (const surfaceId of Array.from(surfaces.keys())) {
         unmount(surfaceId);
       }
+      admission.dispose();
       if (typeof environment.removeEventListener === "function") {
         environment.removeEventListener("message", receiveNappletMessage);
       }
     }
-
     if (typeof environment.addEventListener === "function") {
       environment.addEventListener("message", receiveNappletMessage);
     }
     return Object.freeze({ mount, receive, unmount, dispose });
   }
-
   const exported = {
     MAX_SURFACES,
     MAX_ARTIFACT_HTML_BYTES,

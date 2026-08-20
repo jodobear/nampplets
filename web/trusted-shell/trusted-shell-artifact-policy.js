@@ -7,10 +7,11 @@
   const HARD_MAX_ARTIFACT_HTML_BYTES = 96 * MEBIBYTE;
   const HARD_MAX_MATERIALIZED_HTML_BYTES = 100 * MEBIBYTE;
   const HASH = /^[0-9a-f]{64}$/;
+  const NO_VALUE = null;
   const normalizedPolicies = new WeakSet();
 
   function utf8ByteLength(value) {
-    if (typeof value !== "string") return null;
+    if (typeof value !== "string") return NO_VALUE;
     let length = 0;
     for (let index = 0; index < value.length; index += 1) {
       const code = value.charCodeAt(index);
@@ -43,16 +44,28 @@
       .map((byte) => byte.toString(16).padStart(2, "0")).join("");
   }
 
-  function exactFields(value, fields) {
+  function snapshotDataFields(value, fields) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      return false;
+      return NO_VALUE;
     }
     const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return false;
-    const actual = Object.keys(value).sort();
+    if (prototype !== Object.prototype && prototype !== null) return NO_VALUE;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(descriptors);
+    if (keys.some((field) => typeof field !== "string")) return NO_VALUE;
+    const actual = keys.sort();
     const expected = fields.slice().sort();
-    return actual.length === expected.length &&
-      actual.every((field, index) => field === expected[index]);
+    if (actual.length !== expected.length ||
+        !actual.every((field, index) => field === expected[index])) {
+      return NO_VALUE;
+    }
+    const snapshot = {};
+    for (const field of expected) {
+      const descriptor = descriptors[field];
+      if (!("value" in descriptor) || !descriptor.enumerable) return NO_VALUE;
+      snapshot[field] = descriptor.value;
+    }
+    return Object.freeze(snapshot);
   }
 
   function validPositiveInteger(value, maximum) {
@@ -97,28 +110,29 @@
 
   function normalizeArtifactPolicy(input) {
     if (typeof input === "undefined") return DEFAULT_POLICY;
-    if (!exactFields(input, ELEVATED_FIELDS) || input.exclusive !== true ||
+    const snapshot = snapshotDataFields(input, ELEVATED_FIELDS);
+    if (!snapshot || snapshot.exclusive !== true ||
         !validPositiveInteger(
-          input.maximumArtifactHTMLBytes,
+          snapshot.maximumArtifactHTMLBytes,
           HARD_MAX_ARTIFACT_HTML_BYTES
-        ) || input.maximumArtifactHTMLBytes <= DEFAULT_MAX_ARTIFACT_HTML_BYTES ||
+        ) || snapshot.maximumArtifactHTMLBytes <= DEFAULT_MAX_ARTIFACT_HTML_BYTES ||
         !validPositiveInteger(
-          input.maximumMaterializedHTMLBytes,
+          snapshot.maximumMaterializedHTMLBytes,
           HARD_MAX_MATERIALIZED_HTML_BYTES
         ) || !validPositiveInteger(
-          input.exactArtifactHTMLBytes,
-          input.maximumArtifactHTMLBytes
-        ) || input.exactArtifactHTMLBytes <= DEFAULT_MAX_ARTIFACT_HTML_BYTES ||
+          snapshot.exactArtifactHTMLBytes,
+          snapshot.maximumArtifactHTMLBytes
+        ) || snapshot.exactArtifactHTMLBytes <= DEFAULT_MAX_ARTIFACT_HTML_BYTES ||
         !validPositiveInteger(
-          input.exactMaterializedHTMLBytes,
-          input.maximumMaterializedHTMLBytes
-        ) || !validHash(input.artifactDigest) ||
-        !validHash(input.materializedDigest) ||
-        !validHash(input.manifestAuthor) ||
-        !validHash(input.aggregateHash) || !validDTag(input.dTag)) {
+          snapshot.exactMaterializedHTMLBytes,
+          snapshot.maximumMaterializedHTMLBytes
+        ) || !validHash(snapshot.artifactDigest) ||
+        !validHash(snapshot.materializedDigest) ||
+        !validHash(snapshot.manifestAuthor) ||
+        !validHash(snapshot.aggregateHash) || !validDTag(snapshot.dTag)) {
       throw new TypeError("invalid trusted artifact policy");
     }
-    return freezePolicy({ elevated: true, ...input });
+    return freezePolicy({ elevated: true, ...snapshot });
   }
 
   function isNormalizedPolicy(value) {
@@ -129,7 +143,7 @@
     if (!isNormalizedPolicy(policy)) {
       throw new TypeError("trusted artifact policy must be normalized");
     }
-    if (!policy.elevated) return null;
+    if (!policy.elevated) return NO_VALUE;
     const input = {};
     for (const field of ELEVATED_FIELDS) input[field] = policy[field];
     return Object.freeze(input);
@@ -176,7 +190,7 @@
     let disposed = false;
 
     function begin() {
-      if (!policy.elevated) return null;
+      if (!policy.elevated) return NO_VALUE;
       if (disposed || consumed || pending || active) return false;
       consumed = true;
       pending = Object.freeze({});

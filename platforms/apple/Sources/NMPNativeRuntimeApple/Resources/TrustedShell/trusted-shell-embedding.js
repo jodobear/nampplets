@@ -21,8 +21,7 @@
   function createEmbeddingBridge(environment, dependencies = {}) {
     const primitives = dependencies.primitives || primitiveSource;
     const hostModule = dependencies.hostModule || hostSource;
-    const digestText = dependencies.digestText ||
-      ((value) => artifactPolicySource.digestText(global, value));
+    const digestText = dependencies.digestText || ((value) => artifactPolicySource.digestText(global, value));
     const now = dependencies.now || Date.now;
     if (!primitives || !hostModule || !contractSource || !artifactPolicySource ||
         !environment || !environment.document ||
@@ -146,6 +145,7 @@
           {
             session: copied.session,
             artifactHTML: copied.artifactHTML,
+            artifactDigest,
             materializedHTML: materialized,
             materializedDigest,
             artifactBaseURL: copied.artifactBaseURL,

@@ -127,6 +127,20 @@ test("invalid elevated inputs fail closed without clamping", () => {
     () => policyModule.normalizeArtifactPolicy(confused),
     /invalid trusted artifact policy/
   );
+  let reads = 0;
+  const accessorInput = { ...input };
+  Object.defineProperty(accessorInput, "exactArtifactHTMLBytes", {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return input.exactArtifactHTMLBytes;
+    }
+  });
+  assert.throws(
+    () => policyModule.normalizeArtifactPolicy(accessorInput),
+    /invalid trusted artifact policy/
+  );
+  assert.equal(reads, 0);
 });
 
 test("UTF-8 measurement matches TextEncoder without allocating through it", () => {
