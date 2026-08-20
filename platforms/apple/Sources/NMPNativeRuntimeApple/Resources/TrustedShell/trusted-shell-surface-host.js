@@ -1,6 +1,5 @@
 (function trustedShellSurfaceHost(global) {
   "use strict";
-
   const MAX_SURFACES = 16;
   const MAX_SURFACE_ID_BYTES = 128;
   const MAX_SESSION_ID_BYTES = 256;
@@ -14,6 +13,7 @@
     (typeof require === "function"
       ? require("./trusted-shell-artifact-policy.js")
       : null);
+  const artifactVerifierSource = global.NMPTrustedShellArtifactVerifier || (typeof require === "function" ? require("./trusted-shell-artifact-verifier.js") : null);
   const MAX_ARTIFACT_HTML_BYTES =
     artifactPolicySource.DEFAULT_MAX_ARTIFACT_HTML_BYTES;
   const MAX_MATERIALIZED_HTML_BYTES =
@@ -35,7 +35,8 @@
   }
   function createSurfaceHost(environment, suppliedPrimitives, options = {}) {
     const primitives = suppliedPrimitives || primitiveSource;
-    if (!primitives || !environment || !environment.document) {
+    if (!primitives || !artifactVerifierSource ||
+        !environment || !environment.document) {
       throw new Error("The trusted shell surface host is unavailable");
     }
     const artifactPolicy = typeof options.artifactPolicy === "undefined"
@@ -112,8 +113,7 @@
             configuration.artifactHTML
           ) ||
           (artifactPolicy.elevated &&
-            (configuration.artifactDigest !== artifactPolicy.artifactDigest ||
-              typeof configuration.materializedHTML !== "string")) ||
+            typeof configuration.materializedHTML !== "string") ||
           (typeof configuration.materializedHTML !== "undefined" &&
             (!acceptMaterializedHTML ||
               !artifactPolicySource.acceptsMaterializedHTML(
@@ -137,7 +137,8 @@
           (!surfaces.has(surfaceId) && surfaces.size >= MAX_SURFACES)) {
         return false;
       }
-      const admissionToken = admission.begin();
+      const admissionToken = artifactVerifierSource.beginVerifiedMount(
+        admission, artifactPolicy, configuration);
       if (artifactPolicy.elevated && !admissionToken) return false;
       const frame = environment.document.createElement("iframe");
       if (surfaceId === "default") {

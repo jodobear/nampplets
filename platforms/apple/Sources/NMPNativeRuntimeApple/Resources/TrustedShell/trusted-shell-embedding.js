@@ -18,12 +18,17 @@
   const artifactPolicySource = moduleSource(
     global.NMPTrustedShellArtifactPolicy, "./trusted-shell-artifact-policy.js"
   );
+  const artifactVerifierSource = moduleSource(
+    global.NMPTrustedShellArtifactVerifier, "./trusted-shell-artifact-verifier.js"
+  );
   function createEmbeddingBridge(environment, dependencies = {}) {
     const primitives = dependencies.primitives || primitiveSource;
     const hostModule = dependencies.hostModule || hostSource;
     const digestText = dependencies.digestText || ((value) => artifactPolicySource.digestText(global, value));
     const now = dependencies.now || Date.now;
+    const artifactVerifier = dependencies.artifactVerifier || artifactVerifierSource;
     if (!primitives || !hostModule || !contractSource || !artifactPolicySource ||
+        !artifactVerifier ||
         !environment || !environment.document ||
         !environment.parent || environment.parent === environment) {
       throw new Error("The trusted shell embedding bridge is unavailable");
@@ -108,32 +113,22 @@
       });
       const mountToken = Object.freeze({ session: copied.session });
       pendingSurfaces.set(request.surfaceId, mountToken);
-      let materialized;
       pendingMounts += 1;
       try {
-        const artifactDigest = await digestText(copied.artifactHTML);
-        if (pendingSurfaces.get(request.surfaceId) !== mountToken || disposed) return;
-        if (artifactDigest !== copied.binding.artifactDigest) {
-          result(request.type, request, false, "digest-mismatch");
-          return;
-        }
-        materialized = primitives.materialize(
-          copied.artifactHTML,
-          copied.artifactBaseURL,
-          copied.domains
+        const verified = await artifactVerifier.verifyAndMaterialize(
+          global, artifactPolicy, copied.binding, copied.artifactHTML,
+          () => primitives.materialize(
+            copied.artifactHTML, copied.artifactBaseURL, copied.domains
+          ), digestText,
+          () => pendingSurfaces.get(request.surfaceId) === mountToken && !disposed
         );
-        if (!artifactPolicySource.acceptsMaterializedHTMLBytes(
-          artifactPolicy, materialized)) {
-          result(request.type, request, false, "materialization-refused");
+        if (verified.status === "stale") return;
+        if (verified.status !== "verified") {
+          result(request.type, request, false, verified.status);
           return;
         }
-        const materializedDigest = await digestText(materialized);
-        if (pendingSurfaces.get(request.surfaceId) !== mountToken || disposed) return;
-        if (!artifactPolicySource.acceptsMaterializedHTML(
-          artifactPolicy, materialized, materializedDigest)) {
-          result(request.type, request, false, "materialization-refused");
-          return;
-        }
+        const materialized = verified.materializedHTML;
+        const materializedDigest = verified.materializedDigest;
         const sealedBinding = Object.freeze({
           ...copied.binding,
           materializedDigest
@@ -145,9 +140,10 @@
           {
             session: copied.session,
             artifactHTML: copied.artifactHTML,
-            artifactDigest,
+            binding: copied.binding,
             materializedHTML: materialized,
             materializedDigest,
+            verificationReceipt: verified.verificationReceipt,
             artifactBaseURL: copied.artifactBaseURL,
             domains: copied.domains,
             title: copied.title,

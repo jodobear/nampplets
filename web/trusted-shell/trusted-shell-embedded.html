@@ -2397,10 +2397,101 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
 })(typeof window === "undefined" ? globalThis : window);
 
   </script>
+  <script data-source="trusted-shell-artifact-verifier.js">
+(function trustedShellArtifactVerifierModule(global) {
+  "use strict";
+
+  const policySource = global.NMPTrustedShellArtifactPolicy ||
+    (typeof require === "function"
+      ? require("./trusted-shell-artifact-policy.js")
+      : null);
+  const NO_RECEIPT = null;
+  const verifiedReceipts = new WeakMap();
+  const consumedReceipts = new WeakSet();
+
+  function result(status, values = {}) {
+    return Object.freeze({ status, ...values });
+  }
+
+  async function verifyAndMaterialize(
+    environment, policy, binding, artifactHTML, materialize,
+    defaultDigestText, isCurrent
+  ) {
+    if (!policySource.isNormalizedPolicy(policy) ||
+        !policySource.matchesBinding(policy, binding) ||
+        !policySource.acceptsArtifactHTML(policy, artifactHTML) ||
+        typeof materialize !== "function" || typeof isCurrent !== "function") {
+      return result("digest-mismatch");
+    }
+    const digestText = policy.elevated
+      ? (value) => policySource.digestText(environment, value)
+      : defaultDigestText;
+    if (typeof digestText !== "function") return result("digest-mismatch");
+    const artifactDigest = await digestText(artifactHTML);
+    if (artifactDigest !== binding.artifactDigest) {
+      return result("digest-mismatch");
+    }
+    if (!isCurrent()) return result("stale");
+    const materializedHTML = materialize();
+    if (!policySource.acceptsMaterializedHTMLBytes(
+      policy, materializedHTML
+    )) return result("materialization-refused");
+    const materializedDigest = await digestText(materializedHTML);
+    if (!isCurrent()) return result("stale");
+    if (!policySource.acceptsMaterializedHTML(
+      policy, materializedHTML, materializedDigest
+    )) return result("materialization-refused");
+    let verificationReceipt = NO_RECEIPT;
+    if (policy.elevated) {
+      verificationReceipt = Object.freeze({});
+      verifiedReceipts.set(verificationReceipt, Object.freeze({
+        artifactHTML, binding, materializedHTML, policy
+      }));
+    }
+    return result("verified", {
+      artifactDigest, materializedDigest, materializedHTML,
+      verificationReceipt
+    });
+  }
+
+  function consumeArtifactReceipt(
+    policy, receipt, binding, artifactHTML, materializedHTML
+  ) {
+    const verified = verifiedReceipts.get(receipt);
+    if (!verified || consumedReceipts.has(receipt) ||
+        verified.policy !== policy || verified.binding !== binding ||
+        verified.artifactHTML !== artifactHTML ||
+        verified.materializedHTML !== materializedHTML) return false;
+    consumedReceipts.add(receipt);
+    return true;
+  }
+
+  function beginVerifiedMount(admission, policy, configuration) {
+    const token = admission.begin();
+    if (!policy.elevated) return token;
+    if (!token || !consumeArtifactReceipt(
+      policy, configuration.verificationReceipt, configuration.binding,
+      configuration.artifactHTML, configuration.materializedHTML
+    )) {
+      admission.settle(token);
+      return false;
+    }
+    return token;
+  }
+
+  const exported = Object.freeze({
+    beginVerifiedMount,
+    consumeArtifactReceipt,
+    verifyAndMaterialize
+  });
+  global.NMPTrustedShellArtifactVerifier = exported;
+  if (typeof module !== "undefined" && module.exports) module.exports = exported;
+})(typeof window === "undefined" ? globalThis : window);
+
+  </script>
   <script data-source="trusted-shell-surface-host.js">
 (function trustedShellSurfaceHost(global) {
   "use strict";
-
   const MAX_SURFACES = 16;
   const MAX_SURFACE_ID_BYTES = 128;
   const MAX_SESSION_ID_BYTES = 256;
@@ -2414,6 +2505,7 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
     (typeof require === "function"
       ? require("./trusted-shell-artifact-policy.js")
       : null);
+  const artifactVerifierSource = global.NMPTrustedShellArtifactVerifier || (typeof require === "function" ? require("./trusted-shell-artifact-verifier.js") : null);
   const MAX_ARTIFACT_HTML_BYTES =
     artifactPolicySource.DEFAULT_MAX_ARTIFACT_HTML_BYTES;
   const MAX_MATERIALIZED_HTML_BYTES =
@@ -2435,7 +2527,8 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
   }
   function createSurfaceHost(environment, suppliedPrimitives, options = {}) {
     const primitives = suppliedPrimitives || primitiveSource;
-    if (!primitives || !environment || !environment.document) {
+    if (!primitives || !artifactVerifierSource ||
+        !environment || !environment.document) {
       throw new Error("The trusted shell surface host is unavailable");
     }
     const artifactPolicy = typeof options.artifactPolicy === "undefined"
@@ -2512,8 +2605,7 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
             configuration.artifactHTML
           ) ||
           (artifactPolicy.elevated &&
-            (configuration.artifactDigest !== artifactPolicy.artifactDigest ||
-              typeof configuration.materializedHTML !== "string")) ||
+            typeof configuration.materializedHTML !== "string") ||
           (typeof configuration.materializedHTML !== "undefined" &&
             (!acceptMaterializedHTML ||
               !artifactPolicySource.acceptsMaterializedHTML(
@@ -2537,7 +2629,8 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
           (!surfaces.has(surfaceId) && surfaces.size >= MAX_SURFACES)) {
         return false;
       }
-      const admissionToken = admission.begin();
+      const admissionToken = artifactVerifierSource.beginVerifiedMount(
+        admission, artifactPolicy, configuration);
       if (artifactPolicy.elevated && !admissionToken) return false;
       const frame = environment.document.createElement("iframe");
       if (surfaceId === "default") {
@@ -2825,12 +2918,17 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
   const artifactPolicySource = moduleSource(
     global.NMPTrustedShellArtifactPolicy, "./trusted-shell-artifact-policy.js"
   );
+  const artifactVerifierSource = moduleSource(
+    global.NMPTrustedShellArtifactVerifier, "./trusted-shell-artifact-verifier.js"
+  );
   function createEmbeddingBridge(environment, dependencies = {}) {
     const primitives = dependencies.primitives || primitiveSource;
     const hostModule = dependencies.hostModule || hostSource;
     const digestText = dependencies.digestText || ((value) => artifactPolicySource.digestText(global, value));
     const now = dependencies.now || Date.now;
+    const artifactVerifier = dependencies.artifactVerifier || artifactVerifierSource;
     if (!primitives || !hostModule || !contractSource || !artifactPolicySource ||
+        !artifactVerifier ||
         !environment || !environment.document ||
         !environment.parent || environment.parent === environment) {
       throw new Error("The trusted shell embedding bridge is unavailable");
@@ -2915,32 +3013,22 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       });
       const mountToken = Object.freeze({ session: copied.session });
       pendingSurfaces.set(request.surfaceId, mountToken);
-      let materialized;
       pendingMounts += 1;
       try {
-        const artifactDigest = await digestText(copied.artifactHTML);
-        if (pendingSurfaces.get(request.surfaceId) !== mountToken || disposed) return;
-        if (artifactDigest !== copied.binding.artifactDigest) {
-          result(request.type, request, false, "digest-mismatch");
-          return;
-        }
-        materialized = primitives.materialize(
-          copied.artifactHTML,
-          copied.artifactBaseURL,
-          copied.domains
+        const verified = await artifactVerifier.verifyAndMaterialize(
+          global, artifactPolicy, copied.binding, copied.artifactHTML,
+          () => primitives.materialize(
+            copied.artifactHTML, copied.artifactBaseURL, copied.domains
+          ), digestText,
+          () => pendingSurfaces.get(request.surfaceId) === mountToken && !disposed
         );
-        if (!artifactPolicySource.acceptsMaterializedHTMLBytes(
-          artifactPolicy, materialized)) {
-          result(request.type, request, false, "materialization-refused");
+        if (verified.status === "stale") return;
+        if (verified.status !== "verified") {
+          result(request.type, request, false, verified.status);
           return;
         }
-        const materializedDigest = await digestText(materialized);
-        if (pendingSurfaces.get(request.surfaceId) !== mountToken || disposed) return;
-        if (!artifactPolicySource.acceptsMaterializedHTML(
-          artifactPolicy, materialized, materializedDigest)) {
-          result(request.type, request, false, "materialization-refused");
-          return;
-        }
+        const materialized = verified.materializedHTML;
+        const materializedDigest = verified.materializedDigest;
         const sealedBinding = Object.freeze({
           ...copied.binding,
           materializedDigest
@@ -2952,9 +3040,10 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
           {
             session: copied.session,
             artifactHTML: copied.artifactHTML,
-            artifactDigest,
+            binding: copied.binding,
             materializedHTML: materialized,
             materializedDigest,
+            verificationReceipt: verified.verificationReceipt,
             artifactBaseURL: copied.artifactBaseURL,
             domains: copied.domains,
             title: copied.title,

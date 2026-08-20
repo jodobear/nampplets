@@ -5,6 +5,7 @@ const crypto = require("node:crypto");
 const test = require("node:test");
 
 const policyModule = require("../trusted-shell-artifact-policy.js");
+const artifactVerifier = require("../trusted-shell-artifact-verifier.js");
 const { createSurfaceHost } = require("../trusted-shell-surface-host.js");
 const NO_ENVELOPE = null;
 
@@ -15,6 +16,8 @@ function digest(value) {
 function createEnvironment() {
   const listeners = new Map();
   return {
+    crypto: crypto.webcrypto,
+    TextEncoder,
     document: {
       createElement() {
         return {
@@ -29,6 +32,24 @@ function createEnvironment() {
     addEventListener(type, listener) { listeners.set(type, listener); },
     removeEventListener(type) { listeners.delete(type); }
   };
+}
+
+function binding(fixture) {
+  return Object.freeze({
+    artifactDigest: fixture.policy.artifactDigest,
+    manifestAuthor: fixture.policy.manifestAuthor,
+    dTag: fixture.policy.dTag,
+    aggregateHash: fixture.policy.aggregateHash
+  });
+}
+
+async function verifiedReceipt(environment, fixture, manifestBinding) {
+  const verified = await artifactVerifier.verifyAndMaterialize(
+    environment, fixture.policy, manifestBinding, fixture.artifactHTML,
+    () => fixture.materializedHTML, undefined, () => true
+  );
+  assert.equal(verified.status, "verified");
+  return verified.verificationReceipt;
 }
 
 function createFixture() {
@@ -71,10 +92,13 @@ function surface() {
   return { replaceChildren(frame) { this.frame = frame; } };
 }
 
-test("surface host enforces the same normalized elevated policy at srcdoc", () => {
+test("surface host enforces the same normalized elevated policy at srcdoc", async () => {
   const fixture = createFixture();
+  const environment = createEnvironment();
+  const manifestBinding = binding(fixture);
+  const receipt = await verifiedReceipt(environment, fixture, manifestBinding);
   const target = surface();
-  const host = createSurfaceHost(createEnvironment(), primitives(), {
+  const host = createSurfaceHost(environment, primitives(), {
     acceptMaterializedHTML: true,
     artifactPolicy: fixture.policy
   });
@@ -82,8 +106,10 @@ test("surface host enforces the same normalized elevated policy at srcdoc", () =
     session: "rage-session",
     artifactHTML: fixture.artifactHTML,
     artifactDigest: fixture.policy.artifactDigest,
+    binding: manifestBinding,
     materializedHTML: fixture.materializedHTML,
     materializedDigest: fixture.policy.materializedDigest,
+    verificationReceipt: receipt,
     artifactBaseURL: "nmp-artifact://verified/",
     domains: ["shell"],
     title: "Rage"
@@ -96,41 +122,50 @@ test("surface host enforces the same normalized elevated policy at srcdoc", () =
   });
 });
 
-test("surface host refuses elevated byte or digest drift before srcdoc", () => {
+test("surface host refuses elevated byte or digest drift before srcdoc", async () => {
   const fixture = createFixture();
-  const host = createSurfaceHost(createEnvironment(), primitives(), {
-    acceptMaterializedHTML: true,
-    artifactPolicy: fixture.policy
-  });
   const sameLengthMutation = `y${fixture.artifactHTML.slice(1)}`;
+  const materializedMutation = `y${fixture.materializedHTML.slice(1)}`;
   for (const configuration of [{
     artifactHTML: `${fixture.artifactHTML}x`,
     materializedHTML: fixture.materializedHTML,
     materializedDigest: fixture.policy.materializedDigest
   }, {
     artifactHTML: sameLengthMutation,
-    artifactDigest: digest(sameLengthMutation),
     materializedHTML: fixture.materializedHTML,
+    materializedDigest: fixture.policy.materializedDigest
+  }, {
+    artifactHTML: fixture.artifactHTML,
+    materializedHTML: materializedMutation,
     materializedDigest: fixture.policy.materializedDigest
   }, {
     artifactHTML: fixture.artifactHTML,
     materializedHTML: fixture.materializedHTML,
     materializedDigest: "0".repeat(64)
   }]) {
+    const environment = createEnvironment();
+    const manifestBinding = binding(fixture);
+    const receipt = await verifiedReceipt(environment, fixture, manifestBinding);
+    const host = createSurfaceHost(environment, primitives(), {
+      acceptMaterializedHTML: true,
+      artifactPolicy: fixture.policy
+    });
     const target = surface();
     assert.equal(host.mount("rage", target, {
       session: "rage-session",
       artifactDigest: fixture.policy.artifactDigest,
+      binding: manifestBinding,
       artifactBaseURL: "nmp-artifact://verified/",
       domains: ["shell"],
       title: "Rage",
+      verificationReceipt: receipt,
       ...configuration
     }), false);
     assert.equal(target.frame, undefined);
   }
 });
 
-test("surface host requires preverified elevated materialization", () => {
+test("surface host requires cryptographically verified materialization", () => {
   const fixture = createFixture();
   let materializations = 0;
   const suppliedPrimitives = primitives();
@@ -147,6 +182,7 @@ test("surface host requires preverified elevated materialization", () => {
     session: "rage-session",
     artifactHTML: fixture.artifactHTML,
     artifactDigest: fixture.policy.artifactDigest,
+    binding: binding(fixture),
     artifactBaseURL: "nmp-artifact://verified/",
     domains: ["shell"]
   }), false);
@@ -154,9 +190,12 @@ test("surface host requires preverified elevated materialization", () => {
   assert.equal(target.frame, undefined);
 });
 
-test("surface host elevated admission cannot remount after teardown", () => {
+test("surface host receipt and admission cannot replay after teardown", async () => {
   const fixture = createFixture();
-  const host = createSurfaceHost(createEnvironment(), primitives(), {
+  const environment = createEnvironment();
+  const manifestBinding = binding(fixture);
+  const receipt = await verifiedReceipt(environment, fixture, manifestBinding);
+  const host = createSurfaceHost(environment, primitives(), {
     acceptMaterializedHTML: true,
     artifactPolicy: fixture.policy
   });
@@ -164,14 +203,62 @@ test("surface host elevated admission cannot remount after teardown", () => {
     session: "rage-session",
     artifactHTML: fixture.artifactHTML,
     artifactDigest: fixture.policy.artifactDigest,
+    binding: manifestBinding,
     materializedHTML: fixture.materializedHTML,
     materializedDigest: fixture.policy.materializedDigest,
+    verificationReceipt: receipt,
     artifactBaseURL: "nmp-artifact://verified/",
     domains: ["shell"]
   };
   assert.equal(host.mount("rage", surface(), configuration), true);
   assert.equal(host.unmount("rage"), true);
   assert.equal(host.mount("rage", surface(), configuration), false);
+  const secondHost = createSurfaceHost(createEnvironment(), primitives(), {
+    acceptMaterializedHTML: true,
+    artifactPolicy: fixture.policy
+  });
+  assert.equal(secondHost.mount("rage", surface(), configuration), false);
+
+  const disposeEnvironment = createEnvironment();
+  const disposeBinding = binding(fixture);
+  const disposeReceipt = await verifiedReceipt(
+    disposeEnvironment, fixture, disposeBinding
+  );
+  const disposeConfiguration = {
+    ...configuration,
+    binding: disposeBinding,
+    verificationReceipt: disposeReceipt
+  };
+  const disposeHost = createSurfaceHost(disposeEnvironment, primitives(), {
+    acceptMaterializedHTML: true,
+    artifactPolicy: fixture.policy
+  });
+  assert.equal(disposeHost.mount("rage", surface(), disposeConfiguration), true);
+  disposeHost.dispose();
+  const afterDispose = createSurfaceHost(createEnvironment(), primitives(), {
+    acceptMaterializedHTML: true,
+    artifactPolicy: fixture.policy
+  });
+  assert.equal(afterDispose.mount("rage", surface(), disposeConfiguration), false);
+
+  const changedPolicy = policyModule.normalizeArtifactPolicy({
+    ...policyModule.constructorInput(fixture.policy),
+    dTag: "different"
+  });
+  const policyEnvironment = createEnvironment();
+  const policyBinding = binding(fixture);
+  const policyReceipt = await verifiedReceipt(
+    policyEnvironment, fixture, policyBinding
+  );
+  const changedHost = createSurfaceHost(createEnvironment(), primitives(), {
+    acceptMaterializedHTML: true,
+    artifactPolicy: changedPolicy
+  });
+  assert.equal(changedHost.mount("rage", surface(), {
+    ...configuration,
+    binding: policyBinding,
+    verificationReceipt: policyReceipt
+  }), false);
 });
 
 test("surface host refuses unnormalized policy lookalikes", () => {

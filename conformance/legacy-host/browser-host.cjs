@@ -62,6 +62,10 @@ function createServer(shellRoot, fixtureRoot) {
       path.join(shellRoot, "trusted-shell-artifact-policy.js")
     ],
     [
+      "/trusted-shell-artifact-verifier.js",
+      path.join(shellRoot, "trusted-shell-artifact-verifier.js")
+    ],
+    [
       "/trusted-shell-embedding-contract.js",
       path.join(shellRoot, "trusted-shell-embedding-contract.js")
     ],
