@@ -8,6 +8,10 @@
   const MAX_TITLE_BYTES = 1024;
   const MAX_DOMAINS = 64;
   const HASH = /^[0-9a-f]{64}$/;
+  const artifactPolicySource = global.NMPTrustedShellArtifactPolicy ||
+    (typeof require === "function"
+      ? require("./trusted-shell-artifact-policy.js")
+      : null);
 
   function exactFields(value, fields, primitives) {
     if (!primitives.isPlainObject(value)) return false;
@@ -24,7 +28,10 @@
       !/[\u0000-\u001f\u007f]/.test(value);
   }
 
-  function createContract(primitives, hostModule) {
+  function createContract(primitives, hostModule, artifactPolicy) {
+    if (!artifactPolicySource.isNormalizedPolicy(artifactPolicy)) {
+      throw new TypeError("trusted artifact policy must be normalized");
+    }
     function validRequestId(value) {
       return validText(value, MAX_REQUEST_ID_BYTES);
     }
@@ -62,9 +69,10 @@
       ], primitives) &&
         validSurfaceId(request.surfaceId) &&
         validSession(configuration.session) &&
-        typeof configuration.artifactHTML === "string" &&
-        new TextEncoder().encode(configuration.artifactHTML).byteLength <=
-          hostModule.MAX_ARTIFACT_HTML_BYTES &&
+        artifactPolicySource.acceptsArtifactHTML(
+          artifactPolicy,
+          configuration.artifactHTML
+        ) &&
         primitives.isVerifiedArtifactBaseURL(configuration.artifactBaseURL) &&
         Array.isArray(configuration.domains) &&
         configuration.domains.length <= MAX_DOMAINS &&
@@ -72,7 +80,11 @@
           validText(domain, 64) && /^[a-z][a-z0-9-]*$/.test(domain)
         ) &&
         validText(configuration.title, MAX_TITLE_BYTES, true) &&
-        validBinding(configuration.binding, request.surfaceId, configuration.session);
+        validBinding(configuration.binding, request.surfaceId, configuration.session) &&
+        artifactPolicySource.matchesBinding(
+          artifactPolicy,
+          configuration.binding
+        );
     }
 
     return Object.freeze({

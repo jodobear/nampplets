@@ -4,26 +4,25 @@
   const MAX_SURFACES = 16;
   const MAX_SURFACE_ID_BYTES = 128;
   const MAX_SESSION_ID_BYTES = 256;
-  const MAX_ARTIFACT_HTML_BYTES = 8 * 1024 * 1024;
-  const MAX_MATERIALIZED_HTML_BYTES = 16 * 1024 * 1024;
   const MAX_TITLE_BYTES = 1024;
   const MAX_DOMAINS = 64;
   const MAX_DOMAIN_BYTES = 64;
   const MAX_NAPPLET_MESSAGES_PER_SECOND = 256;
   const primitiveSource = global.NMPTrustedShellPrimitives ||
     (typeof require === "function" ? require("./trusted-shell.js") : null);
-
-  function byteLength(environment, value) {
-    if (typeof environment.TextEncoder === "function") {
-      return new environment.TextEncoder().encode(value).byteLength;
-    }
-    return value.length * 3;
-  }
+  const artifactPolicySource = global.NMPTrustedShellArtifactPolicy ||
+    (typeof require === "function"
+      ? require("./trusted-shell-artifact-policy.js")
+      : null);
+  const MAX_ARTIFACT_HTML_BYTES =
+    artifactPolicySource.DEFAULT_MAX_ARTIFACT_HTML_BYTES;
+  const MAX_MATERIALIZED_HTML_BYTES =
+    artifactPolicySource.DEFAULT_MAX_MATERIALIZED_HTML_BYTES;
 
   function validText(environment, value, maximumBytes, allowEmpty = false) {
     return typeof value === "string" &&
       (allowEmpty || value.length > 0) &&
-      byteLength(environment, value) <= maximumBytes &&
+      artifactPolicySource.utf8ByteLength(value) <= maximumBytes &&
       !/[\u0000-\u001f\u007f]/.test(value);
   }
 
@@ -41,6 +40,12 @@
     const primitives = suppliedPrimitives || primitiveSource;
     if (!primitives || !environment || !environment.document) {
       throw new Error("The trusted shell surface host is unavailable");
+    }
+    const artifactPolicy = typeof options.artifactPolicy === "undefined"
+      ? artifactPolicySource.normalizeArtifactPolicy()
+      : options.artifactPolicy;
+    if (!artifactPolicySource.isNormalizedPolicy(artifactPolicy)) {
+      throw new TypeError("trusted artifact policy must be normalized");
     }
     const forwardEnvelope = typeof options.forwardEnvelope === "function"
       ? options.forwardEnvelope
@@ -108,14 +113,17 @@
           typeof surface.replaceChildren !== "function" ||
           !primitives.isPlainObject(configuration) ||
           !validText(environment, configuration.session, MAX_SESSION_ID_BYTES) ||
-          typeof configuration.artifactHTML !== "string" ||
-          byteLength(environment, configuration.artifactHTML) >
-            MAX_ARTIFACT_HTML_BYTES ||
+          !artifactPolicySource.acceptsArtifactHTML(
+            artifactPolicy,
+            configuration.artifactHTML
+          ) ||
           (typeof configuration.materializedHTML !== "undefined" &&
             (!acceptMaterializedHTML ||
-              typeof configuration.materializedHTML !== "string" ||
-              byteLength(environment, configuration.materializedHTML) >
-                MAX_MATERIALIZED_HTML_BYTES)) ||
+              !artifactPolicySource.acceptsMaterializedHTML(
+                artifactPolicy,
+                configuration.materializedHTML,
+                configuration.materializedDigest
+              ))) ||
           !primitives.isVerifiedArtifactBaseURL(configuration.artifactBaseURL) ||
           !validDomains(environment, configuration.domains) ||
           (typeof configuration.title !== "undefined" &&

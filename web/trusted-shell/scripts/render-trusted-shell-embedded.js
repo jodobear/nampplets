@@ -4,12 +4,14 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const policy = require("../trusted-shell-policy.js");
+const artifactPolicy = require("../trusted-shell-artifact-policy.js");
 
 const root = path.join(__dirname, "..");
 const scriptNames = Object.freeze([
   "trusted-shell-policy.js",
   "trusted-shell-prelude-domains.js",
   "trusted-shell.js",
+  "trusted-shell-artifact-policy.js",
   "trusted-shell-surface-host.js",
   "trusted-shell-embedding-contract.js",
   "trusted-shell-embedding.js"
@@ -20,12 +22,36 @@ function inlineScript(name) {
   return source.replace(/<\/script/gi, "<\\/script");
 }
 
-function renderEmbeddedShell() {
+function renderBootstrap(input) {
+  const normalized = artifactPolicy.normalizeArtifactPolicy(input);
+  const elevated = artifactPolicy.constructorInput(normalized);
+  const serialized = elevated === null ? null : JSON.stringify(elevated)
+    .replace(/&/g, "\\u0026")
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+  const options = elevated === null
+    ? ""
+    : `, { artifactPolicy: ${serialized} }`;
+  return "  <script data-source=\"trusted-shell-bootstrap\">\n" +
+    "if (window.parent !== window) {\n" +
+    `  NMPTrustedShellEmbedding.createEmbeddingBridge(window${options});\n` +
+    "}\n" +
+    "  </script>";
+}
+
+function renderEmbeddedShell(options = {}) {
+  const fields = Object.keys(options);
+  if (fields.some((field) => field !== "artifactPolicy")) {
+    throw new TypeError("unsupported embedded trusted-shell option");
+  }
   const scripts = scriptNames
     .map((name) =>
       `  <script data-source="${name}">\n${inlineScript(name)}\n  </script>`
     )
     .join("\n");
+  const bootstrap = renderBootstrap(options.artifactPolicy);
   const style = fs.readFileSync(path.join(root, "trusted-shell.css"), "utf8");
   if (/<\/style/i.test(style)) {
     throw new Error("trusted-shell.css cannot be safely inlined");
@@ -48,6 +74,7 @@ function renderEmbeddedShell() {
     <div id="loading" role="status">Preparing verified napplet…</div>
   </main>
 ${scripts}
+${bootstrap}
 </body>
 </html>
 `;
@@ -94,6 +121,7 @@ if (require.main === module) {
 
 module.exports = Object.freeze({
   checkEmbeddedShell,
+  renderBootstrap,
   renderEmbeddedShell,
   scriptNames
 });

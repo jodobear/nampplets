@@ -274,7 +274,11 @@ test("stale asynchronous mounts retire without replacing the current surface", a
   assert.deepEqual(harness.bridge.stateCounts(), {
     bindings: 1,
     pendingMounts: 0,
-    pendingSurfaces: 0
+    pendingSurfaces: 0,
+    elevatedPending: 0,
+    elevatedActive: 0,
+    reservedArtifactHTMLBytes: 0,
+    reservedMaterializedHTMLBytes: 0
   });
 });
 
@@ -309,7 +313,11 @@ test("unique refused and unmounted surfaces return state to baseline", async () 
   assert.deepEqual(harness.bridge.stateCounts(), {
     bindings: 0,
     pendingMounts: 0,
-    pendingSurfaces: 0
+    pendingSurfaces: 0,
+    elevatedPending: 0,
+    elevatedActive: 0,
+    reservedArtifactHTMLBytes: 0,
+    reservedMaterializedHTMLBytes: 0
   });
 });
 
@@ -379,6 +387,7 @@ test("generated outer shell has one sealed HTML sink and pinned immutable bytes"
     "trusted-shell-policy.js",
     "trusted-shell-prelude-domains.js",
     "trusted-shell.js",
+    "trusted-shell-artifact-policy.js",
     "trusted-shell-surface-host.js",
     "trusted-shell-embedding-contract.js",
     "trusted-shell-embedding.js"
@@ -389,6 +398,11 @@ test("generated outer shell has one sealed HTML sink and pinned immutable bytes"
     /(?:innerHTML|outerHTML)\s*=|insertAdjacentHTML\s*\(|document\.write\s*\(|\beval\s*\(|new Function\s*\(|set(?:Timeout|Interval)\s*\(\s*["']/
   );
   assert.doesNotMatch(embedding, /__TAURI|window\.nostr|fetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon|Worker\s*\(/);
+  assert.doesNotMatch(embedding, /createEmbeddingBridge\(global/);
+  assert.equal(
+    (embedded.toString("utf8").match(/createEmbeddingBridge\(window/g) || []).length,
+    1
+  );
   assert.equal(crypto.createHash("sha256").update(embedded).digest("hex"), recorded);
   assert.equal(embedded.toString("utf8"), renderEmbeddedShell());
   assert.doesNotThrow(() => checkEmbeddedShell());
