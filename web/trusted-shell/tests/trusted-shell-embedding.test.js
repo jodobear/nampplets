@@ -31,6 +31,8 @@ function createHarness(options = {}) {
     materializations: 0, srcdocAssignments: 0
   };
   let currentTime = 1000;
+  let generation = 0;
+  let disposed = false;
   const active = new Set();
   let forwardEnvelope;
   const primitives = {
@@ -50,6 +52,25 @@ function createHarness(options = {}) {
     createSurfaceHost(_environment, _primitives, options) {
       forwardEnvelope = options.forwardEnvelope;
       return {
+        async verifyAndMaterialize(
+          binding, artifactHTML, materialize, digestText, isCurrent
+        ) {
+          const currentGeneration = generation;
+          const current = () => !disposed && generation === currentGeneration &&
+            isCurrent();
+          const artifactDigest = await digestText(artifactHTML);
+          if (artifactDigest !== binding.artifactDigest) {
+            return Object.freeze({ status: "digest-mismatch" });
+          }
+          if (!current()) return Object.freeze({ status: "stale" });
+          const materializedHTML = materialize();
+          const materializedDigest = await digestText(materializedHTML);
+          if (!current()) return Object.freeze({ status: "stale" });
+          return Object.freeze({
+            status: "verified", materializedHTML, materializedDigest
+          });
+        },
+        invalidateArtifactVerification() { generation += 1; },
         mount(surfaceId, surface, configuration) {
           calls.srcdocAssignments += 1;
           calls.mounts.push({ surfaceId, surface, configuration });
@@ -64,7 +85,12 @@ function createHarness(options = {}) {
           calls.unmounts.push(surfaceId);
           return active.delete(surfaceId);
         },
-        dispose() { calls.disposed += 1; active.clear(); }
+        dispose() {
+          calls.disposed += 1;
+          disposed = true;
+          generation += 1;
+          active.clear();
+        }
       };
     }
   };
@@ -274,7 +300,11 @@ test("stale asynchronous mounts retire without replacing the current surface", a
   assert.deepEqual(harness.bridge.stateCounts(), {
     bindings: 1,
     pendingMounts: 0,
-    pendingSurfaces: 0
+    pendingSurfaces: 0,
+    elevatedPending: 0,
+    elevatedActive: 0,
+    reservedArtifactHTMLBytes: 0,
+    reservedMaterializedHTMLBytes: 0
   });
 });
 
@@ -309,7 +339,11 @@ test("unique refused and unmounted surfaces return state to baseline", async () 
   assert.deepEqual(harness.bridge.stateCounts(), {
     bindings: 0,
     pendingMounts: 0,
-    pendingSurfaces: 0
+    pendingSurfaces: 0,
+    elevatedPending: 0,
+    elevatedActive: 0,
+    reservedArtifactHTMLBytes: 0,
+    reservedMaterializedHTMLBytes: 0
   });
 });
 
@@ -379,6 +413,8 @@ test("generated outer shell has one sealed HTML sink and pinned immutable bytes"
     "trusted-shell-policy.js",
     "trusted-shell-prelude-domains.js",
     "trusted-shell.js",
+    "trusted-shell-artifact-policy.js",
+    "trusted-shell-artifact-verifier.js",
     "trusted-shell-surface-host.js",
     "trusted-shell-embedding-contract.js",
     "trusted-shell-embedding.js"
@@ -389,6 +425,11 @@ test("generated outer shell has one sealed HTML sink and pinned immutable bytes"
     /(?:innerHTML|outerHTML)\s*=|insertAdjacentHTML\s*\(|document\.write\s*\(|\beval\s*\(|new Function\s*\(|set(?:Timeout|Interval)\s*\(\s*["']/
   );
   assert.doesNotMatch(embedding, /__TAURI|window\.nostr|fetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon|Worker\s*\(/);
+  assert.doesNotMatch(embedding, /createEmbeddingBridge\(global/);
+  assert.equal(
+    (embedded.toString("utf8").match(/createEmbeddingBridge\(window/g) || []).length,
+    1
+  );
   assert.equal(crypto.createHash("sha256").update(embedded).digest("hex"), recorded);
   assert.equal(embedded.toString("utf8"), renderEmbeddedShell());
   assert.doesNotThrow(() => checkEmbeddedShell());

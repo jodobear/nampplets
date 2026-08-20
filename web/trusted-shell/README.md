@@ -29,6 +29,25 @@ host. Correlation fields do not grant authority. Remount, unexpected iframe
 navigation, page teardown, and explicit disposal invalidate the old window and
 session mapping deterministically.
 
+Artifact HTML retains an 8 MiB default and a 16 MiB materialized default.
+The optional elevated constructor path is a private bounded-execution
+mechanism, not a supported product facility. Canonical and Apple bootstraps do
+not enable it. Production activation requires a Rust-owned exact-build grant
+and native lifecycle, and remains prohibited until legacy compatibility is
+green. When an authorized host supplies the fixed policy,
+`trusted-shell-artifact-policy.js` enforces immutable 120 MiB artifact and
+120 MiB materialized hard ceilings for one exact outer document. Elevated
+admission binds the exact source and materialized lengths and digests plus
+manifest author, d-tag, and aggregate hash.
+`trusted-shell-artifact-verifier.js` issues a module-private, one-use
+receipt only after hashing both exact strings; the surface host consumes that
+receipt before its sole `srcdoc` assignment. It is exclusive to one attempt and
+one surface for that outer-document lifecycle. Limits are never read from a
+mount message, URL, storage, publisher, or napplet, and arbitrary signed
+artifacts do not inherit the allowance.
+In-flight reservations survive cancellation until digest/materialization work
+settles; any later mount requires a fresh outer document and native lifecycle.
+
 Parent rate overflow emits one fixed `nmp.outer.rate-limited` diagnostic per
 rate window. Napplet rate overflow invalidates that surface once and reports a
 fixed surface error. Neither path reflects input fields. A new window or a
@@ -70,7 +89,7 @@ and font loading while retaining `connect-src 'none'`.
 Regenerate the embedded outer bytes with
 `node scripts/render-trusted-shell-embedded.js`. Verify them without writing
 with `node scripts/render-trusted-shell-embedded.js --check`; the comparison
-renders the current six scripts, policy, and CSS and checks both HTML and the
+renders the current seven scripts, policy, and CSS and checks both HTML and the
 recorded SHA-256.
 
 `shell.ping` is an internal M1 isolation canary used to prove the mapped-frame

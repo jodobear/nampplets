@@ -2139,36 +2139,492 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
 })(typeof window === "undefined" ? globalThis : window);
 
   </script>
+  <script data-source="trusted-shell-artifact-policy.js">
+(function trustedShellArtifactPolicyModule(global) {
+  "use strict";
+
+  const MEBIBYTE = 1024 * 1024;
+  const DEFAULT_MAX_ARTIFACT_HTML_BYTES = 8 * MEBIBYTE;
+  const DEFAULT_MAX_MATERIALIZED_HTML_BYTES = 16 * MEBIBYTE;
+  const HARD_MAX_ARTIFACT_HTML_BYTES = 120 * MEBIBYTE;
+  const HARD_MAX_MATERIALIZED_HTML_BYTES = 120 * MEBIBYTE;
+  const HASH = /^[0-9a-f]{64}$/;
+  const NO_VALUE = null;
+  const normalizedPolicies = new WeakSet();
+
+  function utf8ByteLength(value) {
+    if (typeof value !== "string") return NO_VALUE;
+    let length = 0;
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      if (code <= 0x7f) length += 1;
+      else if (code <= 0x7ff) length += 2;
+      else if (code >= 0xd800 && code <= 0xdbff &&
+          index + 1 < value.length) {
+        const next = value.charCodeAt(index + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          length += 4;
+          index += 1;
+        } else {
+          length += 3;
+        }
+      } else {
+        length += 3;
+      }
+    }
+    return length;
+  }
+
+  async function digestText(environment, value) {
+    if (!environment.crypto || !environment.crypto.subtle ||
+        typeof environment.TextEncoder !== "function") {
+      throw new Error("SHA-256 is unavailable");
+    }
+    const bytes = new environment.TextEncoder().encode(value);
+    const digest = await environment.crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  function snapshotDataFields(value, requiredFields, optionalFields = []) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return NO_VALUE;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return NO_VALUE;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(descriptors);
+    if (keys.some((field) => typeof field !== "string")) return NO_VALUE;
+    const actual = keys.sort();
+    const required = requiredFields.slice().sort();
+    const allowed = new Set(required.concat(optionalFields));
+    if (!required.every((field) => actual.includes(field)) ||
+        !actual.every((field) => allowed.has(field))) {
+      return NO_VALUE;
+    }
+    const snapshot = {};
+    for (const field of actual) {
+      const descriptor = descriptors[field];
+      if (!("value" in descriptor) || !descriptor.enumerable) return NO_VALUE;
+      snapshot[field] = descriptor.value;
+    }
+    return Object.freeze(snapshot);
+  }
+
+  function snapshotArrayData(value, maximumLength) {
+    if (!Array.isArray(value) || !Number.isSafeInteger(maximumLength) ||
+        maximumLength < 0) return NO_VALUE;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(descriptors);
+    const length = descriptors.length;
+    if (keys.some((field) => typeof field !== "string") ||
+        !length || !("value" in length) || !Number.isSafeInteger(length.value) ||
+        length.value < 0 || length.value > maximumLength) {
+      return NO_VALUE;
+    }
+    const expected = Array.from({ length: length.value }, (_, index) =>
+      String(index));
+    if (keys.length !== expected.length + 1 ||
+        !keys.includes("length") || !expected.every((field) => {
+          const descriptor = descriptors[field];
+          return descriptor && "value" in descriptor && descriptor.enumerable;
+        })) return NO_VALUE;
+    return Object.freeze(expected.map((field) => descriptors[field].value));
+  }
+
+  function validPositiveInteger(value, maximum) {
+    return Number.isSafeInteger(value) && value > 0 && value <= maximum;
+  }
+
+  function validDTag(value) {
+    return typeof value === "string" && value.length > 0 &&
+      utf8ByteLength(value) <= 256 && !/[\u0000-\u001f\u007f]/.test(value);
+  }
+
+  function validHash(value) {
+    return typeof value === "string" && HASH.test(value);
+  }
+
+  function freezePolicy(value) {
+    const frozen = Object.freeze(value);
+    normalizedPolicies.add(frozen);
+    return frozen;
+  }
+
+  const DEFAULT_POLICY = freezePolicy({
+    elevated: false,
+    maximumArtifactHTMLBytes: DEFAULT_MAX_ARTIFACT_HTML_BYTES,
+    maximumMaterializedHTMLBytes: DEFAULT_MAX_MATERIALIZED_HTML_BYTES,
+    exactArtifactHTMLBytes: null,
+    exactMaterializedHTMLBytes: null,
+    artifactDigest: null,
+    materializedDigest: null,
+    manifestAuthor: null,
+    dTag: null,
+    aggregateHash: null,
+    exclusive: false
+  });
+
+  const ELEVATED_FIELDS = Object.freeze([
+    "aggregateHash", "artifactDigest", "dTag", "exactArtifactHTMLBytes",
+    "exactMaterializedHTMLBytes", "exclusive", "manifestAuthor",
+    "materializedDigest", "maximumArtifactHTMLBytes",
+    "maximumMaterializedHTMLBytes"
+  ]);
+
+  function normalizeArtifactPolicy(input) {
+    if (typeof input === "undefined") return DEFAULT_POLICY;
+    const snapshot = snapshotDataFields(input, ELEVATED_FIELDS);
+    if (!snapshot || snapshot.exclusive !== true ||
+        !validPositiveInteger(
+          snapshot.maximumArtifactHTMLBytes,
+          HARD_MAX_ARTIFACT_HTML_BYTES
+        ) || snapshot.maximumArtifactHTMLBytes <= DEFAULT_MAX_ARTIFACT_HTML_BYTES ||
+        !validPositiveInteger(
+          snapshot.maximumMaterializedHTMLBytes,
+          HARD_MAX_MATERIALIZED_HTML_BYTES
+        ) || !validPositiveInteger(
+          snapshot.exactArtifactHTMLBytes,
+          snapshot.maximumArtifactHTMLBytes
+        ) || snapshot.exactArtifactHTMLBytes <= DEFAULT_MAX_ARTIFACT_HTML_BYTES ||
+        !validPositiveInteger(
+          snapshot.exactMaterializedHTMLBytes,
+          snapshot.maximumMaterializedHTMLBytes
+        ) || !validHash(snapshot.artifactDigest) ||
+        !validHash(snapshot.materializedDigest) ||
+        !validHash(snapshot.manifestAuthor) ||
+        !validHash(snapshot.aggregateHash) || !validDTag(snapshot.dTag)) {
+      throw new TypeError("invalid trusted artifact policy");
+    }
+    return freezePolicy({ elevated: true, ...snapshot });
+  }
+
+  function isNormalizedPolicy(value) {
+    return normalizedPolicies.has(value);
+  }
+
+  function constructorInput(policy) {
+    if (!isNormalizedPolicy(policy)) {
+      throw new TypeError("trusted artifact policy must be normalized");
+    }
+    if (!policy.elevated) return NO_VALUE;
+    const input = {};
+    for (const field of ELEVATED_FIELDS) input[field] = policy[field];
+    return Object.freeze(input);
+  }
+
+  function matchesBinding(policy, binding) {
+    if (!isNormalizedPolicy(policy)) return false;
+    return !policy.elevated || Boolean(binding &&
+      binding.artifactDigest === policy.artifactDigest &&
+      binding.manifestAuthor === policy.manifestAuthor &&
+      binding.dTag === policy.dTag &&
+      binding.aggregateHash === policy.aggregateHash);
+  }
+
+  function acceptsArtifactHTML(policy, value) {
+    if (!isNormalizedPolicy(policy)) return false;
+    const length = utf8ByteLength(value);
+    return length !== null && (policy.elevated
+      ? length === policy.exactArtifactHTMLBytes
+      : length <= policy.maximumArtifactHTMLBytes);
+  }
+
+  function acceptsMaterializedHTMLBytes(policy, value) {
+    if (!isNormalizedPolicy(policy)) return false;
+    const length = utf8ByteLength(value);
+    if (length === null) return false;
+    return policy.elevated
+      ? length === policy.exactMaterializedHTMLBytes
+      : length <= policy.maximumMaterializedHTMLBytes;
+  }
+
+  function acceptsMaterializedHTML(policy, value, digest) {
+    return acceptsMaterializedHTMLBytes(policy, value) &&
+      (!policy.elevated || digest === policy.materializedDigest);
+  }
+
+  function createAdmission(policy) {
+    if (!isNormalizedPolicy(policy)) {
+      throw new TypeError("trusted artifact policy must be normalized");
+    }
+    let consumed = false;
+    let pending = null;
+    let active = null;
+    let disposed = false;
+
+    function begin() {
+      if (!policy.elevated) return NO_VALUE;
+      if (disposed || consumed || pending || active) return false;
+      consumed = true;
+      pending = Object.freeze({});
+      return pending;
+    }
+
+    function activate(token) {
+      if (!policy.elevated) return true;
+      if (disposed || pending !== token || active) return false;
+      active = token;
+      return true;
+    }
+
+    function settle(token) {
+      if (pending === token) pending = null;
+    }
+
+    function release(token) {
+      if (active === token) active = null;
+    }
+
+    function dispose() {
+      disposed = true;
+      active = null;
+    }
+
+    function counts() {
+      const reserved = Boolean(pending || active);
+      return Object.freeze({
+        elevatedPending: pending ? 1 : 0,
+        elevatedActive: active ? 1 : 0,
+        reservedArtifactHTMLBytes: reserved
+          ? policy.exactArtifactHTMLBytes
+          : 0,
+        reservedMaterializedHTMLBytes: reserved
+          ? policy.exactMaterializedHTMLBytes
+          : 0
+      });
+    }
+
+    return Object.freeze({ activate, begin, counts, dispose, release, settle });
+  }
+
+  const exported = Object.freeze({
+    DEFAULT_MAX_ARTIFACT_HTML_BYTES,
+    DEFAULT_MAX_MATERIALIZED_HTML_BYTES,
+    HARD_MAX_ARTIFACT_HTML_BYTES,
+    HARD_MAX_MATERIALIZED_HTML_BYTES,
+    acceptsArtifactHTML,
+    acceptsMaterializedHTML,
+    acceptsMaterializedHTMLBytes,
+    constructorInput,
+    createAdmission,
+    digestText,
+    isNormalizedPolicy,
+    matchesBinding,
+    normalizeArtifactPolicy,
+    snapshotArrayData,
+    snapshotDataFields,
+    utf8ByteLength
+  });
+  global.NMPTrustedShellArtifactPolicy = exported;
+  if (typeof module !== "undefined" && module.exports) module.exports = exported;
+})(typeof window === "undefined" ? globalThis : window);
+
+  </script>
+  <script data-source="trusted-shell-artifact-verifier.js">
+(function trustedShellArtifactVerifierModule(global) {
+  "use strict";
+
+  const policySource = global.NMPTrustedShellArtifactPolicy ||
+    (typeof require === "function"
+      ? require("./trusted-shell-artifact-policy.js")
+      : null);
+  const NO_RECEIPT = null;
+  const NO_TOKEN = null;
+  const BINDING_REQUIRED_FIELDS = Object.freeze([
+    "aggregateHash", "artifactDigest", "dTag", "manifestAuthor"
+  ]);
+  const BINDING_OPTIONAL_FIELDS = Object.freeze(["session", "surface"]);
+  const lifecycles = new WeakMap();
+  const verifiedReceipts = new WeakMap();
+  const consumedReceipts = new WeakSet();
+
+  function result(status, values = {}) {
+    return Object.freeze({ status, ...values });
+  }
+
+  function snapshotBinding(binding) {
+    return policySource.snapshotDataFields(
+      binding, BINDING_REQUIRED_FIELDS, BINDING_OPTIONAL_FIELDS);
+  }
+
+  function bindingsMatch(left, right) {
+    if (!left || !right) return false;
+    const leftFields = Object.keys(left);
+    const rightFields = Object.keys(right);
+    return leftFields.length === rightFields.length && leftFields.every((field) =>
+      Object.prototype.hasOwnProperty.call(right, field) &&
+      left[field] === right[field]);
+  }
+
+  function createArtifactLifecycle() {
+    const lifecycle = Object.freeze({});
+    lifecycles.set(lifecycle, { disposed: false, generation: 0 });
+    return lifecycle;
+  }
+
+  function invalidateArtifactLifecycle(lifecycle, terminal = false) {
+    const state = lifecycles.get(lifecycle);
+    if (!state || state.disposed) return false;
+    state.generation += 1;
+    if (terminal) state.disposed = true;
+    return true;
+  }
+
+  async function verifyAndMaterialize(
+    lifecycle, environment, policy, binding, artifactHTML, materialize,
+    defaultDigestText, isCurrent
+  ) {
+    const state = lifecycles.get(lifecycle);
+    const bindingSnapshot = snapshotBinding(binding);
+    if (!state || state.disposed || !policySource.isNormalizedPolicy(policy) ||
+        !bindingSnapshot || !policySource.matchesBinding(policy, bindingSnapshot) ||
+        !policySource.acceptsArtifactHTML(policy, artifactHTML) ||
+        typeof materialize !== "function" || typeof isCurrent !== "function") {
+      return result("digest-mismatch");
+    }
+    const generation = state.generation;
+    const current = () => !state.disposed && state.generation === generation &&
+      isCurrent();
+    const digestText = policy.elevated
+      ? (value) => policySource.digestText(environment, value)
+      : defaultDigestText;
+    if (typeof digestText !== "function") return result("digest-mismatch");
+    const artifactDigest = await digestText(artifactHTML);
+    if (!current()) return result("stale");
+    const expectedArtifactDigest = policy.elevated
+      ? policy.artifactDigest : bindingSnapshot.artifactDigest;
+    if (artifactDigest !== expectedArtifactDigest)
+      return result("digest-mismatch");
+    const materializedHTML = materialize();
+    if (!policySource.acceptsMaterializedHTMLBytes(
+      policy, materializedHTML
+    )) return result("materialization-refused");
+    const materializedDigest = await digestText(materializedHTML);
+    if (!current()) return result("stale");
+    if (!policySource.acceptsMaterializedHTML(
+      policy, materializedHTML, materializedDigest
+    )) return result("materialization-refused");
+    let verificationReceipt = NO_RECEIPT;
+    if (policy.elevated) {
+      verificationReceipt = Object.freeze({});
+      verifiedReceipts.set(verificationReceipt, Object.freeze({
+        artifactHTML, bindingSnapshot, generation, lifecycle, materializedHTML, policy
+      }));
+    }
+    return result("verified", {
+      artifactDigest, materializedDigest, materializedHTML,
+      verificationReceipt
+    });
+  }
+
+  function consumeArtifactReceipt(
+    lifecycle, policy, receipt, binding, artifactHTML, materializedHTML
+  ) {
+    const verified = verifiedReceipts.get(receipt);
+    if (!verified || consumedReceipts.has(receipt)) return false;
+    consumedReceipts.add(receipt);
+    const state = lifecycles.get(lifecycle);
+    const bindingSnapshot = snapshotBinding(binding);
+    return Boolean(state && !state.disposed &&
+      verified.lifecycle === lifecycle && verified.generation === state.generation &&
+      verified.policy === policy &&
+      bindingsMatch(verified.bindingSnapshot, bindingSnapshot) &&
+      verified.artifactHTML === artifactHTML &&
+      verified.materializedHTML === materializedHTML);
+  }
+
+  function beginVerifiedMount(
+    lifecycle, admission, policy, configuration, token
+  ) {
+    if (!policy.elevated) return token;
+    if (!token || !consumeArtifactReceipt(
+      lifecycle, policy, configuration.verificationReceipt, configuration.binding,
+      configuration.artifactHTML, configuration.materializedHTML
+    )) {
+      admission.settle(token);
+      return false;
+    }
+    return token;
+  }
+
+  function createVerificationAdmission(policy, admission, lifecycle, environment) {
+    const tokens = new WeakMap();
+    let pendingToken = null;
+    async function verify(
+      binding, artifactHTML, materialize, defaultDigestText, isCurrent
+    ) {
+      const token = admission.begin();
+      if (policy.elevated && !token) return result("overloaded");
+      pendingToken = token;
+      const verified = await verifyAndMaterialize(
+        lifecycle, environment, policy, binding, artifactHTML, materialize,
+        defaultDigestText, isCurrent
+      );
+      if (policy.elevated && verified.status === "verified") {
+        tokens.set(verified.verificationReceipt, token);
+      } else {
+        admission.settle(token);
+        if (pendingToken === token) pendingToken = null;
+      }
+      return verified;
+    }
+    function take(receipt) {
+      if (!receipt || typeof receipt !== "object") return NO_TOKEN;
+      const token = tokens.get(receipt);
+      tokens.delete(receipt);
+      if (!token || pendingToken !== token) return NO_TOKEN;
+      pendingToken = null;
+      return token;
+    }
+    function invalidate(terminal = false) {
+      admission.settle(pendingToken);
+      pendingToken = null;
+      return invalidateArtifactLifecycle(lifecycle, terminal);
+    }
+    return Object.freeze({ invalidate, take, verify });
+  }
+
+  const exported = Object.freeze({
+    beginVerifiedMount,
+    consumeArtifactReceipt,
+    createVerificationAdmission,
+    createArtifactLifecycle,
+    invalidateArtifactLifecycle,
+    verifyAndMaterialize
+  });
+  global.NMPTrustedShellArtifactVerifier = exported;
+  if (typeof module !== "undefined" && module.exports) module.exports = exported;
+})(typeof window === "undefined" ? globalThis : window);
+
+  </script>
   <script data-source="trusted-shell-surface-host.js">
 (function trustedShellSurfaceHost(global) {
   "use strict";
-
-  const MAX_SURFACES = 16;
-  const MAX_SURFACE_ID_BYTES = 128;
-  const MAX_SESSION_ID_BYTES = 256;
-  const MAX_ARTIFACT_HTML_BYTES = 8 * 1024 * 1024;
-  const MAX_MATERIALIZED_HTML_BYTES = 16 * 1024 * 1024;
-  const MAX_TITLE_BYTES = 1024;
-  const MAX_DOMAINS = 64;
-  const MAX_DOMAIN_BYTES = 64;
-  const MAX_NAPPLET_MESSAGES_PER_SECOND = 256;
+  const MAX_SURFACES = 16, MAX_SURFACE_ID_BYTES = 128;
+  const MAX_SESSION_ID_BYTES = 256, MAX_TITLE_BYTES = 1024;
+  const MAX_DOMAINS = 64, MAX_DOMAIN_BYTES = 64, MAX_NAPPLET_MESSAGES_PER_SECOND = 256;
   const primitiveSource = global.NMPTrustedShellPrimitives ||
     (typeof require === "function" ? require("./trusted-shell.js") : null);
-
-  function byteLength(environment, value) {
-    if (typeof environment.TextEncoder === "function") {
-      return new environment.TextEncoder().encode(value).byteLength;
-    }
-    return value.length * 3;
-  }
-
+  const artifactPolicySource = global.NMPTrustedShellArtifactPolicy ||
+    (typeof require === "function" ?
+      require("./trusted-shell-artifact-policy.js") : null);
+  const artifactVerifierSource = global.NMPTrustedShellArtifactVerifier || (typeof require === "function" ? require("./trusted-shell-artifact-verifier.js") : null);
+  const MAX_ARTIFACT_HTML_BYTES = artifactPolicySource.DEFAULT_MAX_ARTIFACT_HTML_BYTES;
+  const MAX_MATERIALIZED_HTML_BYTES = artifactPolicySource.DEFAULT_MAX_MATERIALIZED_HTML_BYTES;
+  const REQUIRED_CONFIGURATION_FIELDS = Object.freeze(
+    ["artifactBaseURL", "artifactHTML", "session"]);
+  const OPTIONAL_CONFIGURATION_FIELDS = Object.freeze([
+    "artifactDigest", "binding", "domains", "materializedDigest",
+    "materializedHTML", "onError", "onReady", "title", "verificationReceipt"
+  ]);
+  const elevatedDocuments = new WeakSet();
   function validText(environment, value, maximumBytes, allowEmpty = false) {
     return typeof value === "string" &&
       (allowEmpty || value.length > 0) &&
-      byteLength(environment, value) <= maximumBytes &&
+      artifactPolicySource.utf8ByteLength(value) <= maximumBytes &&
       !/[\u0000-\u001f\u007f]/.test(value);
   }
-
   function validDomains(environment, domains) {
     return typeof domains === "undefined" ||
       (Array.isArray(domains) &&
@@ -2178,27 +2634,37 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
           /^[a-z][a-z0-9-]*$/.test(domain)
         ));
   }
-
   function createSurfaceHost(environment, suppliedPrimitives, options = {}) {
     const primitives = suppliedPrimitives || primitiveSource;
-    if (!primitives || !environment || !environment.document) {
+    if (!primitives || !artifactVerifierSource ||
+        !environment || !environment.document) {
       throw new Error("The trusted shell surface host is unavailable");
     }
+    const artifactPolicy = typeof options.artifactPolicy === "undefined"
+      ? artifactPolicySource.normalizeArtifactPolicy()
+      : options.artifactPolicy;
+    if (!artifactPolicySource.isNormalizedPolicy(artifactPolicy)) throw new TypeError(
+      "trusted artifact policy must be normalized");
+    if (artifactPolicy.elevated && elevatedDocuments.has(environment.document))
+      throw new Error("elevated trusted artifact host already exists");
+    if (artifactPolicy.elevated) elevatedDocuments.add(environment.document);
     const forwardEnvelope = typeof options.forwardEnvelope === "function"
       ? options.forwardEnvelope
       : null;
     const acceptMaterializedHTML = options.acceptMaterializedHTML === true;
     const now = typeof options.now === "function" ? options.now : Date.now;
+    const admission = artifactPolicySource.createAdmission(artifactPolicy);
+    const artifactLifecycle = artifactVerifierSource.createArtifactLifecycle();
+    const verification = artifactVerifierSource.createVerificationAdmission(
+      artifactPolicy, admission, artifactLifecycle, environment);
     const surfaces = new Map();
     let disposed = false;
-
     function closeAcknowledgement(state) {
       if (state.acknowledgement) {
         state.acknowledgement.close();
         state.acknowledgement = null;
       }
     }
-
     function forwardToNative(surfaceId, state, envelope) {
       if (forwardEnvelope) {
         forwardEnvelope(Object.freeze({
@@ -2218,7 +2684,6 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       );
       root.removeAttribute("data-nmp-native-envelope");
     }
-
     function receiveNappletMessage(event) {
       for (const [surfaceId, state] of surfaces.entries()) {
         const envelope = primitives.mappedEnvelope(event, state.frame);
@@ -2242,53 +2707,66 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
         }
       }
     }
-
     function mount(surfaceId, surface, configuration) {
+      const snapshot = artifactPolicySource.snapshotDataFields(
+        configuration, REQUIRED_CONFIGURATION_FIELDS,
+        OPTIONAL_CONFIGURATION_FIELDS
+      );
+      const domains = snapshot && typeof snapshot.domains !== "undefined"
+        ? artifactPolicySource.snapshotArrayData(snapshot.domains, MAX_DOMAINS)
+        : undefined;
       if (disposed ||
           !validText(environment, surfaceId, MAX_SURFACE_ID_BYTES) ||
           !surface ||
           typeof surface.replaceChildren !== "function" ||
-          !primitives.isPlainObject(configuration) ||
-          !validText(environment, configuration.session, MAX_SESSION_ID_BYTES) ||
-          typeof configuration.artifactHTML !== "string" ||
-          byteLength(environment, configuration.artifactHTML) >
-            MAX_ARTIFACT_HTML_BYTES ||
-          (typeof configuration.materializedHTML !== "undefined" &&
+          !snapshot || domains === null ||
+          !validText(environment, snapshot.session, MAX_SESSION_ID_BYTES) ||
+          !artifactPolicySource.acceptsArtifactHTML(
+            artifactPolicy,
+            snapshot.artifactHTML
+          ) ||
+          (artifactPolicy.elevated &&
+            typeof snapshot.materializedHTML !== "string") ||
+          (typeof snapshot.materializedHTML !== "undefined" &&
             (!acceptMaterializedHTML ||
-              typeof configuration.materializedHTML !== "string" ||
-              byteLength(environment, configuration.materializedHTML) >
-                MAX_MATERIALIZED_HTML_BYTES)) ||
-          !primitives.isVerifiedArtifactBaseURL(configuration.artifactBaseURL) ||
-          !validDomains(environment, configuration.domains) ||
-          (typeof configuration.title !== "undefined" &&
-            !validText(
-              environment,
-              configuration.title,
-              MAX_TITLE_BYTES,
-              true
-            )) ||
-          (typeof configuration.onReady !== "undefined" &&
-            typeof configuration.onReady !== "function") ||
-          (typeof configuration.onError !== "undefined" &&
-            typeof configuration.onError !== "function") ||
+              !artifactPolicySource.acceptsMaterializedHTML(
+                artifactPolicy,
+                snapshot.materializedHTML,
+                snapshot.materializedDigest
+              ))) ||
+          !primitives.isVerifiedArtifactBaseURL(snapshot.artifactBaseURL) ||
+          !validDomains(environment, domains) ||
+          (typeof snapshot.title !== "undefined" && !validText(
+            environment, snapshot.title, MAX_TITLE_BYTES, true
+          )) ||
+          (typeof snapshot.onReady !== "undefined" &&
+            typeof snapshot.onReady !== "function") ||
+          (typeof snapshot.onError !== "undefined" &&
+            typeof snapshot.onError !== "function") ||
           (!surfaces.has(surfaceId) && surfaces.size >= MAX_SURFACES)) {
         return false;
       }
+      const receipt = snapshot.verificationReceipt;
+      const reservedToken = artifactPolicy.elevated
+        ? verification.take(receipt) : null;
+      const admissionToken = artifactVerifierSource.beginVerifiedMount(
+        artifactLifecycle, admission, artifactPolicy, snapshot, reservedToken);
+      if (artifactPolicy.elevated && !admissionToken) return false;
       const frame = environment.document.createElement("iframe");
-      if (surfaceId === "default") {
-        frame.id = "napplet-frame";
-      }
+      if (surfaceId === "default") frame.id = "napplet-frame";
       frame.className = "napplet-frame";
       frame.setAttribute("sandbox", "allow-scripts");
       frame.setAttribute("referrerpolicy", "no-referrer");
-      frame.setAttribute("aria-label", configuration.title || "Napplet");
-      frame.srcdoc = typeof configuration.materializedHTML === "string"
-        ? configuration.materializedHTML
+      frame.setAttribute("aria-label", snapshot.title || "Napplet");
+      frame.srcdoc = typeof snapshot.materializedHTML === "string"
+        ? snapshot.materializedHTML
         : primitives.materialize(
-          configuration.artifactHTML,
-          configuration.artifactBaseURL,
-          configuration.domains
+          snapshot.artifactHTML, snapshot.artifactBaseURL, domains
         );
+      if (artifactPolicy.elevated && !admission.activate(admissionToken)) {
+        admission.settle(admissionToken);
+        return false;
+      }
       surface.replaceChildren(frame);
       const previous = surfaces.get(surfaceId);
       if (previous) {
@@ -2299,16 +2777,17 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       }
       const state = {
         frame,
-        session: configuration.session,
-        onReady: configuration.onReady,
-        onError: configuration.onError,
+        session: snapshot.session,
+        onReady: snapshot.onReady,
+        onError: snapshot.onError,
         acknowledgement: null,
         ready: false,
         loadCount: 0,
         messageWindowStartedAt: now(),
         messagesInWindow: 0,
+        admissionToken,
         domains: Object.freeze(Array.from(new Set(
-          ["shell"].concat(configuration.domains || [])
+          ["shell"].concat(domains || [])
         )).sort())
       };
       if (typeof frame.addEventListener === "function") {
@@ -2323,9 +2802,9 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
         });
       }
       surfaces.set(surfaceId, state);
+      admission.settle(admissionToken);
       return true;
     }
-
     function receive(surfaceId, envelope) {
       const state = surfaces.get(surfaceId);
       if (!state) {
@@ -2367,7 +2846,6 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       }
       return true;
     }
-
     function unmount(surfaceId) {
       const state = surfaces.get(surfaceId);
       if (!state) {
@@ -2377,34 +2855,34 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       if (typeof state.frame.remove === "function") {
         state.frame.remove();
       }
+      admission.release(state.admissionToken);
       surfaces.delete(surfaceId);
       return true;
     }
-
+    function invalidateArtifactVerification() {
+      if (!artifactPolicy.elevated) return false;
+      return verification.invalidate();
+    }
+    function verifyAndMaterialize(...argumentsList) {
+      return verification.verify(...argumentsList);
+    }
     function dispose() {
       if (disposed) return;
       disposed = true;
       for (const surfaceId of Array.from(surfaces.keys())) {
         unmount(surfaceId);
       }
-      if (typeof environment.removeEventListener === "function") {
+      verification.invalidate(true);
+      admission.dispose();
+      if (typeof environment.removeEventListener === "function")
         environment.removeEventListener("message", receiveNappletMessage);
-      }
     }
-
-    if (typeof environment.addEventListener === "function") {
+    if (typeof environment.addEventListener === "function")
       environment.addEventListener("message", receiveNappletMessage);
-    }
-    return Object.freeze({ mount, receive, unmount, dispose });
+    return Object.freeze({ dispose, invalidateArtifactVerification, mount, receive, unmount, verifyAndMaterialize });
   }
-
-  const exported = {
-    MAX_SURFACES,
-    MAX_ARTIFACT_HTML_BYTES,
-    MAX_MATERIALIZED_HTML_BYTES,
-    MAX_NAPPLET_MESSAGES_PER_SECOND,
-    createSurfaceHost
-  };
+  const exported = { MAX_SURFACES, MAX_ARTIFACT_HTML_BYTES, MAX_MATERIALIZED_HTML_BYTES,
+    MAX_NAPPLET_MESSAGES_PER_SECOND, createSurfaceHost };
   if (global.document &&
       typeof global.addEventListener === "function" &&
       global.parent === global) {
@@ -2412,22 +2890,14 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
     exported.mount = host.mount;
     exported.receive = host.receive;
     exported.unmount = host.unmount;
-    global.__nmpTrustedShellMount = function mountDefault(configuration) {
-      return host.mount(
-        "default",
-        global.document.getElementById("surface"),
-        configuration
-      );
-    };
-    global.__nmpTrustedShellReceive = function receiveDefault(envelope) {
-      return host.receive("default", envelope);
-    };
+    global.__nmpTrustedShellMount = (configuration) => host.mount(
+      "default", global.document.getElementById("surface"), configuration
+    );
+    global.__nmpTrustedShellReceive = (envelope) => host.receive("default", envelope);
   }
   global.NMPTrustedShellHost = Object.freeze(exported);
-
-  if (typeof module !== "undefined" && module.exports) {
+  if (typeof module !== "undefined" && module.exports)
     module.exports = Object.freeze(exported);
-  }
 })(typeof window === "undefined" ? globalThis : window);
 
   </script>
@@ -2442,6 +2912,10 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
   const MAX_TITLE_BYTES = 1024;
   const MAX_DOMAINS = 64;
   const HASH = /^[0-9a-f]{64}$/;
+  const artifactPolicySource = global.NMPTrustedShellArtifactPolicy ||
+    (typeof require === "function"
+      ? require("./trusted-shell-artifact-policy.js")
+      : null);
 
   function exactFields(value, fields, primitives) {
     if (!primitives.isPlainObject(value)) return false;
@@ -2458,7 +2932,10 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       !/[\u0000-\u001f\u007f]/.test(value);
   }
 
-  function createContract(primitives, hostModule) {
+  function createContract(primitives, hostModule, artifactPolicy) {
+    if (!artifactPolicySource.isNormalizedPolicy(artifactPolicy)) {
+      throw new TypeError("trusted artifact policy must be normalized");
+    }
     function validRequestId(value) {
       return validText(value, MAX_REQUEST_ID_BYTES);
     }
@@ -2484,6 +2961,13 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
         value.session === session;
     }
 
+    function snapshotDomains(value) {
+      const domains = artifactPolicySource.snapshotArrayData(value, MAX_DOMAINS);
+      return domains && domains.every((domain) =>
+        validText(domain, 64) && /^[a-z][a-z0-9-]*$/.test(domain)
+      ) ? domains : null;
+    }
+
     function validMount(request) {
       if (!exactFields(request, [
         "configuration", "requestId", "surfaceId", "type"
@@ -2496,21 +2980,23 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       ], primitives) &&
         validSurfaceId(request.surfaceId) &&
         validSession(configuration.session) &&
-        typeof configuration.artifactHTML === "string" &&
-        new TextEncoder().encode(configuration.artifactHTML).byteLength <=
-          hostModule.MAX_ARTIFACT_HTML_BYTES &&
-        primitives.isVerifiedArtifactBaseURL(configuration.artifactBaseURL) &&
-        Array.isArray(configuration.domains) &&
-        configuration.domains.length <= MAX_DOMAINS &&
-        configuration.domains.every((domain) =>
-          validText(domain, 64) && /^[a-z][a-z0-9-]*$/.test(domain)
+        artifactPolicySource.acceptsArtifactHTML(
+          artifactPolicy,
+          configuration.artifactHTML
         ) &&
+        primitives.isVerifiedArtifactBaseURL(configuration.artifactBaseURL) &&
+        Boolean(snapshotDomains(configuration.domains)) &&
         validText(configuration.title, MAX_TITLE_BYTES, true) &&
-        validBinding(configuration.binding, request.surfaceId, configuration.session);
+        validBinding(configuration.binding, request.surfaceId, configuration.session) &&
+        artifactPolicySource.matchesBinding(
+          artifactPolicy,
+          configuration.binding
+        );
     }
 
     return Object.freeze({
       exactFields,
+      snapshotDomains,
       validMount,
       validRequestId,
       validSession,
@@ -2527,44 +3013,39 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
   <script data-source="trusted-shell-embedding.js">
 (function trustedShellEmbedding(global) {
   "use strict";
-
   const PROTOCOL_VERSION = 1;
   const MAX_PENDING_MOUNTS = 16;
   const MAX_PARENT_MESSAGES_PER_SECOND = 256;
-  const primitiveSource = global.NMPTrustedShellPrimitives ||
-    (typeof require === "function" ? require("./trusted-shell.js") : null);
-  const hostSource = global.NMPTrustedShellHost ||
-    (typeof require === "function"
-      ? require("./trusted-shell-surface-host.js")
-      : null);
-  const contractSource = global.NMPTrustedShellEmbeddingContract ||
-    (typeof require === "function"
-      ? require("./trusted-shell-embedding-contract.js")
-      : null);
-
-  async function defaultDigestText(value) {
-    if (!global.crypto || !global.crypto.subtle) {
-      throw new Error("SHA-256 is unavailable");
-    }
-    const bytes = new TextEncoder().encode(value);
-    const digest = await global.crypto.subtle.digest("SHA-256", bytes);
-    return Array.from(new Uint8Array(digest))
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
+  function moduleSource(value, path) {
+    return value || (typeof require === "function" ? require(path) : null);
   }
-
+  const primitiveSource = moduleSource(
+    global.NMPTrustedShellPrimitives, "./trusted-shell.js"
+  );
+  const hostSource = moduleSource(
+    global.NMPTrustedShellHost, "./trusted-shell-surface-host.js"
+  );
+  const contractSource = moduleSource(
+    global.NMPTrustedShellEmbeddingContract, "./trusted-shell-embedding-contract.js"
+  );
+  const artifactPolicySource = moduleSource(
+    global.NMPTrustedShellArtifactPolicy, "./trusted-shell-artifact-policy.js"
+  );
   function createEmbeddingBridge(environment, dependencies = {}) {
     const primitives = dependencies.primitives || primitiveSource;
     const hostModule = dependencies.hostModule || hostSource;
-    const digestText = dependencies.digestText || defaultDigestText;
+    const digestText = dependencies.digestText || ((value) => artifactPolicySource.digestText(global, value));
     const now = dependencies.now || Date.now;
-    if (!primitives || !hostModule || !contractSource ||
+    if (!primitives || !hostModule || !contractSource || !artifactPolicySource ||
         !environment || !environment.document ||
         !environment.parent || environment.parent === environment) {
       throw new Error("The trusted shell embedding bridge is unavailable");
     }
     const parentWindow = environment.parent;
-    const contract = contractSource.createContract(primitives, hostModule);
+    const artifactPolicy = artifactPolicySource
+      .normalizeArtifactPolicy(dependencies.artifactPolicy);
+    const contract = contractSource.createContract(primitives, hostModule, artifactPolicy);
+    const admission = artifactPolicySource.createAdmission(artifactPolicy);
     const bindings = new Map();
     const pendingSurfaces = new Map();
     let pendingMounts = 0;
@@ -2572,20 +3053,18 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
     let messageWindowStartedAt = now();
     let messagesInWindow = 0;
     let parentRateLimited = false;
-
     function post(message) {
       parentWindow.postMessage(Object.freeze(message), "*");
     }
-
     function currentBinding(surfaceId, session) {
       const state = bindings.get(surfaceId);
       return state && state.binding.session === session ? state : null;
     }
-
     const host = hostModule.createSurfaceHost(
       environment,
       primitives,
       {
+        artifactPolicy,
         acceptMaterializedHTML: true,
         forwardEnvelope(message) {
           const state = currentBinding(message.surfaceId, message.session);
@@ -2600,7 +3079,6 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
         }
       }
     );
-
     function result(type, request, ok, error, binding = null) {
       post({
         type: `${type}.result`,
@@ -2613,16 +3091,24 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
         binding
       });
     }
-
     function invalidate(surfaceId) {
+      const state = bindings.get(surfaceId);
+      if (state) admission.release(state.admissionToken);
       pendingSurfaces.delete(surfaceId);
       bindings.delete(surfaceId);
+      host.invalidateArtifactVerification();
       host.unmount(surfaceId);
     }
-
     async function mount(request) {
       if (!contract.validMount(request)) return;
+      const domains = contract.snapshotDomains(request.configuration.domains);
+      if (!domains) return;
       if (pendingMounts >= MAX_PENDING_MOUNTS) {
+        result(request.type, request, false, "overloaded");
+        return;
+      }
+      const admissionToken = admission.begin();
+      if (artifactPolicy.elevated && !admissionToken) {
         result(request.type, request, false, "overloaded");
         return;
       }
@@ -2632,40 +3118,43 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
         session: configuration.session,
         artifactHTML: configuration.artifactHTML,
         artifactBaseURL: configuration.artifactBaseURL,
-        domains: Object.freeze(configuration.domains.slice()),
+        domains,
         title: configuration.title,
         binding: Object.freeze({ ...configuration.binding })
       });
       const mountToken = Object.freeze({ session: copied.session });
       pendingSurfaces.set(request.surfaceId, mountToken);
-      let materialized;
       pendingMounts += 1;
       try {
-        const artifactDigest = await digestText(copied.artifactHTML);
-        if (pendingSurfaces.get(request.surfaceId) !== mountToken || disposed) return;
-        if (artifactDigest !== copied.binding.artifactDigest) {
-          result(request.type, request, false, "digest-mismatch");
+        const verified = await host.verifyAndMaterialize(
+          copied.binding, copied.artifactHTML,
+          () => primitives.materialize(
+            copied.artifactHTML, copied.artifactBaseURL, copied.domains
+          ), digestText,
+          () => pendingSurfaces.get(request.surfaceId) === mountToken && !disposed
+        );
+        if (verified.status === "stale") return;
+        if (verified.status !== "verified") {
+          result(request.type, request, false, verified.status);
           return;
         }
-        materialized = primitives.materialize(
-          copied.artifactHTML,
-          copied.artifactBaseURL,
-          copied.domains
-        );
-        const materializedDigest = await digestText(materialized);
-        if (pendingSurfaces.get(request.surfaceId) !== mountToken || disposed) return;
+        const materialized = verified.materializedHTML;
+        const materializedDigest = verified.materializedDigest;
         const sealedBinding = Object.freeze({
           ...copied.binding,
           materializedDigest
         });
-        const bindingState = { binding: sealedBinding };
+        const bindingState = { binding: sealedBinding, admissionToken };
         const mounted = host.mount(
           request.surfaceId,
           environment.document.getElementById("surface"),
           {
             session: copied.session,
             artifactHTML: copied.artifactHTML,
+            binding: copied.binding,
             materializedHTML: materialized,
+            materializedDigest,
+            verificationReceipt: verified.verificationReceipt,
             artifactBaseURL: copied.artifactBaseURL,
             domains: copied.domains,
             title: copied.title,
@@ -2694,6 +3183,10 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
           result(request.type, request, false, "mount-refused");
           return;
         }
+        if (artifactPolicy.elevated && !admission.activate(admissionToken)) {
+          host.unmount(request.surfaceId);
+          return;
+        }
         bindings.set(request.surfaceId, bindingState);
         pendingSurfaces.delete(request.surfaceId);
         result(request.type, request, true, null, sealedBinding);
@@ -2702,13 +3195,13 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
           result(request.type, request, false, "materialization-refused");
         }
       } finally {
+        admission.settle(admissionToken);
         pendingMounts -= 1;
         if (pendingSurfaces.get(request.surfaceId) === mountToken) {
           pendingSurfaces.delete(request.surfaceId);
         }
       }
     }
-
     function receiveParentMessage(event) {
       if (disposed || event.source !== parentWindow ||
           !primitives.isPlainObject(event.data)) return;
@@ -2773,7 +3266,6 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
         dispose();
       }
     }
-
     function dispose() {
       if (disposed) return;
       disposed = true;
@@ -2784,11 +3276,11 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       for (const surfaceId of surfaceIds) invalidate(surfaceId);
       bindings.clear();
       pendingSurfaces.clear();
+      admission.dispose();
       host.dispose();
       environment.removeEventListener("message", receiveParentMessage);
       environment.removeEventListener("pagehide", dispose);
     }
-
     environment.addEventListener("message", receiveParentMessage);
     environment.addEventListener("pagehide", dispose);
     post({ type: "nmp.outer.ready", version: PROTOCOL_VERSION });
@@ -2798,25 +3290,27 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
         return Object.freeze({
           bindings: bindings.size,
           pendingMounts,
-          pendingSurfaces: pendingSurfaces.size
+          pendingSurfaces: pendingSurfaces.size,
+          ...admission.counts()
         });
       }
     });
   }
-
   const exported = Object.freeze({
     PROTOCOL_VERSION,
     MAX_PENDING_MOUNTS,
     MAX_PARENT_MESSAGES_PER_SECOND,
     createEmbeddingBridge
   });
-  if (global.document && global.parent && global.parent !== global) {
-    createEmbeddingBridge(global);
-  }
   global.NMPTrustedShellEmbedding = exported;
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
 })(typeof window === "undefined" ? globalThis : window);
 
+  </script>
+  <script data-source="trusted-shell-bootstrap">
+if (window.parent !== window) {
+  NMPTrustedShellEmbedding.createEmbeddingBridge(window);
+}
   </script>
 </body>
 </html>

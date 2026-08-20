@@ -1,43 +1,38 @@
 (function trustedShellEmbedding(global) {
   "use strict";
-
   const PROTOCOL_VERSION = 1;
   const MAX_PENDING_MOUNTS = 16;
   const MAX_PARENT_MESSAGES_PER_SECOND = 256;
-  const primitiveSource = global.NMPTrustedShellPrimitives ||
-    (typeof require === "function" ? require("./trusted-shell.js") : null);
-  const hostSource = global.NMPTrustedShellHost ||
-    (typeof require === "function"
-      ? require("./trusted-shell-surface-host.js")
-      : null);
-  const contractSource = global.NMPTrustedShellEmbeddingContract ||
-    (typeof require === "function"
-      ? require("./trusted-shell-embedding-contract.js")
-      : null);
-
-  async function defaultDigestText(value) {
-    if (!global.crypto || !global.crypto.subtle) {
-      throw new Error("SHA-256 is unavailable");
-    }
-    const bytes = new TextEncoder().encode(value);
-    const digest = await global.crypto.subtle.digest("SHA-256", bytes);
-    return Array.from(new Uint8Array(digest))
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
+  function moduleSource(value, path) {
+    return value || (typeof require === "function" ? require(path) : null);
   }
-
+  const primitiveSource = moduleSource(
+    global.NMPTrustedShellPrimitives, "./trusted-shell.js"
+  );
+  const hostSource = moduleSource(
+    global.NMPTrustedShellHost, "./trusted-shell-surface-host.js"
+  );
+  const contractSource = moduleSource(
+    global.NMPTrustedShellEmbeddingContract, "./trusted-shell-embedding-contract.js"
+  );
+  const artifactPolicySource = moduleSource(
+    global.NMPTrustedShellArtifactPolicy, "./trusted-shell-artifact-policy.js"
+  );
   function createEmbeddingBridge(environment, dependencies = {}) {
     const primitives = dependencies.primitives || primitiveSource;
     const hostModule = dependencies.hostModule || hostSource;
-    const digestText = dependencies.digestText || defaultDigestText;
+    const digestText = dependencies.digestText || ((value) => artifactPolicySource.digestText(global, value));
     const now = dependencies.now || Date.now;
-    if (!primitives || !hostModule || !contractSource ||
+    if (!primitives || !hostModule || !contractSource || !artifactPolicySource ||
         !environment || !environment.document ||
         !environment.parent || environment.parent === environment) {
       throw new Error("The trusted shell embedding bridge is unavailable");
     }
     const parentWindow = environment.parent;
-    const contract = contractSource.createContract(primitives, hostModule);
+    const artifactPolicy = artifactPolicySource
+      .normalizeArtifactPolicy(dependencies.artifactPolicy);
+    const contract = contractSource.createContract(primitives, hostModule, artifactPolicy);
+    const admission = artifactPolicySource.createAdmission(artifactPolicy);
     const bindings = new Map();
     const pendingSurfaces = new Map();
     let pendingMounts = 0;
@@ -45,20 +40,18 @@
     let messageWindowStartedAt = now();
     let messagesInWindow = 0;
     let parentRateLimited = false;
-
     function post(message) {
       parentWindow.postMessage(Object.freeze(message), "*");
     }
-
     function currentBinding(surfaceId, session) {
       const state = bindings.get(surfaceId);
       return state && state.binding.session === session ? state : null;
     }
-
     const host = hostModule.createSurfaceHost(
       environment,
       primitives,
       {
+        artifactPolicy,
         acceptMaterializedHTML: true,
         forwardEnvelope(message) {
           const state = currentBinding(message.surfaceId, message.session);
@@ -73,7 +66,6 @@
         }
       }
     );
-
     function result(type, request, ok, error, binding = null) {
       post({
         type: `${type}.result`,
@@ -86,16 +78,24 @@
         binding
       });
     }
-
     function invalidate(surfaceId) {
+      const state = bindings.get(surfaceId);
+      if (state) admission.release(state.admissionToken);
       pendingSurfaces.delete(surfaceId);
       bindings.delete(surfaceId);
+      host.invalidateArtifactVerification();
       host.unmount(surfaceId);
     }
-
     async function mount(request) {
       if (!contract.validMount(request)) return;
+      const domains = contract.snapshotDomains(request.configuration.domains);
+      if (!domains) return;
       if (pendingMounts >= MAX_PENDING_MOUNTS) {
+        result(request.type, request, false, "overloaded");
+        return;
+      }
+      const admissionToken = admission.begin();
+      if (artifactPolicy.elevated && !admissionToken) {
         result(request.type, request, false, "overloaded");
         return;
       }
@@ -105,40 +105,43 @@
         session: configuration.session,
         artifactHTML: configuration.artifactHTML,
         artifactBaseURL: configuration.artifactBaseURL,
-        domains: Object.freeze(configuration.domains.slice()),
+        domains,
         title: configuration.title,
         binding: Object.freeze({ ...configuration.binding })
       });
       const mountToken = Object.freeze({ session: copied.session });
       pendingSurfaces.set(request.surfaceId, mountToken);
-      let materialized;
       pendingMounts += 1;
       try {
-        const artifactDigest = await digestText(copied.artifactHTML);
-        if (pendingSurfaces.get(request.surfaceId) !== mountToken || disposed) return;
-        if (artifactDigest !== copied.binding.artifactDigest) {
-          result(request.type, request, false, "digest-mismatch");
+        const verified = await host.verifyAndMaterialize(
+          copied.binding, copied.artifactHTML,
+          () => primitives.materialize(
+            copied.artifactHTML, copied.artifactBaseURL, copied.domains
+          ), digestText,
+          () => pendingSurfaces.get(request.surfaceId) === mountToken && !disposed
+        );
+        if (verified.status === "stale") return;
+        if (verified.status !== "verified") {
+          result(request.type, request, false, verified.status);
           return;
         }
-        materialized = primitives.materialize(
-          copied.artifactHTML,
-          copied.artifactBaseURL,
-          copied.domains
-        );
-        const materializedDigest = await digestText(materialized);
-        if (pendingSurfaces.get(request.surfaceId) !== mountToken || disposed) return;
+        const materialized = verified.materializedHTML;
+        const materializedDigest = verified.materializedDigest;
         const sealedBinding = Object.freeze({
           ...copied.binding,
           materializedDigest
         });
-        const bindingState = { binding: sealedBinding };
+        const bindingState = { binding: sealedBinding, admissionToken };
         const mounted = host.mount(
           request.surfaceId,
           environment.document.getElementById("surface"),
           {
             session: copied.session,
             artifactHTML: copied.artifactHTML,
+            binding: copied.binding,
             materializedHTML: materialized,
+            materializedDigest,
+            verificationReceipt: verified.verificationReceipt,
             artifactBaseURL: copied.artifactBaseURL,
             domains: copied.domains,
             title: copied.title,
@@ -167,6 +170,10 @@
           result(request.type, request, false, "mount-refused");
           return;
         }
+        if (artifactPolicy.elevated && !admission.activate(admissionToken)) {
+          host.unmount(request.surfaceId);
+          return;
+        }
         bindings.set(request.surfaceId, bindingState);
         pendingSurfaces.delete(request.surfaceId);
         result(request.type, request, true, null, sealedBinding);
@@ -175,13 +182,13 @@
           result(request.type, request, false, "materialization-refused");
         }
       } finally {
+        admission.settle(admissionToken);
         pendingMounts -= 1;
         if (pendingSurfaces.get(request.surfaceId) === mountToken) {
           pendingSurfaces.delete(request.surfaceId);
         }
       }
     }
-
     function receiveParentMessage(event) {
       if (disposed || event.source !== parentWindow ||
           !primitives.isPlainObject(event.data)) return;
@@ -246,7 +253,6 @@
         dispose();
       }
     }
-
     function dispose() {
       if (disposed) return;
       disposed = true;
@@ -257,11 +263,11 @@
       for (const surfaceId of surfaceIds) invalidate(surfaceId);
       bindings.clear();
       pendingSurfaces.clear();
+      admission.dispose();
       host.dispose();
       environment.removeEventListener("message", receiveParentMessage);
       environment.removeEventListener("pagehide", dispose);
     }
-
     environment.addEventListener("message", receiveParentMessage);
     environment.addEventListener("pagehide", dispose);
     post({ type: "nmp.outer.ready", version: PROTOCOL_VERSION });
@@ -271,21 +277,18 @@
         return Object.freeze({
           bindings: bindings.size,
           pendingMounts,
-          pendingSurfaces: pendingSurfaces.size
+          pendingSurfaces: pendingSurfaces.size,
+          ...admission.counts()
         });
       }
     });
   }
-
   const exported = Object.freeze({
     PROTOCOL_VERSION,
     MAX_PENDING_MOUNTS,
     MAX_PARENT_MESSAGES_PER_SECOND,
     createEmbeddingBridge
   });
-  if (global.document && global.parent && global.parent !== global) {
-    createEmbeddingBridge(global);
-  }
   global.NMPTrustedShellEmbedding = exported;
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
 })(typeof window === "undefined" ? globalThis : window);
