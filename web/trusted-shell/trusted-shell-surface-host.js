@@ -108,7 +108,7 @@
         OPTIONAL_CONFIGURATION_FIELDS
       );
       const domains = snapshot && typeof snapshot.domains !== "undefined"
-        ? artifactPolicySource.snapshotArrayData(snapshot.domains)
+        ? artifactPolicySource.snapshotArrayData(snapshot.domains, MAX_DOMAINS)
         : undefined;
       if (disposed ||
           !validText(environment, surfaceId, MAX_SURFACE_ID_BYTES) ||

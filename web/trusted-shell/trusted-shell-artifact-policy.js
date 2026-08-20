@@ -69,13 +69,15 @@
     return Object.freeze(snapshot);
   }
 
-  function snapshotArrayData(value) {
-    if (!Array.isArray(value)) return NO_VALUE;
+  function snapshotArrayData(value, maximumLength) {
+    if (!Array.isArray(value) || !Number.isSafeInteger(maximumLength) ||
+        maximumLength < 0) return NO_VALUE;
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const keys = Reflect.ownKeys(descriptors);
     const length = descriptors.length;
     if (keys.some((field) => typeof field !== "string") ||
-        !length || !("value" in length) || !Number.isSafeInteger(length.value)) {
+        !length || !("value" in length) || !Number.isSafeInteger(length.value) ||
+        length.value < 0 || length.value > maximumLength) {
       return NO_VALUE;
     }
     const expected = Array.from({ length: length.value }, (_, index) =>

@@ -221,3 +221,31 @@ test("post-snapshot caller mutation cannot alter the sealed sink", async () => {
   assert.equal(target.frame.srcdoc, exact.materializedHTML);
   assert.equal(target.frame.attributes["aria-label"], "Rage");
 });
+
+test("domain snapshot refuses sparse and oversized arrays before admission", async () => {
+  const exact = fixture();
+  const issuingHost = host(exact);
+  const manifestBinding = binding(exact);
+  const verified = await receipt(issuingHost, exact, manifestBinding);
+  const config = configuration(exact, manifestBinding, verified);
+  for (const length of [65, 1_000_000, 2 ** 32 - 1]) {
+    let reads = 0;
+    const domains = new Array(length);
+    Object.defineProperty(domains, "0", {
+      enumerable: true,
+      configurable: true,
+      get() { reads += 1; return "shell"; }
+    });
+    const target = surface();
+    assert.equal(issuingHost.mount("rage", target, {
+      ...config, domains
+    }), false, length);
+    assert.equal(reads, 0, length);
+    assert.equal(target.frame, undefined, length);
+  }
+  assert.equal(policyModule.snapshotArrayData([], 64).length, 0);
+  assert.deepEqual(policyModule.snapshotArrayData(["shell", "resource"], 64),
+    ["shell", "resource"]);
+  assert.equal(policyModule.snapshotArrayData(new Array(1), 64), null);
+  assert.equal(issuingHost.mount("rage", surface(), config), true);
+});
