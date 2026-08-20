@@ -115,7 +115,6 @@ test("surface host enforces the same normalized elevated policy at srcdoc", asyn
     "aria-label": "Rage"
   });
 });
-
 test("surface host refuses elevated byte or digest drift before srcdoc", async () => {
   const fixture = createFixture();
   const sameLengthMutation = `y${fixture.artifactHTML.slice(1)}`;
@@ -158,7 +157,6 @@ test("surface host refuses elevated byte or digest drift before srcdoc", async (
     assert.equal(target.frame, undefined);
   }
 });
-
 test("surface host requires cryptographically verified materialization", () => {
   const fixture = createFixture();
   let materializations = 0;
@@ -281,7 +279,6 @@ test("surface host receipt and admission cannot replay after teardown", async ()
     artifactHTML: fixture.artifactHTML
   }), false);
 });
-
 test("surface host refuses unnormalized policy lookalikes", () => {
   const fixture = createFixture();
   assert.throws(() => createSurfaceHost(createEnvironment(), primitives(), {
@@ -289,12 +286,15 @@ test("surface host refuses unnormalized policy lookalikes", () => {
     artifactPolicy: { ...fixture.policy }
   }), /must be normalized/);
 });
-
 test("one document cannot create two elevated hosts", () => {
   const fixture = createFixture();
   const environment = createEnvironment();
+  const alternate = { ...createEnvironment(), document: environment.document };
   const options = { acceptMaterializedHTML: true, artifactPolicy: fixture.policy };
   createSurfaceHost(environment, primitives(), options);
-  assert.throws(() => createSurfaceHost(environment, primitives(), options),
-    /already exists/);
+  assert.throws(() => createSurfaceHost(alternate, primitives(), options), /already exists/);
+  assert.doesNotThrow(() => createSurfaceHost(createEnvironment(), primitives(), options));
+  assert.doesNotThrow(() => {
+    createSurfaceHost(environment, primitives()); createSurfaceHost(alternate, primitives());
+  });
 });

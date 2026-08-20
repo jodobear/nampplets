@@ -44,9 +44,9 @@
       : options.artifactPolicy;
     if (!artifactPolicySource.isNormalizedPolicy(artifactPolicy)) throw new TypeError(
       "trusted artifact policy must be normalized");
-    if (artifactPolicy.elevated && elevatedDocuments.has(environment))
+    if (artifactPolicy.elevated && elevatedDocuments.has(environment.document))
       throw new Error("elevated trusted artifact host already exists");
-    if (artifactPolicy.elevated) elevatedDocuments.add(environment);
+    if (artifactPolicy.elevated) elevatedDocuments.add(environment.document);
     const forwardEnvelope = typeof options.forwardEnvelope === "function"
       ? options.forwardEnvelope
       : null;
