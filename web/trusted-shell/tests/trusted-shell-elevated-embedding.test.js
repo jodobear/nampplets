@@ -44,31 +44,36 @@ function createHarness(artifactPolicy, digestText = async (value) => digest(valu
   const listeners = new Map();
   const calls = { materializations: 0, mounts: 0, unmounts: 0 };
   const active = new Set();
-  const artifactVerifier = {
-    async verifyAndMaterialize(
-      _environment, policy, binding, artifactHTML, materialize,
-      _defaultDigestText, isCurrent
-    ) {
+  let normalizedPolicy;
+  let generation = 0;
+  let disposed = false;
+  const verifyAndMaterialize = async (
+    binding, artifactHTML, materialize, _defaultDigestText, isCurrent
+  ) => {
+      const currentGeneration = generation;
+      const isLifecycleCurrent = () => !disposed &&
+        generation === currentGeneration && isCurrent();
       const artifactDigest = await digestText(artifactHTML);
       if (artifactDigest !== binding.artifactDigest) {
         return Object.freeze({ status: "digest-mismatch" });
       }
-      if (!isCurrent()) return Object.freeze({ status: "stale" });
+      if (!isLifecycleCurrent()) return Object.freeze({ status: "stale" });
       const materializedHTML = materialize();
-      if (!policyModule.acceptsMaterializedHTMLBytes(policy, materializedHTML)) {
+      if (!policyModule.acceptsMaterializedHTMLBytes(
+        normalizedPolicy, materializedHTML
+      )) {
         return Object.freeze({ status: "materialization-refused" });
       }
       const materializedDigest = await digestText(materializedHTML);
-      if (!isCurrent()) return Object.freeze({ status: "stale" });
-      if (materializedDigest !== policy.materializedDigest) {
+      if (!isLifecycleCurrent()) return Object.freeze({ status: "stale" });
+      if (materializedDigest !== normalizedPolicy.materializedDigest) {
         return Object.freeze({ status: "materialization-refused" });
       }
       return Object.freeze({
         status: "verified", materializedHTML, materializedDigest,
         verificationReceipt: Object.freeze({})
       });
-    }
-  };
+    };
   const primitives = {
     isPlainObject(value) {
       return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -84,7 +89,10 @@ function createHarness(artifactPolicy, digestText = async (value) => digest(valu
   const hostModule = {
     createSurfaceHost(_environment, _primitives, options) {
       assert.equal(options.artifactPolicy.elevated, true);
+      normalizedPolicy = options.artifactPolicy;
       return {
+        verifyAndMaterialize,
+        invalidateArtifactVerification() { generation += 1; },
         mount(surfaceId) {
           calls.mounts += 1;
           active.add(surfaceId);
@@ -95,7 +103,7 @@ function createHarness(artifactPolicy, digestText = async (value) => digest(valu
           calls.unmounts += 1;
           return active.delete(surfaceId);
         },
-        dispose() { active.clear(); }
+        dispose() { disposed = true; generation += 1; active.clear(); }
       };
     }
   };
@@ -107,7 +115,6 @@ function createHarness(artifactPolicy, digestText = async (value) => digest(valu
   };
   const bridge = createEmbeddingBridge(environment, {
     artifactPolicy,
-    artifactVerifier,
     digestText,
     hostModule,
     primitives

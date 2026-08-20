@@ -2406,6 +2406,7 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       ? require("./trusted-shell-artifact-policy.js")
       : null);
   const NO_RECEIPT = null;
+  const lifecycles = new WeakMap();
   const verifiedReceipts = new WeakMap();
   const consumedReceipts = new WeakSet();
 
@@ -2413,16 +2414,34 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
     return Object.freeze({ status, ...values });
   }
 
+  function createArtifactLifecycle() {
+    const lifecycle = Object.freeze({});
+    lifecycles.set(lifecycle, { disposed: false, generation: 0 });
+    return lifecycle;
+  }
+
+  function invalidateArtifactLifecycle(lifecycle, terminal = false) {
+    const state = lifecycles.get(lifecycle);
+    if (!state || state.disposed) return false;
+    state.generation += 1;
+    if (terminal) state.disposed = true;
+    return true;
+  }
+
   async function verifyAndMaterialize(
-    environment, policy, binding, artifactHTML, materialize,
+    lifecycle, environment, policy, binding, artifactHTML, materialize,
     defaultDigestText, isCurrent
   ) {
-    if (!policySource.isNormalizedPolicy(policy) ||
+    const state = lifecycles.get(lifecycle);
+    if (!state || state.disposed || !policySource.isNormalizedPolicy(policy) ||
         !policySource.matchesBinding(policy, binding) ||
         !policySource.acceptsArtifactHTML(policy, artifactHTML) ||
         typeof materialize !== "function" || typeof isCurrent !== "function") {
       return result("digest-mismatch");
     }
+    const generation = state.generation;
+    const current = () => !state.disposed && state.generation === generation &&
+      isCurrent();
     const digestText = policy.elevated
       ? (value) => policySource.digestText(environment, value)
       : defaultDigestText;
@@ -2431,13 +2450,13 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
     if (artifactDigest !== binding.artifactDigest) {
       return result("digest-mismatch");
     }
-    if (!isCurrent()) return result("stale");
+    if (!current()) return result("stale");
     const materializedHTML = materialize();
     if (!policySource.acceptsMaterializedHTMLBytes(
       policy, materializedHTML
     )) return result("materialization-refused");
     const materializedDigest = await digestText(materializedHTML);
-    if (!isCurrent()) return result("stale");
+    if (!current()) return result("stale");
     if (!policySource.acceptsMaterializedHTML(
       policy, materializedHTML, materializedDigest
     )) return result("materialization-refused");
@@ -2445,7 +2464,7 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
     if (policy.elevated) {
       verificationReceipt = Object.freeze({});
       verifiedReceipts.set(verificationReceipt, Object.freeze({
-        artifactHTML, binding, materializedHTML, policy
+        artifactHTML, binding, generation, lifecycle, materializedHTML, policy
       }));
     }
     return result("verified", {
@@ -2455,21 +2474,24 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
   }
 
   function consumeArtifactReceipt(
-    policy, receipt, binding, artifactHTML, materializedHTML
+    lifecycle, policy, receipt, binding, artifactHTML, materializedHTML
   ) {
     const verified = verifiedReceipts.get(receipt);
     if (!verified || consumedReceipts.has(receipt)) return false;
     consumedReceipts.add(receipt);
-    return verified.policy === policy && verified.binding === binding &&
+    const state = lifecycles.get(lifecycle);
+    return Boolean(state && !state.disposed &&
+      verified.lifecycle === lifecycle && verified.generation === state.generation &&
+      verified.policy === policy && verified.binding === binding &&
       verified.artifactHTML === artifactHTML &&
-      verified.materializedHTML === materializedHTML;
+      verified.materializedHTML === materializedHTML);
   }
 
-  function beginVerifiedMount(admission, policy, configuration) {
+  function beginVerifiedMount(lifecycle, admission, policy, configuration) {
     const token = admission.begin();
     if (!policy.elevated) return token;
     if (!token || !consumeArtifactReceipt(
-      policy, configuration.verificationReceipt, configuration.binding,
+      lifecycle, policy, configuration.verificationReceipt, configuration.binding,
       configuration.artifactHTML, configuration.materializedHTML
     )) {
       admission.settle(token);
@@ -2481,6 +2503,8 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
   const exported = Object.freeze({
     beginVerifiedMount,
     consumeArtifactReceipt,
+    createArtifactLifecycle,
+    invalidateArtifactLifecycle,
     verifyAndMaterialize
   });
   global.NMPTrustedShellArtifactVerifier = exported;
@@ -2491,19 +2515,15 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
   <script data-source="trusted-shell-surface-host.js">
 (function trustedShellSurfaceHost(global) {
   "use strict";
-  const MAX_SURFACES = 16;
-  const MAX_SURFACE_ID_BYTES = 128;
-  const MAX_SESSION_ID_BYTES = 256;
-  const MAX_TITLE_BYTES = 1024;
-  const MAX_DOMAINS = 64;
-  const MAX_DOMAIN_BYTES = 64;
+  const MAX_SURFACES = 16, MAX_SURFACE_ID_BYTES = 128;
+  const MAX_SESSION_ID_BYTES = 256, MAX_TITLE_BYTES = 1024;
+  const MAX_DOMAINS = 64, MAX_DOMAIN_BYTES = 64;
   const MAX_NAPPLET_MESSAGES_PER_SECOND = 256;
   const primitiveSource = global.NMPTrustedShellPrimitives ||
     (typeof require === "function" ? require("./trusted-shell.js") : null);
   const artifactPolicySource = global.NMPTrustedShellArtifactPolicy ||
-    (typeof require === "function"
-      ? require("./trusted-shell-artifact-policy.js")
-      : null);
+    (typeof require === "function" ?
+      require("./trusted-shell-artifact-policy.js") : null);
   const artifactVerifierSource = global.NMPTrustedShellArtifactVerifier || (typeof require === "function" ? require("./trusted-shell-artifact-verifier.js") : null);
   const MAX_ARTIFACT_HTML_BYTES =
     artifactPolicySource.DEFAULT_MAX_ARTIFACT_HTML_BYTES;
@@ -2542,6 +2562,7 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
     const acceptMaterializedHTML = options.acceptMaterializedHTML === true;
     const now = typeof options.now === "function" ? options.now : Date.now;
     const admission = artifactPolicySource.createAdmission(artifactPolicy);
+    const artifactLifecycle = artifactVerifierSource.createArtifactLifecycle();
     const surfaces = new Map();
     let disposed = false;
     function closeAcknowledgement(state) {
@@ -2629,7 +2650,7 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
         return false;
       }
       const admissionToken = artifactVerifierSource.beginVerifiedMount(
-        admission, artifactPolicy, configuration);
+        artifactLifecycle, admission, artifactPolicy, configuration);
       if (artifactPolicy.elevated && !admissionToken) return false;
       const frame = environment.document.createElement("iframe");
       if (surfaceId === "default") {
@@ -2742,6 +2763,16 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       surfaces.delete(surfaceId);
       return true;
     }
+    const invalidateArtifactVerification = () => artifactPolicy.elevated &&
+      artifactVerifierSource.invalidateArtifactLifecycle(artifactLifecycle);
+    function verifyAndMaterialize(
+      binding, artifactHTML, materialize, defaultDigestText, isCurrent
+    ) {
+      return artifactVerifierSource.verifyAndMaterialize(
+        artifactLifecycle, environment, artifactPolicy, binding, artifactHTML,
+        materialize, defaultDigestText, isCurrent
+      );
+    }
     function dispose() {
       if (disposed) return;
       disposed = true;
@@ -2749,6 +2780,7 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
         unmount(surfaceId);
       }
       admission.dispose();
+      artifactVerifierSource.invalidateArtifactLifecycle(artifactLifecycle, true);
       if (typeof environment.removeEventListener === "function") {
         environment.removeEventListener("message", receiveNappletMessage);
       }
@@ -2756,15 +2788,12 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
     if (typeof environment.addEventListener === "function") {
       environment.addEventListener("message", receiveNappletMessage);
     }
-    return Object.freeze({ mount, receive, unmount, dispose });
+    return Object.freeze({ dispose, invalidateArtifactVerification, mount,
+      receive, unmount, verifyAndMaterialize });
   }
-  const exported = {
-    MAX_SURFACES,
-    MAX_ARTIFACT_HTML_BYTES,
-    MAX_MATERIALIZED_HTML_BYTES,
-    MAX_NAPPLET_MESSAGES_PER_SECOND,
-    createSurfaceHost
-  };
+  const exported = { MAX_SURFACES, MAX_ARTIFACT_HTML_BYTES,
+    MAX_MATERIALIZED_HTML_BYTES, MAX_NAPPLET_MESSAGES_PER_SECOND,
+    createSurfaceHost };
   if (global.document &&
       typeof global.addEventListener === "function" &&
       global.parent === global) {
@@ -2772,19 +2801,14 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
     exported.mount = host.mount;
     exported.receive = host.receive;
     exported.unmount = host.unmount;
-    global.__nmpTrustedShellMount = function mountDefault(configuration) {
-      return host.mount(
-        "default",
-        global.document.getElementById("surface"),
-        configuration
-      );
-    };
+    global.__nmpTrustedShellMount = (configuration) => host.mount(
+      "default", global.document.getElementById("surface"), configuration
+    );
     global.__nmpTrustedShellReceive = function receiveDefault(envelope) {
       return host.receive("default", envelope);
     };
   }
   global.NMPTrustedShellHost = Object.freeze(exported);
-
   if (typeof module !== "undefined" && module.exports) {
     module.exports = Object.freeze(exported);
   }
@@ -2917,17 +2941,12 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
   const artifactPolicySource = moduleSource(
     global.NMPTrustedShellArtifactPolicy, "./trusted-shell-artifact-policy.js"
   );
-  const artifactVerifierSource = moduleSource(
-    global.NMPTrustedShellArtifactVerifier, "./trusted-shell-artifact-verifier.js"
-  );
   function createEmbeddingBridge(environment, dependencies = {}) {
     const primitives = dependencies.primitives || primitiveSource;
     const hostModule = dependencies.hostModule || hostSource;
     const digestText = dependencies.digestText || ((value) => artifactPolicySource.digestText(global, value));
     const now = dependencies.now || Date.now;
-    const artifactVerifier = dependencies.artifactVerifier || artifactVerifierSource;
     if (!primitives || !hostModule || !contractSource || !artifactPolicySource ||
-        !artifactVerifier ||
         !environment || !environment.document ||
         !environment.parent || environment.parent === environment) {
       throw new Error("The trusted shell embedding bridge is unavailable");
@@ -2987,6 +3006,7 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       if (state) admission.release(state.admissionToken);
       pendingSurfaces.delete(surfaceId);
       bindings.delete(surfaceId);
+      host.invalidateArtifactVerification();
       host.unmount(surfaceId);
     }
     async function mount(request) {
@@ -3014,8 +3034,8 @@ ${preludeDomainsSource.DOMAIN_CLIENT_SOURCE}
       pendingSurfaces.set(request.surfaceId, mountToken);
       pendingMounts += 1;
       try {
-        const verified = await artifactVerifier.verifyAndMaterialize(
-          global, artifactPolicy, copied.binding, copied.artifactHTML,
+        const verified = await host.verifyAndMaterialize(
+          copied.binding, copied.artifactHTML,
           () => primitives.materialize(
             copied.artifactHTML, copied.artifactBaseURL, copied.domains
           ), digestText,

@@ -31,6 +31,8 @@ function createHarness(options = {}) {
     materializations: 0, srcdocAssignments: 0
   };
   let currentTime = 1000;
+  let generation = 0;
+  let disposed = false;
   const active = new Set();
   let forwardEnvelope;
   const primitives = {
@@ -50,6 +52,25 @@ function createHarness(options = {}) {
     createSurfaceHost(_environment, _primitives, options) {
       forwardEnvelope = options.forwardEnvelope;
       return {
+        async verifyAndMaterialize(
+          binding, artifactHTML, materialize, digestText, isCurrent
+        ) {
+          const currentGeneration = generation;
+          const current = () => !disposed && generation === currentGeneration &&
+            isCurrent();
+          const artifactDigest = await digestText(artifactHTML);
+          if (artifactDigest !== binding.artifactDigest) {
+            return Object.freeze({ status: "digest-mismatch" });
+          }
+          if (!current()) return Object.freeze({ status: "stale" });
+          const materializedHTML = materialize();
+          const materializedDigest = await digestText(materializedHTML);
+          if (!current()) return Object.freeze({ status: "stale" });
+          return Object.freeze({
+            status: "verified", materializedHTML, materializedDigest
+          });
+        },
+        invalidateArtifactVerification() { generation += 1; },
         mount(surfaceId, surface, configuration) {
           calls.srcdocAssignments += 1;
           calls.mounts.push({ surfaceId, surface, configuration });
@@ -64,7 +85,12 @@ function createHarness(options = {}) {
           calls.unmounts.push(surfaceId);
           return active.delete(surfaceId);
         },
-        dispose() { calls.disposed += 1; active.clear(); }
+        dispose() {
+          calls.disposed += 1;
+          disposed = true;
+          generation += 1;
+          active.clear();
+        }
       };
     }
   };

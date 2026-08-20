@@ -5,7 +5,6 @@ const crypto = require("node:crypto");
 const test = require("node:test");
 
 const policyModule = require("../trusted-shell-artifact-policy.js");
-const artifactVerifier = require("../trusted-shell-artifact-verifier.js");
 const { createSurfaceHost } = require("../trusted-shell-surface-host.js");
 const NO_ENVELOPE = null;
 
@@ -43,9 +42,9 @@ function binding(fixture) {
   });
 }
 
-async function verifiedReceipt(environment, fixture, manifestBinding) {
-  const verified = await artifactVerifier.verifyAndMaterialize(
-    environment, fixture.policy, manifestBinding, fixture.artifactHTML,
+async function verifiedReceipt(host, fixture, manifestBinding) {
+  const verified = await host.verifyAndMaterialize(
+    manifestBinding, fixture.artifactHTML,
     () => fixture.materializedHTML, undefined, () => true
   );
   assert.equal(verified.status, "verified");
@@ -96,12 +95,12 @@ test("surface host enforces the same normalized elevated policy at srcdoc", asyn
   const fixture = createFixture();
   const environment = createEnvironment();
   const manifestBinding = binding(fixture);
-  const receipt = await verifiedReceipt(environment, fixture, manifestBinding);
   const target = surface();
   const host = createSurfaceHost(environment, primitives(), {
     acceptMaterializedHTML: true,
     artifactPolicy: fixture.policy
   });
+  const receipt = await verifiedReceipt(host, fixture, manifestBinding);
   assert.equal(host.mount("rage", target, {
     session: "rage-session",
     artifactHTML: fixture.artifactHTML,
@@ -145,11 +144,11 @@ test("surface host refuses elevated byte or digest drift before srcdoc", async (
   }]) {
     const environment = createEnvironment();
     const manifestBinding = binding(fixture);
-    const receipt = await verifiedReceipt(environment, fixture, manifestBinding);
     const host = createSurfaceHost(environment, primitives(), {
       acceptMaterializedHTML: true,
       artifactPolicy: fixture.policy
     });
+    const receipt = await verifiedReceipt(host, fixture, manifestBinding);
     const target = surface();
     assert.equal(host.mount("rage", target, {
       session: "rage-session",
@@ -194,11 +193,11 @@ test("surface host receipt and admission cannot replay after teardown", async ()
   const fixture = createFixture();
   const environment = createEnvironment();
   const manifestBinding = binding(fixture);
-  const receipt = await verifiedReceipt(environment, fixture, manifestBinding);
   const host = createSurfaceHost(environment, primitives(), {
     acceptMaterializedHTML: true,
     artifactPolicy: fixture.policy
   });
+  const receipt = await verifiedReceipt(host, fixture, manifestBinding);
   const configuration = {
     session: "rage-session",
     artifactHTML: fixture.artifactHTML,
@@ -221,18 +220,18 @@ test("surface host receipt and admission cannot replay after teardown", async ()
 
   const disposeEnvironment = createEnvironment();
   const disposeBinding = binding(fixture);
+  const disposeHost = createSurfaceHost(disposeEnvironment, primitives(), {
+    acceptMaterializedHTML: true,
+    artifactPolicy: fixture.policy
+  });
   const disposeReceipt = await verifiedReceipt(
-    disposeEnvironment, fixture, disposeBinding
+    disposeHost, fixture, disposeBinding
   );
   const disposeConfiguration = {
     ...configuration,
     binding: disposeBinding,
     verificationReceipt: disposeReceipt
   };
-  const disposeHost = createSurfaceHost(disposeEnvironment, primitives(), {
-    acceptMaterializedHTML: true,
-    artifactPolicy: fixture.policy
-  });
   assert.equal(disposeHost.mount("rage", surface(), disposeConfiguration), true);
   disposeHost.dispose();
   const afterDispose = createSurfaceHost(createEnvironment(), primitives(), {
@@ -247,9 +246,11 @@ test("surface host receipt and admission cannot replay after teardown", async ()
   });
   const policyEnvironment = createEnvironment();
   const policyBinding = binding(fixture);
-  const policyReceipt = await verifiedReceipt(
-    policyEnvironment, fixture, policyBinding
-  );
+  const policyHost = createSurfaceHost(policyEnvironment, primitives(), {
+    acceptMaterializedHTML: true,
+    artifactPolicy: fixture.policy
+  });
+  const policyReceipt = await verifiedReceipt(policyHost, fixture, policyBinding);
   const changedHost = createSurfaceHost(createEnvironment(), primitives(), {
     acceptMaterializedHTML: true,
     artifactPolicy: changedPolicy
@@ -262,8 +263,12 @@ test("surface host receipt and admission cannot replay after teardown", async ()
 
   const mismatchEnvironment = createEnvironment();
   const mismatchBinding = binding(fixture);
+  const mismatchHost = createSurfaceHost(mismatchEnvironment, primitives(), {
+    acceptMaterializedHTML: true,
+    artifactPolicy: fixture.policy
+  });
   const mismatchReceipt = await verifiedReceipt(
-    mismatchEnvironment, fixture, mismatchBinding
+    mismatchHost, fixture, mismatchBinding
   );
   const mismatchConfiguration = {
     ...configuration,
@@ -271,10 +276,6 @@ test("surface host receipt and admission cannot replay after teardown", async ()
     binding: mismatchBinding,
     verificationReceipt: mismatchReceipt
   };
-  const mismatchHost = createSurfaceHost(mismatchEnvironment, primitives(), {
-    acceptMaterializedHTML: true,
-    artifactPolicy: fixture.policy
-  });
   assert.equal(mismatchHost.mount("rage", surface(), mismatchConfiguration), false);
   const mismatchReplay = createSurfaceHost(createEnvironment(), primitives(), {
     acceptMaterializedHTML: true,

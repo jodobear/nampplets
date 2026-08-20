@@ -18,17 +18,12 @@
   const artifactPolicySource = moduleSource(
     global.NMPTrustedShellArtifactPolicy, "./trusted-shell-artifact-policy.js"
   );
-  const artifactVerifierSource = moduleSource(
-    global.NMPTrustedShellArtifactVerifier, "./trusted-shell-artifact-verifier.js"
-  );
   function createEmbeddingBridge(environment, dependencies = {}) {
     const primitives = dependencies.primitives || primitiveSource;
     const hostModule = dependencies.hostModule || hostSource;
     const digestText = dependencies.digestText || ((value) => artifactPolicySource.digestText(global, value));
     const now = dependencies.now || Date.now;
-    const artifactVerifier = dependencies.artifactVerifier || artifactVerifierSource;
     if (!primitives || !hostModule || !contractSource || !artifactPolicySource ||
-        !artifactVerifier ||
         !environment || !environment.document ||
         !environment.parent || environment.parent === environment) {
       throw new Error("The trusted shell embedding bridge is unavailable");
@@ -88,6 +83,7 @@
       if (state) admission.release(state.admissionToken);
       pendingSurfaces.delete(surfaceId);
       bindings.delete(surfaceId);
+      host.invalidateArtifactVerification();
       host.unmount(surfaceId);
     }
     async function mount(request) {
@@ -115,8 +111,8 @@
       pendingSurfaces.set(request.surfaceId, mountToken);
       pendingMounts += 1;
       try {
-        const verified = await artifactVerifier.verifyAndMaterialize(
-          global, artifactPolicy, copied.binding, copied.artifactHTML,
+        const verified = await host.verifyAndMaterialize(
+          copied.binding, copied.artifactHTML,
           () => primitives.materialize(
             copied.artifactHTML, copied.artifactBaseURL, copied.domains
           ), digestText,
