@@ -44,7 +44,7 @@
       .map((byte) => byte.toString(16).padStart(2, "0")).join("");
   }
 
-  function snapshotDataFields(value, fields) {
+  function snapshotDataFields(value, requiredFields, optionalFields = []) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
       return NO_VALUE;
     }
@@ -54,18 +54,38 @@
     const keys = Reflect.ownKeys(descriptors);
     if (keys.some((field) => typeof field !== "string")) return NO_VALUE;
     const actual = keys.sort();
-    const expected = fields.slice().sort();
-    if (actual.length !== expected.length ||
-        !actual.every((field, index) => field === expected[index])) {
+    const required = requiredFields.slice().sort();
+    const allowed = new Set(required.concat(optionalFields));
+    if (!required.every((field) => actual.includes(field)) ||
+        !actual.every((field) => allowed.has(field))) {
       return NO_VALUE;
     }
     const snapshot = {};
-    for (const field of expected) {
+    for (const field of actual) {
       const descriptor = descriptors[field];
       if (!("value" in descriptor) || !descriptor.enumerable) return NO_VALUE;
       snapshot[field] = descriptor.value;
     }
     return Object.freeze(snapshot);
+  }
+
+  function snapshotArrayData(value) {
+    if (!Array.isArray(value)) return NO_VALUE;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(descriptors);
+    const length = descriptors.length;
+    if (keys.some((field) => typeof field !== "string") ||
+        !length || !("value" in length) || !Number.isSafeInteger(length.value)) {
+      return NO_VALUE;
+    }
+    const expected = Array.from({ length: length.value }, (_, index) =>
+      String(index));
+    if (keys.length !== expected.length + 1 ||
+        !keys.includes("length") || !expected.every((field) => {
+          const descriptor = descriptors[field];
+          return descriptor && "value" in descriptor && descriptor.enumerable;
+        })) return NO_VALUE;
+    return Object.freeze(expected.map((field) => descriptors[field].value));
   }
 
   function validPositiveInteger(value, maximum) {
@@ -248,6 +268,8 @@
     isNormalizedPolicy,
     matchesBinding,
     normalizeArtifactPolicy,
+    snapshotArrayData,
+    snapshotDataFields,
     utf8ByteLength
   });
   global.NMPTrustedShellArtifactPolicy = exported;

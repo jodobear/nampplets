@@ -690,15 +690,15 @@
       }
     },
     "trusted_shell_sha256": {
-      "trusted-shell-artifact-policy.js": "4c055e7f80b4a9b1c04de33ed9d0fbe326efde64010f8ff2ed01a3fffc9ce15a",
+      "trusted-shell-artifact-policy.js": "5ae678645c3a0f4271551dadee5424812a8958b10cf4f278fe05b2444afb5e43",
       "trusted-shell-artifact-verifier.js": "3fc9d08b5891f6933bc82c9d3ac212d954b9cd1b611228a59faa316a7dfd5c22",
-      "trusted-shell-embedded.html": "6c7ca93954b995c9bea555c3930ad8c63d6a47d17a2b65945793e2485f0bb392",
-      "trusted-shell-embedded.sha256": "f0455a4d7b800279531eb776723f93b21a9846fca15e0995c99744ccda294044",
+      "trusted-shell-embedded.html": "7b989455641e1abf1fd2fee40aa83b1078a9600690fc86b36f7527ee70575c57",
+      "trusted-shell-embedded.sha256": "efaec15d3d957d8aa7be27a7f5fc82eae9cde4f7e14b9fb39de44e4ab2caf792",
       "trusted-shell-embedding-contract.js": "95579e92c7d067e12bf5ea1a029dbc241b7681fe076dc9634c10f798bfce3781",
       "trusted-shell-embedding.js": "b0b719add7936409b3622a8aaebb84293b980ead6d710cf167d757ebac36c32f",
       "trusted-shell-policy.js": "d130c02862f8934caba77bfaca4a72cc2f94158daecfaf888830c0807e2352c4",
       "trusted-shell-prelude-domains.js": "d4c930f66df0ae1767147598d2a05b9940a06ba8f6681a1093af36e6e35251c5",
-      "trusted-shell-surface-host.js": "0b95fbec83bcef0812a18896a45127caa0c31202522e540200c8ac19deb1a36e",
+      "trusted-shell-surface-host.js": "939124d7350595716203a9f66b0b84db719ebba198a6336d2da299107349f590",
       "trusted-shell.css": "087218b55e44b7682b46e01ce0ea4afda1e743bb94ad116a145ee5567f993055",
       "trusted-shell.html": "5b37fdbc61af81e3770935cce4227c83a0c58918334d951c7ad5352a42574cdf",
       "trusted-shell.js": "f1a648993468098398a9e46413f7ed3721e2e2fce706ed3452ba1d1f04210f4d"
