@@ -35,8 +35,8 @@ mechanism, not a supported product facility. Canonical and Apple bootstraps do
 not enable it. Production activation requires a Rust-owned exact-build grant
 and native lifecycle, and remains prohibited until legacy compatibility is
 green. When an authorized host supplies the fixed policy,
-`trusted-shell-artifact-policy.js` enforces immutable 96 MiB artifact and
-100 MiB materialized hard ceilings for one exact outer document. Elevated
+`trusted-shell-artifact-policy.js` enforces immutable 120 MiB artifact and
+120 MiB materialized hard ceilings for one exact outer document. Elevated
 admission binds the exact source and materialized lengths and digests plus
 manifest author, d-tag, and aggregate hash.
 `trusted-shell-artifact-verifier.js` issues a module-private, one-use

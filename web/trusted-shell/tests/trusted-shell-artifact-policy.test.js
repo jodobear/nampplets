@@ -61,6 +61,22 @@ test("default policy preserves the existing byte ceilings", () => {
 test("elevated policy is exact-artifact-bound under immutable hard ceilings", () => {
   const fixture = elevatedPolicy();
   const policy = policyModule.normalizeArtifactPolicy(fixture.input);
+  assert.equal(
+    policyModule.HARD_MAX_ARTIFACT_HTML_BYTES,
+    120 * 1024 * 1024
+  );
+  assert.equal(
+    policyModule.HARD_MAX_MATERIALIZED_HTML_BYTES,
+    120 * 1024 * 1024
+  );
+  assert.equal(
+    policy.maximumArtifactHTMLBytes,
+    policyModule.HARD_MAX_ARTIFACT_HTML_BYTES
+  );
+  assert.equal(
+    policy.maximumMaterializedHTMLBytes,
+    policyModule.HARD_MAX_MATERIALIZED_HTML_BYTES
+  );
   assert.equal(Object.isFrozen(policy), true);
   assert.equal(policyModule.isNormalizedPolicy(policy), true);
   assert.deepEqual(
