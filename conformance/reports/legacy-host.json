@@ -690,10 +690,10 @@
       }
     },
     "trusted_shell_sha256": {
-      "trusted-shell-artifact-policy.js": "12cb7d577ed53956f71c550632c339a1902c8a5f420f03cf2516070881367d23",
+      "trusted-shell-artifact-policy.js": "534954ed130a364fb7e7a42b4222d6086d1bd446dd7cf41bdb42d73aa64c2205",
       "trusted-shell-artifact-verifier.js": "7013f7a45091d84de89ea88ca3e6b3735d112cab62d6ef48f4fb003c24b1e104",
-      "trusted-shell-embedded.html": "beff379af54592584c3314450f8fa117c6698d84c7195fd7486ee7cf44de0d2f",
-      "trusted-shell-embedded.sha256": "6e5a18dfddf8ad2d5f4854d8417798879119f3683b56d749ce2215c7c0ba0fd9",
+      "trusted-shell-embedded.html": "44ad3a6509b18963e6f34640953ac7721847e955ecb3326d8f1303474e450a54",
+      "trusted-shell-embedded.sha256": "8f3e5ee72343a05112f28e56579e9777928c18f04334b2e57200f1df36786cd3",
       "trusted-shell-embedding-contract.js": "04fe9eca342aac3c73ace09051e83900e1145957d461dff259a2ee86bb478992",
       "trusted-shell-embedding.js": "049e92cc05d44dde95238c8974ff10f339022f580b2d2f2b3b2d6eadbdb8167f",
       "trusted-shell-policy.js": "d130c02862f8934caba77bfaca4a72cc2f94158daecfaf888830c0807e2352c4",
