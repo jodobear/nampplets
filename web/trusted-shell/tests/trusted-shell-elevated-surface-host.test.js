@@ -259,6 +259,31 @@ test("surface host receipt and admission cannot replay after teardown", async ()
     binding: policyBinding,
     verificationReceipt: policyReceipt
   }), false);
+
+  const mismatchEnvironment = createEnvironment();
+  const mismatchBinding = binding(fixture);
+  const mismatchReceipt = await verifiedReceipt(
+    mismatchEnvironment, fixture, mismatchBinding
+  );
+  const mismatchConfiguration = {
+    ...configuration,
+    artifactHTML: `y${fixture.artifactHTML.slice(1)}`,
+    binding: mismatchBinding,
+    verificationReceipt: mismatchReceipt
+  };
+  const mismatchHost = createSurfaceHost(mismatchEnvironment, primitives(), {
+    acceptMaterializedHTML: true,
+    artifactPolicy: fixture.policy
+  });
+  assert.equal(mismatchHost.mount("rage", surface(), mismatchConfiguration), false);
+  const mismatchReplay = createSurfaceHost(createEnvironment(), primitives(), {
+    acceptMaterializedHTML: true,
+    artifactPolicy: fixture.policy
+  });
+  assert.equal(mismatchReplay.mount("rage", surface(), {
+    ...mismatchConfiguration,
+    artifactHTML: fixture.artifactHTML
+  }), false);
 });
 
 test("surface host refuses unnormalized policy lookalikes", () => {

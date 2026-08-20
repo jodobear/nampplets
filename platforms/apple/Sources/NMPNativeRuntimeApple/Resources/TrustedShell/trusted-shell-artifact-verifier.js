@@ -58,12 +58,11 @@
     policy, receipt, binding, artifactHTML, materializedHTML
   ) {
     const verified = verifiedReceipts.get(receipt);
-    if (!verified || consumedReceipts.has(receipt) ||
-        verified.policy !== policy || verified.binding !== binding ||
-        verified.artifactHTML !== artifactHTML ||
-        verified.materializedHTML !== materializedHTML) return false;
+    if (!verified || consumedReceipts.has(receipt)) return false;
     consumedReceipts.add(receipt);
-    return true;
+    return verified.policy === policy && verified.binding === binding &&
+      verified.artifactHTML === artifactHTML &&
+      verified.materializedHTML === materializedHTML;
   }
 
   function beginVerifiedMount(admission, policy, configuration) {
