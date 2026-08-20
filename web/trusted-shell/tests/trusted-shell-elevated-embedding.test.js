@@ -54,10 +54,10 @@ function createHarness(artifactPolicy, digestText = async (value) => digest(valu
       const isLifecycleCurrent = () => !disposed &&
         generation === currentGeneration && isCurrent();
       const artifactDigest = await digestText(artifactHTML);
+      if (!isLifecycleCurrent()) return Object.freeze({ status: "stale" });
       if (artifactDigest !== binding.artifactDigest) {
         return Object.freeze({ status: "digest-mismatch" });
       }
-      if (!isLifecycleCurrent()) return Object.freeze({ status: "stale" });
       const materializedHTML = materialize();
       if (!policyModule.acceptsMaterializedHTMLBytes(
         normalizedPolicy, materializedHTML
@@ -217,15 +217,22 @@ test("mutation, mount-selected policy, and materialized mismatch never reach src
   assert.equal(digestCalls, 1);
   assert.equal(oversizedHarness.calls.materializations, 1);
   assert.equal(oversizedHarness.calls.mounts, 0);
+
+  const sparseHarness = createHarness(exact.policy);
+  const sparse = mountRequest(exact.artifactHTML);
+  sparse.configuration.domains = new Array(1);
+  await dispatch(sparseHarness, sparse);
+  assert.equal(sparseHarness.calls.materializations, 0);
+  assert.equal(sparseHarness.calls.mounts, 0);
 });
 
-test("cancelled elevated digest holds reservation until settlement", async () => {
+test("cancelled mismatching digest is stale and holds reservation until settlement", async () => {
   const exact = fixture();
   let releaseDigest;
   const harness = createHarness(exact.policy, (value) => {
     if (value === exact.artifactHTML) {
       return new Promise((resolve) => {
-        releaseDigest = () => resolve(digest(value));
+        releaseDigest = () => resolve("0".repeat(64));
       });
     }
     return Promise.resolve(digest(value));
@@ -242,11 +249,13 @@ test("cancelled elevated digest holds reservation until settlement", async () =>
     session: "session-pending"
   });
   assert.equal(harness.bridge.stateCounts().elevatedPending, 1);
+  const postedAfterUnmount = harness.parent.posted.length;
   releaseDigest();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(harness.bridge.stateCounts().elevatedPending, 0);
   assert.equal(harness.calls.materializations, 0);
   assert.equal(harness.calls.mounts, 0);
+  assert.equal(harness.parent.posted.length, postedAfterUnmount);
 });
 
 test("page teardown invalidates authority but retains in-flight reservation", async () => {

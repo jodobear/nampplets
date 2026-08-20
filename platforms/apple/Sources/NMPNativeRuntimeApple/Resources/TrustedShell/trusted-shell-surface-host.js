@@ -52,6 +52,8 @@
     const now = typeof options.now === "function" ? options.now : Date.now;
     const admission = artifactPolicySource.createAdmission(artifactPolicy);
     const artifactLifecycle = artifactVerifierSource.createArtifactLifecycle();
+    const verification = artifactVerifierSource.createVerificationAdmission(
+      artifactPolicy, admission, artifactLifecycle, environment);
     const surfaces = new Map();
     let disposed = false;
     function closeAcknowledgement(state) {
@@ -141,8 +143,11 @@
           (!surfaces.has(surfaceId) && surfaces.size >= MAX_SURFACES)) {
         return false;
       }
+      const receipt = snapshot.verificationReceipt;
+      const reservedToken = artifactPolicy.elevated
+        ? verification.take(receipt) : null;
       const admissionToken = artifactVerifierSource.beginVerifiedMount(
-        artifactLifecycle, admission, artifactPolicy, snapshot);
+        artifactLifecycle, admission, artifactPolicy, snapshot, reservedToken);
       if (artifactPolicy.elevated && !admissionToken) return false;
       const frame = environment.document.createElement("iframe");
       if (surfaceId === "default") frame.id = "napplet-frame";
@@ -251,15 +256,12 @@
       surfaces.delete(surfaceId);
       return true;
     }
-    const invalidateArtifactVerification = () => artifactPolicy.elevated &&
-      artifactVerifierSource.invalidateArtifactLifecycle(artifactLifecycle);
-    function verifyAndMaterialize(
-      binding, artifactHTML, materialize, defaultDigestText, isCurrent
-    ) {
-      return artifactVerifierSource.verifyAndMaterialize(
-        artifactLifecycle, environment, artifactPolicy, binding, artifactHTML,
-        materialize, defaultDigestText, isCurrent
-      );
+    function invalidateArtifactVerification() {
+      if (!artifactPolicy.elevated) return false;
+      return verification.invalidate();
+    }
+    function verifyAndMaterialize(...argumentsList) {
+      return verification.verify(...argumentsList);
     }
     function dispose() {
       if (disposed) return;
@@ -267,14 +269,13 @@
       for (const surfaceId of Array.from(surfaces.keys())) {
         unmount(surfaceId);
       }
+      verification.invalidate(true);
       admission.dispose();
-      artifactVerifierSource.invalidateArtifactLifecycle(artifactLifecycle, true);
       if (typeof environment.removeEventListener === "function")
         environment.removeEventListener("message", receiveNappletMessage);
     }
-    if (typeof environment.addEventListener === "function") {
+    if (typeof environment.addEventListener === "function")
       environment.addEventListener("message", receiveNappletMessage);
-    }
     return Object.freeze({ dispose, invalidateArtifactVerification, mount,
       receive, unmount, verifyAndMaterialize });
   }

@@ -88,6 +88,8 @@
     }
     async function mount(request) {
       if (!contract.validMount(request)) return;
+      const domains = contract.snapshotDomains(request.configuration.domains);
+      if (!domains) return;
       if (pendingMounts >= MAX_PENDING_MOUNTS) {
         result(request.type, request, false, "overloaded");
         return;
@@ -103,7 +105,7 @@
         session: configuration.session,
         artifactHTML: configuration.artifactHTML,
         artifactBaseURL: configuration.artifactBaseURL,
-        domains: Object.freeze(configuration.domains.slice()),
+        domains,
         title: configuration.title,
         binding: Object.freeze({ ...configuration.binding })
       });

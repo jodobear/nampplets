@@ -249,3 +249,52 @@ test("domain snapshot refuses sparse and oversized arrays before admission", asy
   assert.equal(policyModule.snapshotArrayData(new Array(1), 64), null);
   assert.equal(issuingHost.mount("rage", surface(), config), true);
 });
+test("binding mutation during hashing cannot retarget verified bytes", async () => {
+  const exact = fixture();
+  const issuingHost = host(exact);
+  const mutableBinding = { ...binding(exact) };
+  const changedArtifact = `y${exact.artifactHTML.slice(1)}`;
+  const pending = issuingHost.verifyAndMaterialize(
+    mutableBinding,
+    changedArtifact,
+    () => exact.materializedHTML,
+    undefined,
+    () => true
+  );
+  mutableBinding.artifactDigest = digest(changedArtifact);
+  const verified = await pending;
+  assert.equal(verified.status, "digest-mismatch");
+  assert.equal(verified.verificationReceipt, undefined);
+});
+
+test("elevated verification admission permits one expensive attempt", async () => {
+  const exact = fixture();
+  const issuingHost = host(exact);
+  const manifestBinding = binding(exact);
+  let materializations = 0;
+  const first = issuingHost.verifyAndMaterialize(
+    manifestBinding,
+    exact.artifactHTML,
+    () => { materializations += 1; return exact.materializedHTML; },
+    undefined,
+    () => true
+  );
+  const concurrent = await issuingHost.verifyAndMaterialize(
+    manifestBinding, exact.artifactHTML,
+    () => { materializations += 1; return exact.materializedHTML; },
+    undefined, () => true
+  );
+  assert.equal(concurrent.status, "overloaded");
+  const verified = await first;
+  assert.equal(verified.status, "verified");
+  const repeated = await issuingHost.verifyAndMaterialize(
+    manifestBinding, exact.artifactHTML,
+    () => { materializations += 1; return exact.materializedHTML; },
+    undefined, () => true
+  );
+  assert.equal(repeated.status, "overloaded");
+  assert.equal(materializations, 1);
+  assert.equal(issuingHost.mount("rage", surface(), configuration(
+    exact, manifestBinding, verified.verificationReceipt
+  )), true);
+});

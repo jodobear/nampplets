@@ -57,6 +57,13 @@
         value.session === session;
     }
 
+    function snapshotDomains(value) {
+      const domains = artifactPolicySource.snapshotArrayData(value, MAX_DOMAINS);
+      return domains && domains.every((domain) =>
+        validText(domain, 64) && /^[a-z][a-z0-9-]*$/.test(domain)
+      ) ? domains : null;
+    }
+
     function validMount(request) {
       if (!exactFields(request, [
         "configuration", "requestId", "surfaceId", "type"
@@ -74,11 +81,7 @@
           configuration.artifactHTML
         ) &&
         primitives.isVerifiedArtifactBaseURL(configuration.artifactBaseURL) &&
-        Array.isArray(configuration.domains) &&
-        configuration.domains.length <= MAX_DOMAINS &&
-        configuration.domains.every((domain) =>
-          validText(domain, 64) && /^[a-z][a-z0-9-]*$/.test(domain)
-        ) &&
+        Boolean(snapshotDomains(configuration.domains)) &&
         validText(configuration.title, MAX_TITLE_BYTES, true) &&
         validBinding(configuration.binding, request.surfaceId, configuration.session) &&
         artifactPolicySource.matchesBinding(
@@ -89,6 +92,7 @@
 
     return Object.freeze({
       exactFields,
+      snapshotDomains,
       validMount,
       validRequestId,
       validSession,
