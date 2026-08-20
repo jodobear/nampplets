@@ -7,12 +7,30 @@
       : null);
   const NO_RECEIPT = null;
   const NO_TOKEN = null;
+  const BINDING_REQUIRED_FIELDS = Object.freeze([
+    "aggregateHash", "artifactDigest", "dTag", "manifestAuthor"
+  ]);
+  const BINDING_OPTIONAL_FIELDS = Object.freeze(["session", "surface"]);
   const lifecycles = new WeakMap();
   const verifiedReceipts = new WeakMap();
   const consumedReceipts = new WeakSet();
 
   function result(status, values = {}) {
     return Object.freeze({ status, ...values });
+  }
+
+  function snapshotBinding(binding) {
+    return policySource.snapshotDataFields(
+      binding, BINDING_REQUIRED_FIELDS, BINDING_OPTIONAL_FIELDS);
+  }
+
+  function bindingsMatch(left, right) {
+    if (!left || !right) return false;
+    const leftFields = Object.keys(left);
+    const rightFields = Object.keys(right);
+    return leftFields.length === rightFields.length && leftFields.every((field) =>
+      Object.prototype.hasOwnProperty.call(right, field) &&
+      left[field] === right[field]);
   }
 
   function createArtifactLifecycle() {
@@ -34,9 +52,7 @@
     defaultDigestText, isCurrent
   ) {
     const state = lifecycles.get(lifecycle);
-    const bindingSnapshot = policySource.snapshotDataFields(binding, [
-      "aggregateHash", "artifactDigest", "dTag", "manifestAuthor"
-    ], ["session", "surface"]);
+    const bindingSnapshot = snapshotBinding(binding);
     if (!state || state.disposed || !policySource.isNormalizedPolicy(policy) ||
         !bindingSnapshot || !policySource.matchesBinding(policy, bindingSnapshot) ||
         !policySource.acceptsArtifactHTML(policy, artifactHTML) ||
@@ -69,7 +85,7 @@
     if (policy.elevated) {
       verificationReceipt = Object.freeze({});
       verifiedReceipts.set(verificationReceipt, Object.freeze({
-        artifactHTML, binding, generation, lifecycle, materializedHTML, policy
+        artifactHTML, bindingSnapshot, generation, lifecycle, materializedHTML, policy
       }));
     }
     return result("verified", {
@@ -85,9 +101,11 @@
     if (!verified || consumedReceipts.has(receipt)) return false;
     consumedReceipts.add(receipt);
     const state = lifecycles.get(lifecycle);
+    const bindingSnapshot = snapshotBinding(binding);
     return Boolean(state && !state.disposed &&
       verified.lifecycle === lifecycle && verified.generation === state.generation &&
-      verified.policy === policy && verified.binding === binding &&
+      verified.policy === policy &&
+      bindingsMatch(verified.bindingSnapshot, bindingSnapshot) &&
       verified.artifactHTML === artifactHTML &&
       verified.materializedHTML === materializedHTML);
   }

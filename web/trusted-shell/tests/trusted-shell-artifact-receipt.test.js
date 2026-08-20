@@ -7,11 +7,9 @@ const test = require("node:test");
 const policyModule = require("../trusted-shell-artifact-policy.js");
 const { createSurfaceHost } = require("../trusted-shell-surface-host.js");
 const NO_ENVELOPE = null;
-
 function digest(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
-
 function fixture() {
   const artifactHTML = "x".repeat(
     policyModule.DEFAULT_MAX_ARTIFACT_HTML_BYTES + 1
@@ -32,7 +30,6 @@ function fixture() {
   });
   return { artifactHTML, materializedHTML, policy };
 }
-
 function environment() {
   return {
     crypto: crypto.webcrypto,
@@ -52,7 +49,6 @@ function environment() {
     removeEventListener() {}
   };
 }
-
 function primitives() {
   return {
     isPlainObject(value) {
@@ -65,14 +61,12 @@ function primitives() {
     projectNativeEnvelope() { return NO_ENVELOPE; }
   };
 }
-
 function host(exact, suppliedPrimitives = primitives()) {
   return createSurfaceHost(environment(), suppliedPrimitives, {
     acceptMaterializedHTML: true,
     artifactPolicy: exact.policy
   });
 }
-
 function binding(exact) {
   return Object.freeze({
     artifactDigest: exact.policy.artifactDigest,
@@ -81,7 +75,6 @@ function binding(exact) {
     aggregateHash: exact.policy.aggregateHash
   });
 }
-
 async function receipt(issuingHost, exact, manifestBinding) {
   const verified = await issuingHost.verifyAndMaterialize(
     manifestBinding,
@@ -136,6 +129,15 @@ test("receipt is bound to issuing host and current lifecycle", async () => {
 
 test("current issuing host consumes exact receipt once", async () => {
   const exact = fixture();
+  const mutableBinding = { ...binding(exact) };
+  const rejectedHost = host(exact);
+  const rejectedReceipt = await receipt(rejectedHost, exact, mutableBinding);
+  mutableBinding.dTag = "changed";
+  const rejectedTarget = surface();
+  assert.equal(rejectedHost.mount("rage", rejectedTarget, configuration(
+    exact, mutableBinding, rejectedReceipt
+  )), false);
+  assert.equal(rejectedTarget.frame, undefined);
   const issuingHost = host(exact);
   const manifestBinding = binding(exact);
   const verified = await receipt(issuingHost, exact, manifestBinding);
@@ -146,7 +148,6 @@ test("current issuing host consumes exact receipt once", async () => {
   issuingHost.unmount("rage");
   assert.equal(issuingHost.mount("rage", surface(), config), false);
 });
-
 test("mount snapshot rejects accessors without invoking them", async () => {
   const exact = fixture();
   const issuingHost = host(exact);
@@ -200,7 +201,6 @@ test("mount snapshot rejects accessors without invoking them", async () => {
   assert.equal(inheritedReads, 0);
   assert.equal(issuingHost.mount("rage", surface(), config), true);
 });
-
 test("post-snapshot caller mutation cannot alter the sealed sink", async () => {
   const exact = fixture();
   let config;

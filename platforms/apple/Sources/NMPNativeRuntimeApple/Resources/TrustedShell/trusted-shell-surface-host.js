@@ -2,8 +2,7 @@
   "use strict";
   const MAX_SURFACES = 16, MAX_SURFACE_ID_BYTES = 128;
   const MAX_SESSION_ID_BYTES = 256, MAX_TITLE_BYTES = 1024;
-  const MAX_DOMAINS = 64, MAX_DOMAIN_BYTES = 64;
-  const MAX_NAPPLET_MESSAGES_PER_SECOND = 256;
+  const MAX_DOMAINS = 64, MAX_DOMAIN_BYTES = 64, MAX_NAPPLET_MESSAGES_PER_SECOND = 256;
   const primitiveSource = global.NMPTrustedShellPrimitives ||
     (typeof require === "function" ? require("./trusted-shell.js") : null);
   const artifactPolicySource = global.NMPTrustedShellArtifactPolicy ||
@@ -18,6 +17,7 @@
     "artifactDigest", "binding", "domains", "materializedDigest",
     "materializedHTML", "onError", "onReady", "title", "verificationReceipt"
   ]);
+  const elevatedDocuments = new WeakSet();
   function validText(environment, value, maximumBytes, allowEmpty = false) {
     return typeof value === "string" &&
       (allowEmpty || value.length > 0) &&
@@ -42,9 +42,11 @@
     const artifactPolicy = typeof options.artifactPolicy === "undefined"
       ? artifactPolicySource.normalizeArtifactPolicy()
       : options.artifactPolicy;
-    if (!artifactPolicySource.isNormalizedPolicy(artifactPolicy)) {
-      throw new TypeError("trusted artifact policy must be normalized");
-    }
+    if (!artifactPolicySource.isNormalizedPolicy(artifactPolicy)) throw new TypeError(
+      "trusted artifact policy must be normalized");
+    if (artifactPolicy.elevated && elevatedDocuments.has(environment))
+      throw new Error("elevated trusted artifact host already exists");
+    if (artifactPolicy.elevated) elevatedDocuments.add(environment);
     const forwardEnvelope = typeof options.forwardEnvelope === "function"
       ? options.forwardEnvelope
       : null;
@@ -276,12 +278,10 @@
     }
     if (typeof environment.addEventListener === "function")
       environment.addEventListener("message", receiveNappletMessage);
-    return Object.freeze({ dispose, invalidateArtifactVerification, mount,
-      receive, unmount, verifyAndMaterialize });
+    return Object.freeze({ dispose, invalidateArtifactVerification, mount, receive, unmount, verifyAndMaterialize });
   }
-  const exported = { MAX_SURFACES, MAX_ARTIFACT_HTML_BYTES,
-    MAX_MATERIALIZED_HTML_BYTES, MAX_NAPPLET_MESSAGES_PER_SECOND,
-    createSurfaceHost };
+  const exported = { MAX_SURFACES, MAX_ARTIFACT_HTML_BYTES, MAX_MATERIALIZED_HTML_BYTES,
+    MAX_NAPPLET_MESSAGES_PER_SECOND, createSurfaceHost };
   if (global.document &&
       typeof global.addEventListener === "function" &&
       global.parent === global) {

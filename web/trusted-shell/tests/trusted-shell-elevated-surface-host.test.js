@@ -7,11 +7,9 @@ const test = require("node:test");
 const policyModule = require("../trusted-shell-artifact-policy.js");
 const { createSurfaceHost } = require("../trusted-shell-surface-host.js");
 const NO_ENVELOPE = null;
-
 function digest(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
-
 function createEnvironment() {
   const listeners = new Map();
   return {
@@ -32,7 +30,6 @@ function createEnvironment() {
     removeEventListener(type) { listeners.delete(type); }
   };
 }
-
 function binding(fixture) {
   return Object.freeze({
     artifactDigest: fixture.policy.artifactDigest,
@@ -41,7 +38,6 @@ function binding(fixture) {
     aggregateHash: fixture.policy.aggregateHash
   });
 }
-
 async function verifiedReceipt(host, fixture, manifestBinding) {
   const verified = await host.verifyAndMaterialize(
     manifestBinding, fixture.artifactHTML,
@@ -50,7 +46,6 @@ async function verifiedReceipt(host, fixture, manifestBinding) {
   assert.equal(verified.status, "verified");
   return verified.verificationReceipt;
 }
-
 function createFixture() {
   const artifactHTML = "x".repeat(
     policyModule.DEFAULT_MAX_ARTIFACT_HTML_BYTES + 1
@@ -293,4 +288,13 @@ test("surface host refuses unnormalized policy lookalikes", () => {
     acceptMaterializedHTML: true,
     artifactPolicy: { ...fixture.policy }
   }), /must be normalized/);
+});
+
+test("one document cannot create two elevated hosts", () => {
+  const fixture = createFixture();
+  const environment = createEnvironment();
+  const options = { acceptMaterializedHTML: true, artifactPolicy: fixture.policy };
+  createSurfaceHost(environment, primitives(), options);
+  assert.throws(() => createSurfaceHost(environment, primitives(), options),
+    /already exists/);
 });
