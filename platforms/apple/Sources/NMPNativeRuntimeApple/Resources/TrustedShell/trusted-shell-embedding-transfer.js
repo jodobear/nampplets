@@ -42,6 +42,17 @@
     let reservedBytes = 0;
     let disposed = false;
 
+    function armDeadline(surfaceId, transfer) {
+      if (transfer.timer !== null) clearTimer(transfer.timer);
+      transfer.timer = scheduleTimer(() => {
+        const current = transfers.get(surfaceId);
+        if (current !== transfer) return;
+        retire(surfaceId);
+        result(transfer.expiryRequest.type, transfer.expiryRequest, false,
+          "transfer-expired");
+      }, TRANSFER_DEADLINE_MS);
+    }
+
     function remove(surfaceId, settle = true) {
       const transfer = transfers.get(surfaceId);
       if (!transfer) return null;
@@ -104,6 +115,7 @@
       const transfer = {
         admissionToken,
         bytes,
+        expiryRequest,
         nextOffset: 0,
         transferId: request.requestId,
         configuration: Object.freeze({
@@ -115,14 +127,9 @@
         }),
         timer: null
       };
-      transfer.timer = scheduleTimer(() => {
-        const current = transfers.get(request.surfaceId);
-        if (current !== transfer) return;
-        retire(request.surfaceId);
-        result(request.type, expiryRequest, false, "transfer-expired");
-      }, TRANSFER_DEADLINE_MS);
       transfers.set(request.surfaceId, transfer);
       reservedBytes += bytes.byteLength;
+      armDeadline(request.surfaceId, transfer);
       result(request.type, request, true, null);
     }
 
@@ -155,6 +162,8 @@
       }
       transfer.bytes.set(new Uint8ArrayType(request.bytes), request.offset);
       transfer.nextOffset += request.bytes.byteLength;
+      armDeadline(request.surfaceId, transfer);
+      result(request.type, request, true, null);
     }
 
     function commit(request) {

@@ -215,3 +215,43 @@ test("abandoned transfer expires and releases its reservation", async () => {
   assert.equal(harness.calls.mounts.length, 0);
   harness.listeners.get("pagehide")();
 });
+
+test("accepted chunks acknowledge progress and renew the finite deadline", async () => {
+  const timers = [];
+  const harness = createHarness({
+    clearTransferTimeout(id) {
+      const timer = timers.find((candidate) => candidate.id === id);
+      if (timer) timer.cleared = true;
+    },
+    setTransferTimeout(callback, milliseconds) {
+      const timer = {
+        callback,
+        cleared: false,
+        id: timers.length + 1,
+        milliseconds
+      };
+      timers.push(timer);
+      return timer.id;
+    }
+  });
+  const [begin, chunk] = chunkedMountRequests(harness, "progress", "x");
+  await dispatch(harness, begin);
+  assert.equal(timers.length, 1);
+  await dispatch(harness, chunk);
+  assert.equal(timers[0].cleared, true);
+  assert.equal(timers.length, 2);
+  assert.equal(timers[1].milliseconds, TRANSFER_DEADLINE_MS);
+  assert.deepEqual(harness.parent.posted.at(-1).message, {
+    type: "nmp.outer.mount.chunk.result",
+    requestId: chunk.requestId,
+    surfaceId: chunk.surfaceId,
+    session: chunk.session,
+    ok: true,
+    error: null,
+    binding: null
+  });
+  timers[1].callback();
+  assert.equal(harness.parent.posted.at(-1).message.error, "transfer-expired");
+  assert.equal(harness.bridge.stateCounts().pendingTransfers, 0);
+  harness.listeners.get("pagehide")();
+});

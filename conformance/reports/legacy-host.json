@@ -692,10 +692,10 @@
     "trusted_shell_sha256": {
       "trusted-shell-artifact-policy.js": "dfb61134d634e4e21fe74b24464e124b57ec081b8a281e22c26d5454461667b0",
       "trusted-shell-artifact-verifier.js": "7013f7a45091d84de89ea88ca3e6b3735d112cab62d6ef48f4fb003c24b1e104",
-      "trusted-shell-embedded.html": "90971bff53fc9758f7700d8fff86b3d5bba4b792c646bc3211cee53a722d99a4",
-      "trusted-shell-embedded.sha256": "3194fe1df2473b5ee38c013080f9e756c81b71922d7b466444247044e01c6bd9",
+      "trusted-shell-embedded.html": "138710b91e638a1d00c4665f1e0e0f277ee91feab6e537267ddf6d69e5c644cb",
+      "trusted-shell-embedded.sha256": "8fb3c21a77ef6d78ad6c03475a1e1a4a0429650c904f880eef6206fa49da3ce1",
       "trusted-shell-embedding-contract.js": "53029feb0a6254ac0c738aa3b9f630d936bc47e7c8af79a115196d40563268c5",
-      "trusted-shell-embedding-transfer.js": "119b682f3f7d5eb6b0b704b228b1c1606d3cee222b79e727d1ba0f3b575132e9",
+      "trusted-shell-embedding-transfer.js": "7194617667ff6272d5f48ed697a1b4cc891ed005c82374e8d6f4c693c25afb1e",
       "trusted-shell-embedding.js": "e308057d4cfc7b8a73af5417d71b652a7397222a10d3c9f750a4bcfadf82e920",
       "trusted-shell-policy.js": "d130c02862f8934caba77bfaca4a72cc2f94158daecfaf888830c0807e2352c4",
       "trusted-shell-prelude-domains.js": "d4c930f66df0ae1767147598d2a05b9940a06ba8f6681a1093af36e6e35251c5",
