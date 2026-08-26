@@ -213,6 +213,7 @@ pub(super) fn open_runtime_controller(
             config.artifact_limits,
             config.maximum_manifest_bytes,
             config.maximum_blob_sources,
+            config.catalog_operation_deadline,
         )
         .map_err(|error| RuntimeOpenError::Runtime {
             detail: format!("catalog: {error}"),
