@@ -1,5 +1,7 @@
 //! Native-supplied runtime configuration and its validated Rust-owned form.
 
+use std::time::Duration;
+
 use nmp_native_artifact::ArtifactLimits;
 use nmp_native_nap_bridge::ProviderPushLimits;
 
@@ -8,6 +10,9 @@ use crate::{
     DEFAULT_MAXIMUM_CONFIG_ITEMS, DEFAULT_MAXIMUM_CONFIG_STRING_BYTES,
     DEFAULT_MAXIMUM_MANIFEST_BYTES, DEFAULT_MAXIMUM_OBSERVERS,
 };
+
+const DEFAULT_CATALOG_OPERATION_DEADLINE_MILLIS: u64 = 15_000;
+pub(crate) const MAXIMUM_CATALOG_OPERATION_DEADLINE_MILLIS: u64 = 10 * 60 * 1_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum RuntimePermissionDefault {
@@ -38,6 +43,7 @@ pub struct RuntimeConfig {
     pub maximum_artifact_file_bytes: u64,
     pub maximum_artifact_total_bytes: u64,
     pub maximum_verified_read_bytes: u64,
+    pub catalog_operation_deadline_millis: u64,
     pub maximum_blob_sources: u64,
     pub permission_default: RuntimePermissionDefault,
 }
@@ -59,6 +65,18 @@ impl RuntimeConfig {
             self.maximum_verified_read_bytes,
             "maximum_verified_read_bytes",
         )?;
+        if self.catalog_operation_deadline_millis == 0
+            || self.catalog_operation_deadline_millis > MAXIMUM_CATALOG_OPERATION_DEADLINE_MILLIS
+        {
+            return Err(RuntimeOpenError::InvalidConfig {
+                detail: format!(
+                    "catalog_operation_deadline_millis must be between 1 and \
+                     {MAXIMUM_CATALOG_OPERATION_DEADLINE_MILLIS}"
+                ),
+            });
+        }
+        let catalog_operation_deadline =
+            Duration::from_millis(self.catalog_operation_deadline_millis);
         let maximum_bridge_workers =
             nonzero_usize(self.maximum_bridge_workers, "maximum_bridge_workers")?;
         let maximum_provider_push_envelope_bytes = provider_push_capacity(
@@ -143,6 +161,7 @@ impl RuntimeConfig {
             maximum_manifest_bytes,
             artifact_limits,
             maximum_verified_read_bytes,
+            catalog_operation_deadline,
             maximum_blob_sources,
             maximum_command_items: maximum_config_items,
             maximum_command_string_bytes: maximum_config_string_bytes,
@@ -176,6 +195,7 @@ impl Default for RuntimeConfig {
             maximum_artifact_file_bytes: DEFAULT_MAXIMUM_ARTIFACT_READ_BYTES,
             maximum_artifact_total_bytes: 32 * 1_024 * 1_024,
             maximum_verified_read_bytes: DEFAULT_MAXIMUM_ARTIFACT_READ_BYTES,
+            catalog_operation_deadline_millis: DEFAULT_CATALOG_OPERATION_DEADLINE_MILLIS,
             maximum_blob_sources: 8,
             permission_default: RuntimePermissionDefault::AskEveryTime,
         }
@@ -199,6 +219,7 @@ pub(crate) struct ValidatedConfig {
     pub(crate) maximum_manifest_bytes: usize,
     pub(crate) artifact_limits: ArtifactLimits,
     pub(crate) maximum_verified_read_bytes: usize,
+    pub(crate) catalog_operation_deadline: Duration,
     pub(crate) maximum_blob_sources: usize,
     pub(crate) maximum_command_items: usize,
     pub(crate) maximum_command_string_bytes: usize,

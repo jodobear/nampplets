@@ -20,6 +20,7 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
         let storageRoot: URL
         let indexerRelays: [String]
         let appRelays: [String]
+        let catalogOperationDeadlineMillis: UInt64
         let accountPersistence: NativeRuntimeAccountPersistence
         let permissionDefault: NativeRuntimePermissionDefault
     }
@@ -113,6 +114,7 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
         storageRoot: URL,
         indexerRelays: [String] = [],
         appRelays: [String] = [],
+        catalogOperationDeadlineMillis: UInt64 = 15_000,
         accountPersistence: NativeRuntimeAccountPersistence = .transient,
         permissionDefault: NativeRuntimePermissionDefault = .askEveryTime,
         persistedArtifactResolver: PersistedArtifactResolver? = nil
@@ -122,6 +124,8 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
                 storageRoot: storageRoot,
                 indexerRelays: indexerRelays,
                 appRelays: appRelays,
+                catalogOperationDeadlineMillis:
+                    catalogOperationDeadlineMillis,
                 accountPersistence: accountPersistence,
                 permissionDefault: permissionDefault
             )
@@ -132,6 +136,8 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
                 storageRoot: storageRoot,
                 indexerRelays: indexerRelays,
                 appRelays: appRelays,
+                catalogOperationDeadlineMillis:
+                    catalogOperationDeadlineMillis,
                 accountPersistence: accountPersistence,
                 permissionDefault: permissionDefault
             ),
@@ -165,6 +171,8 @@ public final class WorkbenchRuntimeProfile: @unchecked Sendable {
             storageRoot: openingConfiguration.storageRoot,
             indexerRelays: openingConfiguration.indexerRelays,
             appRelays: openingConfiguration.appRelays,
+            catalogOperationDeadlineMillis:
+                openingConfiguration.catalogOperationDeadlineMillis,
             accountPersistence: openingConfiguration.accountPersistence,
             permissionDefault: openingConfiguration.permissionDefault,
             persistedArtifactResolver: persistedArtifactResolver

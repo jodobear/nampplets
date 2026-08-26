@@ -19,6 +19,12 @@ fn initial_feed_snapshot_is_connecting_instead_of_terminally_empty() {
     assert_eq!(frame.window_load, WindowLoad::Requesting);
 }
 
+#[test]
+fn catalog_operation_deadline_also_bounds_https_acquisition() {
+    let deadline = Duration::from_secs(300);
+    assert_eq!(https_acquisition_config(deadline).deadline, deadline);
+}
+
 #[ignore = "requires explicit public relay and HTTPS access"]
 #[test]
 fn live_exact_manifest_confirms_into_a_verified_artifact() {
@@ -61,6 +67,7 @@ fn live_exact_manifest_confirms_into_a_verified_artifact() {
         artifact_limits,
         1024 * 1024,
         8,
+        Duration::from_secs(15),
     )
     .expect("the bounded runtime catalog service must open");
 
