@@ -84,15 +84,22 @@
       host.invalidateArtifactVerification();
       host.unmount(surfaceId);
     }
-    async function mount(request) {
-      if (!contract.validMount(request)) return;
+    async function mount(request, reservedAdmissionToken = null) {
+      if (!contract.validMount(request)) {
+        admission.settle(reservedAdmissionToken);
+        return;
+      }
       const domains = contract.snapshotDomains(request.configuration.domains);
-      if (!domains) return;
+      if (!domains) {
+        admission.settle(reservedAdmissionToken);
+        return;
+      }
       if (pendingMounts >= MAX_PENDING_MOUNTS) {
+        admission.settle(reservedAdmissionToken);
         result(request.type, request, false, "overloaded");
         return;
       }
-      const admissionToken = admission.begin();
+      const admissionToken = reservedAdmissionToken || admission.begin();
       if (artifactPolicy.elevated && !admissionToken) {
         result(request.type, request, false, "overloaded");
         return;
@@ -193,10 +200,14 @@
       beforeBegin: invalidate,
       clearTimeout: dependencies.clearTransferTimeout,
       contract,
-      onComplete(request) { void mount(request); },
+      onComplete(request, admissionToken) {
+        void mount(request, admissionToken);
+      },
       primitives,
+      reserveAdmission: admission.begin,
       result,
-      setTimeout: dependencies.setTransferTimeout
+      setTimeout: dependencies.setTransferTimeout,
+      settleAdmission: admission.settle
     });
     function receiveParentMessage(event) {
       if (disposed || event.source !== parentWindow ||

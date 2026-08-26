@@ -58,8 +58,10 @@ replay, overflow, a 30-second transfer deadline, remount, unmount, and page
 teardown retire the bounded transfer. Exactly expected chunks use the
 transfer's byte and sequence bounds instead of the generic parent-message
 window, so the full finite 120 MiB allowance cannot be dropped mid-transfer.
-A replacement is allocated and admitted before the current surface is
-invalidated. The original one-message mount remains the compatibility path for
+Elevated one-use admission is reserved at begin. A replacement is allocated
+and admitted before the current surface is invalidated, and a transfer replay
+is refused while its old buffer would make the new allocation exceed the hard
+ceiling. The original one-message mount remains the compatibility path for
 small artifacts.
 
 Parent rate overflow emits one fixed `nmp.outer.rate-limited` diagnostic per

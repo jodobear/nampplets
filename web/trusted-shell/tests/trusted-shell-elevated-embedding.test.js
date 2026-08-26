@@ -101,7 +101,7 @@ function createHarness(artifactPolicy, digestText = async (value) => digest(valu
           active.add(surfaceId);
           return true;
         },
-        receive() { return false; },
+        receive(surfaceId) { return active.has(surfaceId); },
         unmount(surfaceId) {
           calls.unmounts += 1;
           return active.delete(surfaceId);
@@ -216,6 +216,43 @@ test("exact elevated artifact is exclusive for one outer lifecycle", async () =>
   await dispatch(harness, mountRequest(exact.artifactHTML, "session-remount"));
   assert.equal(harness.calls.mounts, 1);
   assert.equal(harness.parent.posted.at(-1).error, "overloaded");
+});
+
+test("elevated transfer admission preserves active and pending exclusivity", async () => {
+  const exact = fixture();
+  const activeHarness = createHarness(exact.policy);
+  await dispatch(activeHarness, mountRequest(exact.artifactHTML));
+  const unmounts = activeHarness.calls.unmounts;
+  await dispatch(activeHarness, chunkedMountRequests(
+    exact.artifactHTML, "replacement"
+  )[0]);
+  assert.equal(activeHarness.parent.posted.at(-1).error, "overloaded");
+  assert.equal(activeHarness.calls.unmounts, unmounts);
+  assert.equal(activeHarness.bridge.stateCounts().bindings, 1);
+  await dispatch(activeHarness, {
+    type: "nmp.outer.deliver",
+    requestId: "deliver-active",
+    surfaceId: "surface-a",
+    session: "session-large",
+    envelope: { type: "shell.init" }
+  });
+  assert.equal(activeHarness.parent.posted.at(-1).ok, true);
+  activeHarness.listeners.get("pagehide")();
+
+  const pendingHarness = createHarness(exact.policy);
+  await dispatch(pendingHarness, chunkedMountRequests(
+    exact.artifactHTML, "first", "surface-first"
+  )[0]);
+  await dispatch(pendingHarness, chunkedMountRequests(
+    exact.artifactHTML, "second", "surface-second"
+  )[0]);
+  assert.equal(pendingHarness.parent.posted.at(-1).error, "overloaded");
+  assert.equal(pendingHarness.bridge.stateCounts().pendingTransfers, 1);
+  assert.equal(
+    pendingHarness.bridge.stateCounts().reservedTransferBytes,
+    exact.policy.exactArtifactHTMLBytes
+  );
+  pendingHarness.listeners.get("pagehide")();
 });
 
 test("exact elevated artifact reconstructs through bounded chunks", async () => {

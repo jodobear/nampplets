@@ -11,7 +11,8 @@
 
   function createTransferManager(environment, dependencies) {
     const {
-      artifactPolicy, beforeBegin, contract, onComplete, primitives, result
+      artifactPolicy, beforeBegin, contract, onComplete, primitives,
+      reserveAdmission, result, settleAdmission
     } = dependencies;
     const ArrayBufferType = environment && (environment.ArrayBuffer || global.ArrayBuffer);
     const TextDecoderType = environment && (environment.TextDecoder || global.TextDecoder);
@@ -33,20 +34,28 @@
         !artifactPolicySource.isNormalizedPolicy(artifactPolicy) ||
         typeof beforeBegin !== "function" || !contract ||
         typeof onComplete !== "function" ||
-        !primitives || typeof result !== "function") {
+        !primitives || typeof reserveAdmission !== "function" ||
+        typeof result !== "function" || typeof settleAdmission !== "function") {
       throw new TypeError("trusted artifact transfer dependencies are unavailable");
     }
     const transfers = new Map();
     let reservedBytes = 0;
     let disposed = false;
 
-    function retire(surfaceId) {
+    function remove(surfaceId, settle = true) {
       const transfer = transfers.get(surfaceId);
-      if (!transfer) return false;
+      if (!transfer) return null;
       transfers.delete(surfaceId);
       clearTimer(transfer.timer);
       reservedBytes -= transfer.bytes.byteLength;
-      return true;
+      if (settle && transfer.admissionToken) {
+        settleAdmission(transfer.admissionToken);
+      }
+      return transfer;
+    }
+
+    function retire(surfaceId) {
+      return Boolean(remove(surfaceId));
     }
 
     function validIdentity(request) {
@@ -59,18 +68,19 @@
     function begin(request) {
       if (!contract.validMountBegin(request)) return;
       const configuration = request.configuration;
-      const replaced = transfers.get(request.surfaceId);
-      const retainedCount = transfers.size - (replaced ? 1 : 0);
-      const retainedBytes = reservedBytes -
-        (replaced ? replaced.bytes.byteLength : 0);
-      if (disposed || retainedCount >= MAX_PENDING_TRANSFERS ||
-          retainedBytes + configuration.artifactBytes >
+      if (disposed || transfers.size >= MAX_PENDING_TRANSFERS ||
+          reservedBytes + configuration.artifactBytes >
             artifactPolicySource.HARD_MAX_ARTIFACT_HTML_BYTES) {
         result(request.type, request, false, "overloaded");
         return;
       }
       const domains = contract.snapshotDomains(configuration.domains);
       if (!domains) return;
+      const admissionToken = artifactPolicy.elevated ? reserveAdmission() : null;
+      if (artifactPolicy.elevated && !admissionToken) {
+        result(request.type, request, false, "overloaded");
+        return;
+      }
       let bytes;
       try {
         bytes = allocateBytes(configuration.artifactBytes);
@@ -79,6 +89,7 @@
           throw new TypeError("invalid transfer allocation");
         }
       } catch (_) {
+        if (admissionToken) settleAdmission(admissionToken);
         result(request.type, request, false, "overloaded");
         return;
       }
@@ -91,6 +102,7 @@
         configuration: Object.freeze({ session: configuration.session })
       });
       const transfer = {
+        admissionToken,
         bytes,
         nextOffset: 0,
         transferId: request.requestId,
@@ -174,17 +186,17 @@
         refuse(request, "transfer-refused");
         return;
       }
+      const completed = remove(request.surfaceId, false);
       const configuration = Object.freeze({
-        ...transfer.configuration,
+        ...completed.configuration,
         artifactHTML
       });
-      retire(request.surfaceId);
       onComplete(Object.freeze({
         type: request.type,
         requestId: request.requestId,
         surfaceId: request.surfaceId,
         configuration
-      }));
+      }), completed.admissionToken);
     }
 
     function handle(request) {

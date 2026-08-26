@@ -7,7 +7,8 @@ const {
 } = require("../trusted-shell-embedding.js");
 const {
   ARTIFACT_CHUNK_BYTES,
-  TRANSFER_DEADLINE_MS
+  TRANSFER_DEADLINE_MS,
+  createTransferManager
 } = require("../trusted-shell-embedding-transfer.js");
 const policyModule = require("../trusted-shell-artifact-policy.js");
 const {
@@ -84,6 +85,62 @@ test("expected chunks beyond the parent message window remain finite", async () 
   assert.equal(harness.parent.posted.some(({ message }) =>
     message.type === "nmp.outer.rate-limited"), false);
   harness.listeners.get("pagehide")();
+});
+
+test("full-cap transfer replay preserves old bytes without allocating", () => {
+  const allocations = [];
+  const results = [];
+  class FakeBytes {
+    constructor(length) {
+      this.byteLength = length;
+      allocations.push(length);
+    }
+    set() {}
+  }
+  const manager = createTransferManager({
+    ArrayBuffer,
+    TextDecoder,
+    Uint8Array: FakeBytes,
+    clearTimeout() {},
+    setTimeout() { return 1; }
+  }, {
+    artifactPolicy: policyModule.normalizeArtifactPolicy(),
+    beforeBegin() {},
+    contract: {
+      snapshotDomains() { return Object.freeze(["shell"]); },
+      validMountBegin() { return true; }
+    },
+    onComplete() {},
+    primitives: {},
+    reserveAdmission() { return null; },
+    result(_type, _request, ok, error) { results.push({ ok, error }); },
+    settleAdmission() {}
+  });
+  const request = {
+    type: "nmp.outer.mount.begin",
+    requestId: "full-cap",
+    surfaceId: "surface-a",
+    configuration: {
+      artifactBytes: policyModule.HARD_MAX_ARTIFACT_HTML_BYTES,
+      artifactBaseURL: "nmp-artifact://session/",
+      binding: Object.freeze({}),
+      domains: ["shell"],
+      session: "full-cap-session",
+      title: "Full cap"
+    }
+  };
+  manager.handle(request);
+  manager.handle(request);
+  assert.deepEqual(allocations, [policyModule.HARD_MAX_ARTIFACT_HTML_BYTES]);
+  assert.deepEqual(results, [
+    { ok: true, error: null },
+    { ok: false, error: "overloaded" }
+  ]);
+  assert.deepEqual(manager.counts(), {
+    pendingTransfers: 1,
+    reservedTransferBytes: policyModule.HARD_MAX_ARTIFACT_HTML_BYTES
+  });
+  manager.dispose();
 });
 
 test("chunk reconstruction preserves BOM and split multibyte bytes", async () => {
