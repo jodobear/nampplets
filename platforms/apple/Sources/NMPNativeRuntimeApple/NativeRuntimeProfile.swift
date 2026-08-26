@@ -162,6 +162,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
                 allowedLocalRelayHosts: configuration.allowedLocalRelayHosts,
                 maximumNmpRelays: 64,
                 maximumBridgeWorkers: 12,
+                maximumProviderPushEnvelopeBytes: 256 * 1_024,
+                maximumProviderPushPendingBytes: 512 * 1_024,
                 maximumObservers: 4,
                 maximumBoundaryEvents: 256,
                 maximumConfigItems: 64,
@@ -171,6 +173,8 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
                 maximumArtifactFileBytes: Self.maximumReadBytes,
                 maximumArtifactTotalBytes: 32 * 1_024 * 1_024,
                 maximumVerifiedReadBytes: Self.maximumReadBytes,
+                catalogOperationDeadlineMillis:
+                    configuration.catalogOperationDeadlineMillis,
                 maximumBlobSources: 8,
                 permissionDefault: configuration.permissionDefault
             ),

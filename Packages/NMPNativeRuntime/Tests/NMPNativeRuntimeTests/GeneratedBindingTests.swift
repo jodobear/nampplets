@@ -265,6 +265,8 @@ final class GeneratedBindingTests: XCTestCase {
             allowedLocalRelayHosts: [],
             maximumNmpRelays: 8,
             maximumBridgeWorkers: 4,
+            maximumProviderPushEnvelopeBytes: 262_144,
+            maximumProviderPushPendingBytes: 524_288,
             maximumObservers: 2,
             maximumBoundaryEvents: 16,
             maximumConfigItems: 16,
@@ -274,6 +276,7 @@ final class GeneratedBindingTests: XCTestCase {
             maximumArtifactFileBytes: 1_048_576,
             maximumArtifactTotalBytes: 4_194_304,
             maximumVerifiedReadBytes: 1_048_576,
+            catalogOperationDeadlineMillis: 15_000,
             maximumBlobSources: 4,
             permissionDefault: .askEveryTime
         )

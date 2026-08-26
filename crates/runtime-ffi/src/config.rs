@@ -1,12 +1,18 @@
 //! Native-supplied runtime configuration and its validated Rust-owned form.
 
+use std::time::Duration;
+
 use nmp_native_artifact::ArtifactLimits;
+use nmp_native_nap_bridge::ProviderPushLimits;
 
 use crate::{
     DEFAULT_MAXIMUM_ARTIFACT_READ_BYTES, DEFAULT_MAXIMUM_BOUNDARY_EVENTS,
     DEFAULT_MAXIMUM_CONFIG_ITEMS, DEFAULT_MAXIMUM_CONFIG_STRING_BYTES,
     DEFAULT_MAXIMUM_MANIFEST_BYTES, DEFAULT_MAXIMUM_OBSERVERS,
 };
+
+const DEFAULT_CATALOG_OPERATION_DEADLINE_MILLIS: u64 = 15_000;
+pub(crate) const MAXIMUM_CATALOG_OPERATION_DEADLINE_MILLIS: u64 = 10 * 60 * 1_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum RuntimePermissionDefault {
@@ -26,6 +32,8 @@ pub struct RuntimeConfig {
     pub allowed_local_relay_hosts: Vec<String>,
     pub maximum_nmp_relays: u64,
     pub maximum_bridge_workers: u64,
+    pub maximum_provider_push_envelope_bytes: u64,
+    pub maximum_provider_push_pending_bytes: u64,
     pub maximum_observers: u64,
     pub maximum_boundary_events: u64,
     pub maximum_config_items: u64,
@@ -35,6 +43,7 @@ pub struct RuntimeConfig {
     pub maximum_artifact_file_bytes: u64,
     pub maximum_artifact_total_bytes: u64,
     pub maximum_verified_read_bytes: u64,
+    pub catalog_operation_deadline_millis: u64,
     pub maximum_blob_sources: u64,
     pub permission_default: RuntimePermissionDefault,
 }
@@ -56,8 +65,40 @@ impl RuntimeConfig {
             self.maximum_verified_read_bytes,
             "maximum_verified_read_bytes",
         )?;
+        if self.catalog_operation_deadline_millis == 0
+            || self.catalog_operation_deadline_millis > MAXIMUM_CATALOG_OPERATION_DEADLINE_MILLIS
+        {
+            return Err(RuntimeOpenError::InvalidConfig {
+                detail: format!(
+                    "catalog_operation_deadline_millis must be between 1 and \
+                     {MAXIMUM_CATALOG_OPERATION_DEADLINE_MILLIS}"
+                ),
+            });
+        }
+        let catalog_operation_deadline =
+            Duration::from_millis(self.catalog_operation_deadline_millis);
         let maximum_bridge_workers =
             nonzero_usize(self.maximum_bridge_workers, "maximum_bridge_workers")?;
+        let maximum_provider_push_envelope_bytes = provider_push_capacity(
+            self.maximum_provider_push_envelope_bytes,
+            "maximum_provider_push_envelope_bytes",
+        )?;
+        let maximum_provider_push_pending_bytes = provider_push_capacity(
+            self.maximum_provider_push_pending_bytes,
+            "maximum_provider_push_pending_bytes",
+        )?;
+        if maximum_provider_push_envelope_bytes > maximum_provider_push_pending_bytes {
+            return Err(RuntimeOpenError::InvalidConfig {
+                detail: "maximum_provider_push_envelope_bytes must not exceed \
+                         maximum_provider_push_pending_bytes"
+                    .to_owned(),
+            });
+        }
+        let provider_push_limits = ProviderPushLimits {
+            maximum_envelope_bytes: maximum_provider_push_envelope_bytes,
+            maximum_pending_bytes: maximum_provider_push_pending_bytes,
+            ..ProviderPushLimits::default()
+        };
         let maximum_blob_sources =
             nonzero_usize(self.maximum_blob_sources, "maximum_blob_sources")?;
         let artifact_limits = ArtifactLimits {
@@ -114,11 +155,13 @@ impl RuntimeConfig {
             allowed_local_relay_hosts: self.allowed_local_relay_hosts,
             maximum_nmp_relays,
             maximum_bridge_workers,
+            provider_push_limits,
             maximum_observers,
             maximum_boundary_events,
             maximum_manifest_bytes,
             artifact_limits,
             maximum_verified_read_bytes,
+            catalog_operation_deadline,
             maximum_blob_sources,
             maximum_command_items: maximum_config_items,
             maximum_command_string_bytes: maximum_config_string_bytes,
@@ -139,6 +182,10 @@ impl Default for RuntimeConfig {
             allowed_local_relay_hosts: Vec::new(),
             maximum_nmp_relays: 64,
             maximum_bridge_workers: 12,
+            maximum_provider_push_envelope_bytes: ProviderPushLimits::default()
+                .maximum_envelope_bytes as u64,
+            maximum_provider_push_pending_bytes: ProviderPushLimits::default().maximum_pending_bytes
+                as u64,
             maximum_observers: DEFAULT_MAXIMUM_OBSERVERS,
             maximum_boundary_events: DEFAULT_MAXIMUM_BOUNDARY_EVENTS,
             maximum_config_items: DEFAULT_MAXIMUM_CONFIG_ITEMS,
@@ -148,6 +195,7 @@ impl Default for RuntimeConfig {
             maximum_artifact_file_bytes: DEFAULT_MAXIMUM_ARTIFACT_READ_BYTES,
             maximum_artifact_total_bytes: 32 * 1_024 * 1_024,
             maximum_verified_read_bytes: DEFAULT_MAXIMUM_ARTIFACT_READ_BYTES,
+            catalog_operation_deadline_millis: DEFAULT_CATALOG_OPERATION_DEADLINE_MILLIS,
             maximum_blob_sources: 8,
             permission_default: RuntimePermissionDefault::AskEveryTime,
         }
@@ -165,11 +213,13 @@ pub(crate) struct ValidatedConfig {
     pub(crate) allowed_local_relay_hosts: Vec<String>,
     pub(crate) maximum_nmp_relays: usize,
     pub(crate) maximum_bridge_workers: usize,
+    pub(crate) provider_push_limits: ProviderPushLimits,
     pub(crate) maximum_observers: usize,
     pub(crate) maximum_boundary_events: usize,
     pub(crate) maximum_manifest_bytes: usize,
     pub(crate) artifact_limits: ArtifactLimits,
     pub(crate) maximum_verified_read_bytes: usize,
+    pub(crate) catalog_operation_deadline: Duration,
     pub(crate) maximum_blob_sources: usize,
     pub(crate) maximum_command_items: usize,
     pub(crate) maximum_command_string_bytes: usize,
@@ -206,4 +256,14 @@ fn nonzero_usize(value: u64, name: &str) -> Result<usize, RuntimeOpenError> {
         .ok_or_else(|| RuntimeOpenError::InvalidConfig {
             detail: format!("{name} must fit usize and be non-zero"),
         })
+}
+
+fn provider_push_capacity(value: u64, name: &str) -> Result<usize, RuntimeOpenError> {
+    let value = nonzero_usize(value, name)?;
+    if value == usize::MAX {
+        return Err(RuntimeOpenError::InvalidConfig {
+            detail: format!("{name} must leave usize arithmetic overflow headroom"),
+        });
+    }
+    Ok(value)
 }

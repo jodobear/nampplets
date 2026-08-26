@@ -88,7 +88,7 @@ TRUSTED_SHELL_SHA256 = {
         "d4c930f66df0ae1767147598d2a05b9940a06ba8f6681a1093af36e6e35251c5"
     ),
     "trusted-shell.js": (
-        "036a63361eafa0f7c997cad02cb1cb80351c0cab58e6d746bf95fc0680a24a14"
+        "c39443bd0571dcbe74965fe97e90f78908c00cd57ba246b6a4509189890d7db6"
     ),
 }
 

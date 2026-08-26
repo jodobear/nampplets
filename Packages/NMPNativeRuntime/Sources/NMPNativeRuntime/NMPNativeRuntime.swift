@@ -4706,6 +4706,8 @@ public struct RuntimeConfig {
     public var allowedLocalRelayHosts: [String]
     public var maximumNmpRelays: UInt64
     public var maximumBridgeWorkers: UInt64
+    public var maximumProviderPushEnvelopeBytes: UInt64
+    public var maximumProviderPushPendingBytes: UInt64
     public var maximumObservers: UInt64
     public var maximumBoundaryEvents: UInt64
     public var maximumConfigItems: UInt64
@@ -4715,12 +4717,13 @@ public struct RuntimeConfig {
     public var maximumArtifactFileBytes: UInt64
     public var maximumArtifactTotalBytes: UInt64
     public var maximumVerifiedReadBytes: UInt64
+    public var catalogOperationDeadlineMillis: UInt64
     public var maximumBlobSources: UInt64
     public var permissionDefault: RuntimePermissionDefault
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(runtimeStorePath: String, nmpStorePath: String?, artifactCachePath: String, indexerRelays: [String], appRelays: [String], fallbackRelays: [String], allowedLocalRelayHosts: [String], maximumNmpRelays: UInt64, maximumBridgeWorkers: UInt64, maximumObservers: UInt64, maximumBoundaryEvents: UInt64, maximumConfigItems: UInt64, maximumConfigStringBytes: UInt64, maximumManifestBytes: UInt64, maximumArtifactFiles: UInt64, maximumArtifactFileBytes: UInt64, maximumArtifactTotalBytes: UInt64, maximumVerifiedReadBytes: UInt64, maximumBlobSources: UInt64, permissionDefault: RuntimePermissionDefault) {
+    public init(runtimeStorePath: String, nmpStorePath: String?, artifactCachePath: String, indexerRelays: [String], appRelays: [String], fallbackRelays: [String], allowedLocalRelayHosts: [String], maximumNmpRelays: UInt64, maximumBridgeWorkers: UInt64, maximumProviderPushEnvelopeBytes: UInt64, maximumProviderPushPendingBytes: UInt64, maximumObservers: UInt64, maximumBoundaryEvents: UInt64, maximumConfigItems: UInt64, maximumConfigStringBytes: UInt64, maximumManifestBytes: UInt64, maximumArtifactFiles: UInt64, maximumArtifactFileBytes: UInt64, maximumArtifactTotalBytes: UInt64, maximumVerifiedReadBytes: UInt64, catalogOperationDeadlineMillis: UInt64, maximumBlobSources: UInt64, permissionDefault: RuntimePermissionDefault) {
         self.runtimeStorePath = runtimeStorePath
         self.nmpStorePath = nmpStorePath
         self.artifactCachePath = artifactCachePath
@@ -4730,6 +4733,8 @@ public struct RuntimeConfig {
         self.allowedLocalRelayHosts = allowedLocalRelayHosts
         self.maximumNmpRelays = maximumNmpRelays
         self.maximumBridgeWorkers = maximumBridgeWorkers
+        self.maximumProviderPushEnvelopeBytes = maximumProviderPushEnvelopeBytes
+        self.maximumProviderPushPendingBytes = maximumProviderPushPendingBytes
         self.maximumObservers = maximumObservers
         self.maximumBoundaryEvents = maximumBoundaryEvents
         self.maximumConfigItems = maximumConfigItems
@@ -4739,6 +4744,7 @@ public struct RuntimeConfig {
         self.maximumArtifactFileBytes = maximumArtifactFileBytes
         self.maximumArtifactTotalBytes = maximumArtifactTotalBytes
         self.maximumVerifiedReadBytes = maximumVerifiedReadBytes
+        self.catalogOperationDeadlineMillis = catalogOperationDeadlineMillis
         self.maximumBlobSources = maximumBlobSources
         self.permissionDefault = permissionDefault
     }
@@ -4778,6 +4784,12 @@ extension RuntimeConfig: Equatable, Hashable {
         if lhs.maximumBridgeWorkers != rhs.maximumBridgeWorkers {
             return false
         }
+        if lhs.maximumProviderPushEnvelopeBytes != rhs.maximumProviderPushEnvelopeBytes {
+            return false
+        }
+        if lhs.maximumProviderPushPendingBytes != rhs.maximumProviderPushPendingBytes {
+            return false
+        }
         if lhs.maximumObservers != rhs.maximumObservers {
             return false
         }
@@ -4805,6 +4817,9 @@ extension RuntimeConfig: Equatable, Hashable {
         if lhs.maximumVerifiedReadBytes != rhs.maximumVerifiedReadBytes {
             return false
         }
+        if lhs.catalogOperationDeadlineMillis != rhs.catalogOperationDeadlineMillis {
+            return false
+        }
         if lhs.maximumBlobSources != rhs.maximumBlobSources {
             return false
         }
@@ -4824,6 +4839,8 @@ extension RuntimeConfig: Equatable, Hashable {
         hasher.combine(allowedLocalRelayHosts)
         hasher.combine(maximumNmpRelays)
         hasher.combine(maximumBridgeWorkers)
+        hasher.combine(maximumProviderPushEnvelopeBytes)
+        hasher.combine(maximumProviderPushPendingBytes)
         hasher.combine(maximumObservers)
         hasher.combine(maximumBoundaryEvents)
         hasher.combine(maximumConfigItems)
@@ -4833,6 +4850,7 @@ extension RuntimeConfig: Equatable, Hashable {
         hasher.combine(maximumArtifactFileBytes)
         hasher.combine(maximumArtifactTotalBytes)
         hasher.combine(maximumVerifiedReadBytes)
+        hasher.combine(catalogOperationDeadlineMillis)
         hasher.combine(maximumBlobSources)
         hasher.combine(permissionDefault)
     }
@@ -4856,6 +4874,8 @@ public struct FfiConverterTypeRuntimeConfig: FfiConverterRustBuffer {
                 allowedLocalRelayHosts: FfiConverterSequenceString.read(from: &buf),
                 maximumNmpRelays: FfiConverterUInt64.read(from: &buf),
                 maximumBridgeWorkers: FfiConverterUInt64.read(from: &buf),
+                maximumProviderPushEnvelopeBytes: FfiConverterUInt64.read(from: &buf),
+                maximumProviderPushPendingBytes: FfiConverterUInt64.read(from: &buf),
                 maximumObservers: FfiConverterUInt64.read(from: &buf),
                 maximumBoundaryEvents: FfiConverterUInt64.read(from: &buf),
                 maximumConfigItems: FfiConverterUInt64.read(from: &buf),
@@ -4865,6 +4885,7 @@ public struct FfiConverterTypeRuntimeConfig: FfiConverterRustBuffer {
                 maximumArtifactFileBytes: FfiConverterUInt64.read(from: &buf),
                 maximumArtifactTotalBytes: FfiConverterUInt64.read(from: &buf),
                 maximumVerifiedReadBytes: FfiConverterUInt64.read(from: &buf),
+                catalogOperationDeadlineMillis: FfiConverterUInt64.read(from: &buf),
                 maximumBlobSources: FfiConverterUInt64.read(from: &buf),
                 permissionDefault: FfiConverterTypeRuntimePermissionDefault.read(from: &buf)
         )
@@ -4880,6 +4901,8 @@ public struct FfiConverterTypeRuntimeConfig: FfiConverterRustBuffer {
         FfiConverterSequenceString.write(value.allowedLocalRelayHosts, into: &buf)
         FfiConverterUInt64.write(value.maximumNmpRelays, into: &buf)
         FfiConverterUInt64.write(value.maximumBridgeWorkers, into: &buf)
+        FfiConverterUInt64.write(value.maximumProviderPushEnvelopeBytes, into: &buf)
+        FfiConverterUInt64.write(value.maximumProviderPushPendingBytes, into: &buf)
         FfiConverterUInt64.write(value.maximumObservers, into: &buf)
         FfiConverterUInt64.write(value.maximumBoundaryEvents, into: &buf)
         FfiConverterUInt64.write(value.maximumConfigItems, into: &buf)
@@ -4889,6 +4912,7 @@ public struct FfiConverterTypeRuntimeConfig: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.maximumArtifactFileBytes, into: &buf)
         FfiConverterUInt64.write(value.maximumArtifactTotalBytes, into: &buf)
         FfiConverterUInt64.write(value.maximumVerifiedReadBytes, into: &buf)
+        FfiConverterUInt64.write(value.catalogOperationDeadlineMillis, into: &buf)
         FfiConverterUInt64.write(value.maximumBlobSources, into: &buf)
         FfiConverterTypeRuntimePermissionDefault.write(value.permissionDefault, into: &buf)
     }
