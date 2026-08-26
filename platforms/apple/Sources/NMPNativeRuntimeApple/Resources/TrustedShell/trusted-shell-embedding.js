@@ -188,31 +188,36 @@
       }
     }
     transfers = transferSource.createTransferManager(environment, {
+      allocateBytes: dependencies.allocateTransferBytes,
       artifactPolicy,
       beforeBegin: invalidate,
+      clearTimeout: dependencies.clearTransferTimeout,
       contract,
       onComplete(request) { void mount(request); },
       primitives,
-      result
+      result,
+      setTimeout: dependencies.setTransferTimeout
     });
     function receiveParentMessage(event) {
       if (disposed || event.source !== parentWindow ||
           !primitives.isPlainObject(event.data)) return;
+      const request = event.data;
+      const bypassesParentRate = transfers.bypassesParentRate(request);
       const currentTime = now();
       if (currentTime - messageWindowStartedAt >= 1000) {
         messageWindowStartedAt = currentTime;
         messagesInWindow = 0;
         parentRateLimited = false;
       }
-      if (messagesInWindow >= MAX_PARENT_MESSAGES_PER_SECOND) {
+      if (!bypassesParentRate &&
+          messagesInWindow >= MAX_PARENT_MESSAGES_PER_SECOND) {
         if (!parentRateLimited) {
           parentRateLimited = true;
           post({ type: "nmp.outer.rate-limited", scope: "parent" });
         }
         return;
       }
-      messagesInWindow += 1;
-      const request = event.data;
+      if (!bypassesParentRate) messagesInWindow += 1;
       if (transfers.handle(request)) return;
       if (request.type === "nmp.outer.mount") {
         void mount(request);

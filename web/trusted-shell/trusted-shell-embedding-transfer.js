@@ -3,6 +3,7 @@
 
   const ARTIFACT_CHUNK_BYTES = 256 * 1024;
   const MAX_PENDING_TRANSFERS = 16;
+  const TRANSFER_DEADLINE_MS = 30 * 1000;
   const artifactPolicySource = global.NMPTrustedShellArtifactPolicy ||
     (typeof require === "function"
       ? require("./trusted-shell-artifact-policy.js")
@@ -15,10 +16,20 @@
     const ArrayBufferType = environment && (environment.ArrayBuffer || global.ArrayBuffer);
     const TextDecoderType = environment && (environment.TextDecoder || global.TextDecoder);
     const Uint8ArrayType = environment && (environment.Uint8Array || global.Uint8Array);
+    const allocateBytes = dependencies.allocateBytes ||
+      ((length) => new Uint8ArrayType(length));
+    const clearTimerSource = environment.clearTimeout || global.clearTimeout;
+    const scheduleTimerSource = environment.setTimeout || global.setTimeout;
+    const clearTimer = dependencies.clearTimeout ||
+      ((token) => clearTimerSource.call(environment, token));
+    const scheduleTimer = dependencies.setTimeout ||
+      ((callback, delay) => scheduleTimerSource.call(environment, callback, delay));
     if (!artifactPolicySource || !environment ||
         typeof TextDecoderType !== "function" ||
         typeof Uint8ArrayType !== "function" ||
         typeof ArrayBufferType !== "function" ||
+        typeof allocateBytes !== "function" ||
+        typeof clearTimer !== "function" || typeof scheduleTimer !== "function" ||
         !artifactPolicySource.isNormalizedPolicy(artifactPolicy) ||
         typeof beforeBegin !== "function" || !contract ||
         typeof onComplete !== "function" ||
@@ -33,6 +44,7 @@
       const transfer = transfers.get(surfaceId);
       if (!transfer) return false;
       transfers.delete(surfaceId);
+      clearTimer(transfer.timer);
       reservedBytes -= transfer.bytes.byteLength;
       return true;
     }
@@ -47,10 +59,12 @@
     function begin(request) {
       if (!contract.validMountBegin(request)) return;
       const configuration = request.configuration;
-      beforeBegin(request.surfaceId);
-      retire(request.surfaceId);
-      if (disposed || transfers.size >= MAX_PENDING_TRANSFERS ||
-          reservedBytes + configuration.artifactBytes >
+      const replaced = transfers.get(request.surfaceId);
+      const retainedCount = transfers.size - (replaced ? 1 : 0);
+      const retainedBytes = reservedBytes -
+        (replaced ? replaced.bytes.byteLength : 0);
+      if (disposed || retainedCount >= MAX_PENDING_TRANSFERS ||
+          retainedBytes + configuration.artifactBytes >
             artifactPolicySource.HARD_MAX_ARTIFACT_HTML_BYTES) {
         result(request.type, request, false, "overloaded");
         return;
@@ -59,12 +73,24 @@
       if (!domains) return;
       let bytes;
       try {
-        bytes = new Uint8ArrayType(configuration.artifactBytes);
+        bytes = allocateBytes(configuration.artifactBytes);
+        if (!(bytes instanceof Uint8ArrayType) ||
+            bytes.byteLength !== configuration.artifactBytes) {
+          throw new TypeError("invalid transfer allocation");
+        }
       } catch (_) {
         result(request.type, request, false, "overloaded");
         return;
       }
-      transfers.set(request.surfaceId, {
+      beforeBegin(request.surfaceId);
+      retire(request.surfaceId);
+      const expiryRequest = Object.freeze({
+        type: request.type,
+        requestId: request.requestId,
+        surfaceId: request.surfaceId,
+        configuration: Object.freeze({ session: configuration.session })
+      });
+      const transfer = {
         bytes,
         nextOffset: 0,
         transferId: request.requestId,
@@ -74,8 +100,16 @@
           domains,
           session: configuration.session,
           title: configuration.title
-        })
-      });
+        }),
+        timer: null
+      };
+      transfer.timer = scheduleTimer(() => {
+        const current = transfers.get(request.surfaceId);
+        if (current !== transfer) return;
+        retire(request.surfaceId);
+        result(request.type, expiryRequest, false, "transfer-expired");
+      }, TRANSFER_DEADLINE_MS);
+      transfers.set(request.surfaceId, transfer);
       reservedBytes += bytes.byteLength;
       result(request.type, request, true, null);
     }
@@ -131,7 +165,10 @@
       }
       let artifactHTML;
       try {
-        artifactHTML = new TextDecoderType("utf-8", { fatal: true })
+        artifactHTML = new TextDecoderType("utf-8", {
+          fatal: true,
+          ignoreBOM: true
+        })
           .decode(transfer.bytes);
       } catch (_) {
         refuse(request, "transfer-refused");
@@ -159,6 +196,22 @@
       return true;
     }
 
+    function bypassesParentRate(request) {
+      if (!request || request.type !== "nmp.outer.mount.chunk" ||
+          !validIdentity(request) || !contract.exactFields(request, [
+            "bytes", "offset", "requestId", "session", "surfaceId", "transferId", "type"
+          ], primitives) || !Number.isSafeInteger(request.offset) ||
+          !(request.bytes instanceof ArrayBufferType)) return false;
+      const transfer = transfers.get(request.surfaceId);
+      if (!transfer || transfer.configuration.session !== request.session ||
+          transfer.transferId !== request.transferId) return false;
+      const remaining = transfer.bytes.byteLength - transfer.nextOffset;
+      return request.offset === transfer.nextOffset &&
+        request.bytes.byteLength > 0 &&
+        request.bytes.byteLength <= ARTIFACT_CHUNK_BYTES &&
+        request.bytes.byteLength === Math.min(ARTIFACT_CHUNK_BYTES, remaining);
+    }
+
     function has(surfaceId, session) {
       const transfer = transfers.get(surfaceId);
       return Boolean(transfer && transfer.configuration.session === session);
@@ -166,20 +219,22 @@
 
     function dispose() {
       disposed = true;
-      transfers.clear();
-      reservedBytes = 0;
+      for (const surfaceId of Array.from(transfers.keys())) retire(surfaceId);
     }
 
     function counts() {
       return Object.freeze({ pendingTransfers: transfers.size, reservedTransferBytes: reservedBytes });
     }
 
-    return Object.freeze({ counts, dispose, handle, has, retire });
+    return Object.freeze({
+      bypassesParentRate, counts, dispose, handle, has, retire
+    });
   }
 
   const exported = Object.freeze({
     ARTIFACT_CHUNK_BYTES,
     MAX_PENDING_TRANSFERS,
+    TRANSFER_DEADLINE_MS,
     createTransferManager
   });
   global.NMPTrustedShellEmbeddingTransfer = exported;
