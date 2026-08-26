@@ -56,6 +56,8 @@ test("default policy preserves the existing byte ceilings", () => {
     policy,
     "x".repeat(policy.maximumArtifactHTMLBytes + 1)
   ), false);
+  assert.equal(policyModule.acceptsArtifactHTML(policy, ""), true);
+  assert.equal(policyModule.acceptsArtifactHTMLBytes(policy, 0), false);
 });
 
 test("artifact byte admission is positive, finite, and policy-bound", () => {

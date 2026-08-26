@@ -63,6 +63,15 @@ test("embedded host binds parent, artifact digests, and napplet forwarding", asy
   assert.equal(harness.parent.posted.at(-1).message.type, "nmp.outer.surface.ready");
 });
 
+test("empty legacy artifact mounts through the one-message path", async () => {
+  const harness = createHarness();
+  await dispatch(harness, mountRequest(harness, "empty-session", ""));
+  assert.equal(harness.calls.materializations, 1);
+  assert.equal(harness.calls.mounts.length, 1);
+  assert.equal(harness.calls.srcdocAssignments, 1);
+  assert.equal(harness.parent.posted.at(-1).message.ok, true);
+});
+
 test("ordered 256 KiB mount chunks reconstruct before the sealed sink", async () => {
   const harness = createHarness();
   const artifactHTML = "x".repeat(ARTIFACT_CHUNK_BYTES + 1);

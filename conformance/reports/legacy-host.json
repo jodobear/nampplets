@@ -690,10 +690,10 @@
       }
     },
     "trusted_shell_sha256": {
-      "trusted-shell-artifact-policy.js": "af76cef274b4b8c3563ea063c7faac3fe230ac73884762a796b4857b60cd9feb",
+      "trusted-shell-artifact-policy.js": "dfb61134d634e4e21fe74b24464e124b57ec081b8a281e22c26d5454461667b0",
       "trusted-shell-artifact-verifier.js": "7013f7a45091d84de89ea88ca3e6b3735d112cab62d6ef48f4fb003c24b1e104",
-      "trusted-shell-embedded.html": "b800ca308222b62290d825aa3211df3b076c27ef2b7a5932009118b5271fd43c",
-      "trusted-shell-embedded.sha256": "347e99a2f068801b5b24faf1f85df43d1bea991034d529f61cbf7b4f5548bc6e",
+      "trusted-shell-embedded.html": "90971bff53fc9758f7700d8fff86b3d5bba4b792c646bc3211cee53a722d99a4",
+      "trusted-shell-embedded.sha256": "3194fe1df2473b5ee38c013080f9e756c81b71922d7b466444247044e01c6bd9",
       "trusted-shell-embedding-contract.js": "53029feb0a6254ac0c738aa3b9f630d936bc47e7c8af79a115196d40563268c5",
       "trusted-shell-embedding-transfer.js": "119b682f3f7d5eb6b0b704b228b1c1606d3cee222b79e727d1ba0f3b575132e9",
       "trusted-shell-embedding.js": "e308057d4cfc7b8a73af5417d71b652a7397222a10d3c9f750a4bcfadf82e920",

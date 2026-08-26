@@ -183,7 +183,9 @@
   function acceptsArtifactHTML(policy, value) {
     if (!isNormalizedPolicy(policy)) return false;
     const length = utf8ByteLength(value);
-    return length !== null && acceptsArtifactHTMLBytes(policy, length);
+    return length !== null && (length === 0
+      ? !policy.elevated
+      : acceptsArtifactHTMLBytes(policy, length));
   }
 
   function acceptsArtifactHTMLBytes(policy, length) {
