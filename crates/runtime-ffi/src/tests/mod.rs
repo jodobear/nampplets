@@ -3,6 +3,7 @@
 mod accounts;
 mod artifact;
 mod catalog;
+mod catalog_deadline;
 mod envelope;
 mod intent;
 mod intent_restore;

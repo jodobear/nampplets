@@ -58,8 +58,6 @@ pub use types::{
 const MAXIMUM_PAGE_ENTRIES: usize = 100;
 const MAXIMUM_PENDING_REVIEWS: usize = 16;
 const MAXIMUM_ONE_SHOT_OPERATIONS: usize = 4;
-const OPERATION_DEADLINE: Duration = Duration::from_secs(15);
-
 #[derive(Debug)]
 struct StoredReview {
     handle: VerifiedArtifactHandle,
@@ -113,10 +111,16 @@ impl RuntimeCatalogService {
         artifact_limits: ArtifactLimits,
         maximum_manifest_bytes: usize,
         maximum_blob_sources: usize,
+        operation_deadline: Duration,
     ) -> Result<Self, RuntimeCatalogError> {
         if maximum_manifest_bytes == 0 || maximum_blob_sources == 0 {
             return Err(RuntimeCatalogError::InvalidConfiguration {
                 reason: "manifest and source limits must be non-zero".to_owned(),
+            });
+        }
+        if operation_deadline.is_zero() {
+            return Err(RuntimeCatalogError::InvalidConfiguration {
+                reason: "catalog operation deadline must be non-zero".to_owned(),
             });
         }
         let catalog = data_plane.manifest_catalog();
@@ -144,7 +148,7 @@ impl RuntimeCatalogService {
             )?,
         );
         let transport = Arc::new(
-            RustHttpsAcquisitionPort::new(RustHttpsAcquisitionConfig::default()).map_err(
+            RustHttpsAcquisitionPort::new(https_acquisition_config(operation_deadline)).map_err(
                 |error| RuntimeCatalogError::InvalidConfiguration {
                     reason: error.to_string(),
                 },
@@ -190,7 +194,7 @@ impl RuntimeCatalogService {
             admission: Arc::new(OneShotAdmission::new(MAXIMUM_ONE_SHOT_OPERATIONS)),
             active_operations: Mutex::new(BTreeMap::new()),
             next_operation: AtomicU64::new(0),
-            deadline: OPERATION_DEADLINE,
+            deadline: operation_deadline,
         })
     }
 
@@ -282,6 +286,13 @@ impl RuntimeCatalogService {
 
     fn remove_operation(&self, id: u64) {
         self.active_operations.lock().remove(&id);
+    }
+}
+
+fn https_acquisition_config(deadline: Duration) -> RustHttpsAcquisitionConfig {
+    RustHttpsAcquisitionConfig {
+        deadline,
+        ..RustHttpsAcquisitionConfig::default()
     }
 }
 

@@ -173,6 +173,7 @@ public final class NativeRuntimeProfile: RuntimeObserver, @unchecked Sendable {
                 maximumArtifactFileBytes: Self.maximumReadBytes,
                 maximumArtifactTotalBytes: 32 * 1_024 * 1_024,
                 maximumVerifiedReadBytes: Self.maximumReadBytes,
+                catalogOperationDeadlineMillis: 15_000,
                 maximumBlobSources: 8,
                 permissionDefault: configuration.permissionDefault
             ),
