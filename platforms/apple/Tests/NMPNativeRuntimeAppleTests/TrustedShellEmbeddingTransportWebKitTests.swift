@@ -67,6 +67,7 @@ final class TrustedShellEmbeddingTransportWebKitTests: XCTestCase {
         )
         let state = try XCTUnwrap(result as? [String: Any])
         XCTAssertEqual(state["chunkCountExceedsWindow"] as? Bool, true)
+        XCTAssertEqual(state["chunkAcknowledgements"] as? Int, 257)
         XCTAssertEqual(state["splitUtf8Preserved"] as? Bool, true)
         XCTAssertEqual(state["exactMaterializedDigest"] as? Bool, true)
         XCTAssertEqual(state["commitResults"] as? Int, 1)
@@ -222,7 +223,10 @@ final class TrustedShellEmbeddingTransportWebKitTests: XCTestCase {
         bytes: chunk
       }, "*", [chunk]);
       chunkCount += 1;
-      if (chunkCount % 16 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+      await waitFor(positive.messages, message =>
+        message.type === "nmp.outer.mount.chunk.result" &&
+        message.requestId === "positive-chunk-" + offset && message.ok === true,
+      "positive-chunk-" + offset);
     }
     positive.child.postMessage({
       type: "nmp.outer.mount.commit",
@@ -242,6 +246,8 @@ final class TrustedShellEmbeddingTransportWebKitTests: XCTestCase {
     const positiveDigest = await sha256(positive.child.__testLastSrcdoc);
     const commitResults = positive.messages.filter(message =>
       message.type === "nmp.outer.mount.commit.result").length;
+    const chunkAcknowledgements = positive.messages.filter(message =>
+      message.type === "nmp.outer.mount.chunk.result" && message.ok === true).length;
     const srcdocAssignments = positive.child.__testSrcdocAssignments;
     const positiveElapsed = performance.now() - positiveStarted;
     retireOuter(positive);
@@ -271,6 +277,7 @@ final class TrustedShellEmbeddingTransportWebKitTests: XCTestCase {
     pagehide.frame.remove();
     return {
       chunkCountExceedsWindow: chunkCount > 256,
+      chunkAcknowledgements,
       splitUtf8Preserved: artifactBytes[CHUNK - 1] === 0xE2 &&
         artifactBytes[CHUNK] === 0x82 && artifactBytes[CHUNK + 1] === 0xAC,
       exactMaterializedDigest: positiveDigest === materializedDigest,
