@@ -20,16 +20,13 @@ final class TrustedShellEmbeddingTransportWebKitTests: XCTestCase {
         let controlledBootstrap = """
         window.__createChunkTestBridge = function (policy, timeoutMs) {
           const copiedPolicy = JSON.parse(JSON.stringify(policy));
+          const dependencies = { artifactPolicy: copiedPolicy };
+          if (timeoutMs !== null) {
+            dependencies.setTransferTimeout = callback => window.setTimeout(callback, timeoutMs);
+            dependencies.clearTransferTimeout = identifier => window.clearTimeout(identifier);
+          }
           window.__chunkTestBridge =
-            NMPTrustedShellEmbedding.createEmbeddingBridge(window, {
-              artifactPolicy: copiedPolicy,
-              setTransferTimeout(callback, _milliseconds) {
-                return window.setTimeout(callback, timeoutMs);
-              },
-              clearTransferTimeout(identifier) {
-                window.clearTimeout(identifier);
-              }
-            });
+            NMPTrustedShellEmbedding.createEmbeddingBridge(window, dependencies);
           return true;
         };
         """
@@ -74,6 +71,7 @@ final class TrustedShellEmbeddingTransportWebKitTests: XCTestCase {
         XCTAssertEqual(state["exactMaterializedDigest"] as? Bool, true)
         XCTAssertEqual(state["commitResults"] as? Int, 1)
         XCTAssertEqual(state["srcdocAssignments"] as? Int, 1)
+        XCTAssertEqual(state["completedWithinProductionDeadline"] as? Bool, true)
         XCTAssertEqual(state["timeoutExpired"] as? Bool, true)
         XCTAssertEqual(state["timeoutStateRetired"] as? Bool, true)
         XCTAssertEqual(state["pagehideStateRetired"] as? Bool, true)
@@ -202,7 +200,8 @@ final class TrustedShellEmbeddingTransportWebKitTests: XCTestCase {
       aggregateHash: "b".repeat(64),
       exclusive: true
     };
-    const positive = await makeOuter("positive", policy, 60000);
+    const positive = await makeOuter("positive", policy, null);
+    const positiveStarted = performance.now();
     sendBegin(positive, "positive-session", "surface-positive", artifactDigest,
       "positive-begin");
     await waitFor(positive.messages, message =>
@@ -244,6 +243,7 @@ final class TrustedShellEmbeddingTransportWebKitTests: XCTestCase {
     const commitResults = positive.messages.filter(message =>
       message.type === "nmp.outer.mount.commit.result").length;
     const srcdocAssignments = positive.child.__testSrcdocAssignments;
+    const positiveElapsed = performance.now() - positiveStarted;
     retireOuter(positive);
     const timeout = await makeOuter("timeout", policy, 20);
     sendBegin(timeout, "timeout-session", "surface-timeout", artifactDigest,
@@ -258,7 +258,7 @@ final class TrustedShellEmbeddingTransportWebKitTests: XCTestCase {
     const timeoutCounts = timeout.child.__chunkTestBridge.stateCounts();
     const timeoutAssignments = timeout.child.__testSrcdocAssignments;
     retireOuter(timeout);
-    const pagehide = await makeOuter("pagehide", policy, 60000);
+    const pagehide = await makeOuter("pagehide", policy, null);
     sendBegin(pagehide, "pagehide-session", "surface-pagehide", artifactDigest,
       "pagehide-begin");
     await waitFor(pagehide.messages, message =>
@@ -275,7 +275,7 @@ final class TrustedShellEmbeddingTransportWebKitTests: XCTestCase {
         artifactBytes[CHUNK] === 0x82 && artifactBytes[CHUNK + 1] === 0xAC,
       exactMaterializedDigest: positiveDigest === materializedDigest,
       commitResults,
-      srcdocAssignments,
+      srcdocAssignments, completedWithinProductionDeadline: positiveElapsed < 30000,
       timeoutExpired: expired.error === "transfer-expired",
       timeoutStateRetired: timeoutCounts.pendingTransfers === 0 &&
         timeoutCounts.reservedTransferBytes === 0,
