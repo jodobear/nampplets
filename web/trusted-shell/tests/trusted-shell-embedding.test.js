@@ -8,157 +8,22 @@ const test = require("node:test");
 
 const {
   MAX_PARENT_MESSAGES_PER_SECOND,
-  createEmbeddingBridge
 } = require("../trusted-shell-embedding.js");
+const {
+  ARTIFACT_CHUNK_BYTES
+} = require("../trusted-shell-embedding-transfer.js");
+const {
+  chunkedMountRequests,
+  createHarness,
+  digest,
+  dispatch,
+  mountRequest
+} = require("./trusted-shell-embedding-test-harness.js");
 const {
   checkEmbeddedShell,
   renderEmbeddedShell,
   scriptNames
 } = require("../scripts/render-trusted-shell-embedded.js");
-
-function digest(value) {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-function createHarness(options = {}) {
-  const parent = {
-    posted: [],
-    postMessage(message, target) { this.posted.push({ message, target }); }
-  };
-  const listeners = new Map();
-  const calls = {
-    mounts: [], receives: [], unmounts: [], disposed: 0,
-    materializations: 0, srcdocAssignments: 0
-  };
-  let currentTime = 1000;
-  let generation = 0;
-  let disposed = false;
-  const active = new Set();
-  let forwardEnvelope;
-  const primitives = {
-    isPlainObject(value) {
-      return value !== null && typeof value === "object" && !Array.isArray(value);
-    },
-    isVerifiedArtifactBaseURL(value) {
-      return value === "nmp-artifact://00000000-0000-4000-8000-000000000001/";
-    },
-    materialize(html, base, domains) {
-      calls.materializations += 1;
-      return `materialized:${html}:${base}:${domains.join(",")}`;
-    }
-  };
-  const hostModule = {
-    MAX_ARTIFACT_HTML_BYTES: 8 * 1024 * 1024,
-    createSurfaceHost(_environment, _primitives, options) {
-      forwardEnvelope = options.forwardEnvelope;
-      return {
-        async verifyAndMaterialize(
-          binding, artifactHTML, materialize, digestText, isCurrent
-        ) {
-          const currentGeneration = generation;
-          const current = () => !disposed && generation === currentGeneration &&
-            isCurrent();
-          const artifactDigest = await digestText(artifactHTML);
-          if (artifactDigest !== binding.artifactDigest) {
-            return Object.freeze({ status: "digest-mismatch" });
-          }
-          if (!current()) return Object.freeze({ status: "stale" });
-          const materializedHTML = materialize();
-          const materializedDigest = await digestText(materializedHTML);
-          if (!current()) return Object.freeze({ status: "stale" });
-          return Object.freeze({
-            status: "verified", materializedHTML, materializedDigest
-          });
-        },
-        invalidateArtifactVerification() { generation += 1; },
-        mount(surfaceId, surface, configuration) {
-          calls.srcdocAssignments += 1;
-          calls.mounts.push({ surfaceId, surface, configuration });
-          active.add(surfaceId);
-          return true;
-        },
-        receive(surfaceId, envelope) {
-          calls.receives.push({ surfaceId, envelope });
-          return active.has(surfaceId) && envelope && typeof envelope.type === "string";
-        },
-        unmount(surfaceId) {
-          calls.unmounts.push(surfaceId);
-          return active.delete(surfaceId);
-        },
-        dispose() {
-          calls.disposed += 1;
-          disposed = true;
-          generation += 1;
-          active.clear();
-        }
-      };
-    }
-  };
-  const surface = {};
-  const environment = {
-    parent,
-    document: { getElementById(id) { return id === "surface" ? surface : null; } },
-    addEventListener(type, listener) { listeners.set(type, listener); },
-    removeEventListener(type) { listeners.delete(type); }
-  };
-  const bridge = createEmbeddingBridge(environment, {
-    primitives,
-    hostModule,
-    digestText: options.digestText || (async (value) => digest(value)),
-    now: () => currentTime
-  });
-  return {
-    bridge,
-    advance(milliseconds) { currentTime += milliseconds; },
-    calls,
-    environment,
-    forward(message) { forwardEnvelope(message); },
-    listeners,
-    parent,
-    primitives,
-    surface
-  };
-}
-
-function binding(surface, session, artifactHTML) {
-  return {
-    manifestAuthor: "a".repeat(64),
-    dTag: "clock",
-    aggregateHash: "b".repeat(64),
-    artifactDigest: digest(artifactHTML),
-    surface,
-    session
-  };
-}
-
-function mountRequest(
-  harness,
-  session,
-  artifactHTML = "<p>verified</p>",
-  surfaceId = "surface-a"
-) {
-  const artifactBaseURL =
-    "nmp-artifact://00000000-0000-4000-8000-000000000001/";
-  const domains = ["shell"];
-  return {
-    type: "nmp.outer.mount",
-    requestId: `mount-${session}`,
-    surfaceId,
-    configuration: {
-      session,
-      artifactHTML,
-      artifactBaseURL,
-      domains,
-      title: "Clock",
-      binding: binding(surfaceId, session, artifactHTML)
-    }
-  };
-}
-
-async function dispatch(harness, data, source = harness.parent) {
-  harness.listeners.get("message")({ source, data });
-  await new Promise((resolve) => setImmediate(resolve));
-}
 
 test("embedded host binds parent, artifact digests, and napplet forwarding", async () => {
   const harness = createHarness();
@@ -196,6 +61,99 @@ test("embedded host binds parent, artifact digests, and napplet forwarding", asy
   const mounted = harness.calls.mounts[0].configuration;
   mounted.onReady();
   assert.equal(harness.parent.posted.at(-1).message.type, "nmp.outer.surface.ready");
+});
+
+test("empty legacy artifact mounts through the one-message path", async () => {
+  const harness = createHarness();
+  await dispatch(harness, mountRequest(harness, "empty-session", ""));
+  assert.equal(harness.calls.materializations, 1);
+  assert.equal(harness.calls.mounts.length, 1);
+  assert.equal(harness.calls.srcdocAssignments, 1);
+  assert.equal(harness.parent.posted.at(-1).message.ok, true);
+});
+
+test("ordered 256 KiB mount chunks reconstruct before the sealed sink", async () => {
+  const harness = createHarness();
+  const artifactHTML = "x".repeat(ARTIFACT_CHUNK_BYTES + 1);
+  const requests = chunkedMountRequests(
+    harness, "chunked-session", artifactHTML
+  );
+  for (const request of requests) await dispatch(harness, request);
+  assert.equal(harness.calls.mounts.length, 1);
+  assert.equal(
+    harness.calls.mounts[0].configuration.artifactHTML,
+    artifactHTML
+  );
+  assert.equal(harness.parent.posted.at(-1).message.ok, true);
+  assert.deepEqual(harness.bridge.stateCounts(), {
+    bindings: 1,
+    pendingMounts: 0,
+    pendingSurfaces: 0,
+    pendingTransfers: 0,
+    reservedTransferBytes: 0,
+    elevatedPending: 0,
+    elevatedActive: 0,
+    reservedArtifactHTMLBytes: 0,
+    reservedMaterializedHTMLBytes: 0
+  });
+});
+
+test("chunk gaps and replay retire bytes without assigning srcdoc", async () => {
+  const harness = createHarness();
+  const artifactHTML = "x".repeat(ARTIFACT_CHUNK_BYTES + 1);
+  const requests = chunkedMountRequests(harness, "replayed", artifactHTML);
+  await dispatch(harness, requests[0]);
+  await dispatch(harness, requests[1]);
+  await dispatch(harness, requests[1]);
+  assert.equal(harness.parent.posted.at(-1).message.error, "transfer-refused");
+  await dispatch(harness, requests.at(-1));
+  assert.equal(harness.parent.posted.at(-1).message.error, "stale");
+  assert.equal(harness.calls.materializations, 0);
+  assert.equal(harness.calls.srcdocAssignments, 0);
+  assert.equal(harness.bridge.stateCounts().pendingTransfers, 0);
+  assert.equal(harness.bridge.stateCounts().reservedTransferBytes, 0);
+});
+
+test("oversized chunks, remount, unmount, and teardown retire transfer bytes", async () => {
+  const artifactHTML = "x".repeat(ARTIFACT_CHUNK_BYTES + 1);
+  const oversizedHarness = createHarness();
+  const oversized = chunkedMountRequests(
+    oversizedHarness, "oversized", artifactHTML
+  );
+  await dispatch(oversizedHarness, oversized[0]);
+  oversized[1].bytes = new ArrayBuffer(ARTIFACT_CHUNK_BYTES + 1);
+  await dispatch(oversizedHarness, oversized[1]);
+  assert.equal(oversizedHarness.parent.posted.at(-1).message.error,
+    "transfer-refused");
+  assert.equal(oversizedHarness.bridge.stateCounts().reservedTransferBytes, 0);
+
+  const harness = createHarness();
+  const old = chunkedMountRequests(harness, "old-transfer", artifactHTML);
+  const current = chunkedMountRequests(harness, "new-transfer", artifactHTML);
+  await dispatch(harness, old[0]);
+  await dispatch(harness, current[0]);
+  await dispatch(harness, old.at(-1));
+  assert.equal(harness.parent.posted.at(-1).message.error, "stale");
+  const malformed = { ...current[1], bytes: "not-an-array-buffer" };
+  await dispatch(harness, malformed);
+  assert.equal(harness.parent.posted.at(-1).message.error, "transfer-refused");
+  assert.equal(harness.bridge.stateCounts().reservedTransferBytes, 0);
+  await dispatch(harness, current[0]);
+  await dispatch(harness, {
+    type: "nmp.outer.unmount",
+    requestId: "cancel-current",
+    surfaceId: "surface-a",
+    session: "new-transfer"
+  });
+  assert.equal(harness.parent.posted.at(-1).message.ok, true);
+  assert.equal(harness.bridge.stateCounts().reservedTransferBytes, 0);
+
+  const final = chunkedMountRequests(harness, "pagehide-transfer", artifactHTML);
+  await dispatch(harness, final[0]);
+  harness.listeners.get("pagehide")();
+  assert.equal(harness.bridge.stateCounts().pendingTransfers, 0);
+  assert.equal(harness.bridge.stateCounts().reservedTransferBytes, 0);
+  assert.equal(harness.listeners.has("message"), false);
 });
 
 test("one-byte mutation and type-confused launch refuse before the sealed sink", async () => {
@@ -301,6 +259,8 @@ test("stale asynchronous mounts retire without replacing the current surface", a
     bindings: 1,
     pendingMounts: 0,
     pendingSurfaces: 0,
+    pendingTransfers: 0,
+    reservedTransferBytes: 0,
     elevatedPending: 0,
     elevatedActive: 0,
     reservedArtifactHTMLBytes: 0,
@@ -340,6 +300,8 @@ test("unique refused and unmounted surfaces return state to baseline", async () 
     bindings: 0,
     pendingMounts: 0,
     pendingSurfaces: 0,
+    pendingTransfers: 0,
+    reservedTransferBytes: 0,
     elevatedPending: 0,
     elevatedActive: 0,
     reservedArtifactHTMLBytes: 0,
@@ -417,6 +379,7 @@ test("generated outer shell has one sealed HTML sink and pinned immutable bytes"
     "trusted-shell-artifact-verifier.js",
     "trusted-shell-surface-host.js",
     "trusted-shell-embedding-contract.js",
+    "trusted-shell-embedding-transfer.js",
     "trusted-shell-embedding.js"
   ]);
   assert.equal((sources.match(/\.srcdoc\s*=/g) || []).length, 1);

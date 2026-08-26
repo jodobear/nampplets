@@ -90,10 +90,30 @@
         );
     }
 
+    function validMountBegin(request) {
+      if (!exactFields(request, [
+        "configuration", "requestId", "surfaceId", "type"
+      ], primitives) || !validRequestId(request.requestId) ||
+          !primitives.isPlainObject(request.configuration)) return false;
+      const configuration = request.configuration;
+      return exactFields(configuration, [
+        "artifactBaseURL", "artifactBytes", "binding", "domains", "session", "title"
+      ], primitives) && validSurfaceId(request.surfaceId) &&
+        validSession(configuration.session) &&
+        artifactPolicySource.acceptsArtifactHTMLBytes(
+          artifactPolicy, configuration.artifactBytes
+        ) && primitives.isVerifiedArtifactBaseURL(configuration.artifactBaseURL) &&
+        Boolean(snapshotDomains(configuration.domains)) &&
+        validText(configuration.title, MAX_TITLE_BYTES, true) &&
+        validBinding(configuration.binding, request.surfaceId, configuration.session) &&
+        artifactPolicySource.matchesBinding(artifactPolicy, configuration.binding);
+    }
+
     return Object.freeze({
       exactFields,
       snapshotDomains,
       validMount,
+      validMountBegin,
       validRequestId,
       validSession,
       validSurfaceId

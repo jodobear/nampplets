@@ -15,6 +15,7 @@ const scriptNames = Object.freeze([
   "trusted-shell-artifact-verifier.js",
   "trusted-shell-surface-host.js",
   "trusted-shell-embedding-contract.js",
+  "trusted-shell-embedding-transfer.js",
   "trusted-shell-embedding.js"
 ]);
 

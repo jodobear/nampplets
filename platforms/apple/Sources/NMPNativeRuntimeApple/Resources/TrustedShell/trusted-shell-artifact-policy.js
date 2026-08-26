@@ -183,9 +183,18 @@
   function acceptsArtifactHTML(policy, value) {
     if (!isNormalizedPolicy(policy)) return false;
     const length = utf8ByteLength(value);
-    return length !== null && (policy.elevated
+    return length !== null && (length === 0
+      ? !policy.elevated
+      : acceptsArtifactHTMLBytes(policy, length));
+  }
+
+  function acceptsArtifactHTMLBytes(policy, length) {
+    if (!isNormalizedPolicy(policy) || !Number.isSafeInteger(length) || length <= 0) {
+      return false;
+    }
+    return policy.elevated
       ? length === policy.exactArtifactHTMLBytes
-      : length <= policy.maximumArtifactHTMLBytes);
+      : length <= policy.maximumArtifactHTMLBytes;
   }
 
   function acceptsMaterializedHTMLBytes(policy, value) {
@@ -262,6 +271,7 @@
     HARD_MAX_ARTIFACT_HTML_BYTES,
     HARD_MAX_MATERIALIZED_HTML_BYTES,
     acceptsArtifactHTML,
+    acceptsArtifactHTMLBytes,
     acceptsMaterializedHTML,
     acceptsMaterializedHTMLBytes,
     constructorInput,

@@ -70,6 +70,10 @@ function createServer(shellRoot, fixtureRoot) {
       path.join(shellRoot, "trusted-shell-embedding-contract.js")
     ],
     [
+      "/trusted-shell-embedding-transfer.js",
+      path.join(shellRoot, "trusted-shell-embedding-transfer.js")
+    ],
+    [
       "/trusted-shell-embedding.js",
       path.join(shellRoot, "trusted-shell-embedding.js")
     ],
