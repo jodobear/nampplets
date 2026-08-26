@@ -117,6 +117,7 @@ def validate_legacy(
         "trusted-shell-artifact-policy.js",
         "trusted-shell-artifact-verifier.js",
         "trusted-shell-embedding-contract.js",
+        "trusted-shell-embedding-transfer.js",
         "trusted-shell-embedding.js",
         "trusted-shell.html",
         "trusted-shell-policy.js",

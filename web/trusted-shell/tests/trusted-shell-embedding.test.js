@@ -11,6 +11,9 @@ const {
   createEmbeddingBridge
 } = require("../trusted-shell-embedding.js");
 const {
+  ARTIFACT_CHUNK_BYTES
+} = require("../trusted-shell-embedding-transfer.js");
+const {
   checkEmbeddedShell,
   renderEmbeddedShell,
   scriptNames
@@ -160,6 +163,45 @@ async function dispatch(harness, data, source = harness.parent) {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
+function chunkedMountRequests(
+  harness,
+  session,
+  artifactHTML,
+  surfaceId = "surface-a"
+) {
+  const bytes = new TextEncoder().encode(artifactHTML);
+  const full = mountRequest(harness, session, artifactHTML, surfaceId);
+  const configuration = { ...full.configuration };
+  delete configuration.artifactHTML;
+  configuration.artifactBytes = bytes.byteLength;
+  const transferId = `begin-${session}`;
+  const requests = [{
+    type: "nmp.outer.mount.begin",
+    requestId: transferId,
+    surfaceId,
+    configuration
+  }];
+  for (let offset = 0; offset < bytes.byteLength; offset += ARTIFACT_CHUNK_BYTES) {
+    requests.push({
+      type: "nmp.outer.mount.chunk",
+      requestId: `chunk-${session}-${offset}`,
+      surfaceId,
+      session,
+      transferId,
+      offset,
+      bytes: bytes.slice(offset, offset + ARTIFACT_CHUNK_BYTES).buffer
+    });
+  }
+  requests.push({
+    type: "nmp.outer.mount.commit",
+    requestId: `commit-${session}`,
+    surfaceId,
+    session,
+    transferId
+  });
+  return requests;
+}
+
 test("embedded host binds parent, artifact digests, and napplet forwarding", async () => {
   const harness = createHarness();
   assert.deepEqual(harness.parent.posted[0], {
@@ -196,6 +238,90 @@ test("embedded host binds parent, artifact digests, and napplet forwarding", asy
   const mounted = harness.calls.mounts[0].configuration;
   mounted.onReady();
   assert.equal(harness.parent.posted.at(-1).message.type, "nmp.outer.surface.ready");
+});
+
+test("ordered 256 KiB mount chunks reconstruct before the sealed sink", async () => {
+  const harness = createHarness();
+  const artifactHTML = "x".repeat(ARTIFACT_CHUNK_BYTES + 1);
+  const requests = chunkedMountRequests(
+    harness, "chunked-session", artifactHTML
+  );
+  for (const request of requests) await dispatch(harness, request);
+  assert.equal(harness.calls.mounts.length, 1);
+  assert.equal(
+    harness.calls.mounts[0].configuration.artifactHTML,
+    artifactHTML
+  );
+  assert.equal(harness.parent.posted.at(-1).message.ok, true);
+  assert.deepEqual(harness.bridge.stateCounts(), {
+    bindings: 1,
+    pendingMounts: 0,
+    pendingSurfaces: 0,
+    pendingTransfers: 0,
+    reservedTransferBytes: 0,
+    elevatedPending: 0,
+    elevatedActive: 0,
+    reservedArtifactHTMLBytes: 0,
+    reservedMaterializedHTMLBytes: 0
+  });
+});
+
+test("chunk gaps and replay retire bytes without assigning srcdoc", async () => {
+  const harness = createHarness();
+  const artifactHTML = "x".repeat(ARTIFACT_CHUNK_BYTES + 1);
+  const requests = chunkedMountRequests(harness, "replayed", artifactHTML);
+  await dispatch(harness, requests[0]);
+  await dispatch(harness, requests[1]);
+  await dispatch(harness, requests[1]);
+  assert.equal(harness.parent.posted.at(-1).message.error, "transfer-refused");
+  await dispatch(harness, requests.at(-1));
+  assert.equal(harness.parent.posted.at(-1).message.error, "stale");
+  assert.equal(harness.calls.materializations, 0);
+  assert.equal(harness.calls.srcdocAssignments, 0);
+  assert.equal(harness.bridge.stateCounts().pendingTransfers, 0);
+  assert.equal(harness.bridge.stateCounts().reservedTransferBytes, 0);
+});
+
+test("oversized chunks, remount, unmount, and teardown retire transfer bytes", async () => {
+  const artifactHTML = "x".repeat(ARTIFACT_CHUNK_BYTES + 1);
+  const oversizedHarness = createHarness();
+  const oversized = chunkedMountRequests(
+    oversizedHarness, "oversized", artifactHTML
+  );
+  await dispatch(oversizedHarness, oversized[0]);
+  oversized[1].bytes = new ArrayBuffer(ARTIFACT_CHUNK_BYTES + 1);
+  await dispatch(oversizedHarness, oversized[1]);
+  assert.equal(oversizedHarness.parent.posted.at(-1).message.error,
+    "transfer-refused");
+  assert.equal(oversizedHarness.bridge.stateCounts().reservedTransferBytes, 0);
+
+  const harness = createHarness();
+  const old = chunkedMountRequests(harness, "old-transfer", artifactHTML);
+  const current = chunkedMountRequests(harness, "new-transfer", artifactHTML);
+  await dispatch(harness, old[0]);
+  await dispatch(harness, current[0]);
+  await dispatch(harness, old.at(-1));
+  assert.equal(harness.parent.posted.at(-1).message.error, "stale");
+  const malformed = { ...current[1], bytes: "not-an-array-buffer" };
+  await dispatch(harness, malformed);
+  assert.equal(harness.parent.posted.at(-1).message.error, "transfer-refused");
+  assert.equal(harness.bridge.stateCounts().reservedTransferBytes, 0);
+  await dispatch(harness, current[0]);
+  await dispatch(harness, {
+    type: "nmp.outer.unmount",
+    requestId: "cancel-current",
+    surfaceId: "surface-a",
+    session: "new-transfer"
+  });
+  assert.equal(harness.parent.posted.at(-1).message.ok, true);
+  assert.equal(harness.bridge.stateCounts().reservedTransferBytes, 0);
+
+  const final = chunkedMountRequests(harness, "pagehide-transfer", artifactHTML);
+  await dispatch(harness, final[0]);
+  harness.listeners.get("pagehide")();
+  assert.equal(harness.bridge.stateCounts().pendingTransfers, 0);
+  assert.equal(harness.bridge.stateCounts().reservedTransferBytes, 0);
+  assert.equal(harness.listeners.has("message"), false);
 });
 
 test("one-byte mutation and type-confused launch refuse before the sealed sink", async () => {
@@ -301,6 +427,8 @@ test("stale asynchronous mounts retire without replacing the current surface", a
     bindings: 1,
     pendingMounts: 0,
     pendingSurfaces: 0,
+    pendingTransfers: 0,
+    reservedTransferBytes: 0,
     elevatedPending: 0,
     elevatedActive: 0,
     reservedArtifactHTMLBytes: 0,
@@ -340,6 +468,8 @@ test("unique refused and unmounted surfaces return state to baseline", async () 
     bindings: 0,
     pendingMounts: 0,
     pendingSurfaces: 0,
+    pendingTransfers: 0,
+    reservedTransferBytes: 0,
     elevatedPending: 0,
     elevatedActive: 0,
     reservedArtifactHTMLBytes: 0,
@@ -417,6 +547,7 @@ test("generated outer shell has one sealed HTML sink and pinned immutable bytes"
     "trusted-shell-artifact-verifier.js",
     "trusted-shell-surface-host.js",
     "trusted-shell-embedding-contract.js",
+    "trusted-shell-embedding-transfer.js",
     "trusted-shell-embedding.js"
   ]);
   assert.equal((sources.match(/\.srcdoc\s*=/g) || []).length, 1);

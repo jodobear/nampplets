@@ -6,15 +6,10 @@
   function moduleSource(value, path) {
     return value || (typeof require === "function" ? require(path) : null);
   }
-  const primitiveSource = moduleSource(
-    global.NMPTrustedShellPrimitives, "./trusted-shell.js"
-  );
-  const hostSource = moduleSource(
-    global.NMPTrustedShellHost, "./trusted-shell-surface-host.js"
-  );
-  const contractSource = moduleSource(
-    global.NMPTrustedShellEmbeddingContract, "./trusted-shell-embedding-contract.js"
-  );
+  const primitiveSource = moduleSource(global.NMPTrustedShellPrimitives, "./trusted-shell.js");
+  const hostSource = moduleSource(global.NMPTrustedShellHost, "./trusted-shell-surface-host.js");
+  const contractSource = moduleSource(global.NMPTrustedShellEmbeddingContract, "./trusted-shell-embedding-contract.js");
+  const transferSource = moduleSource(global.NMPTrustedShellEmbeddingTransfer, "./trusted-shell-embedding-transfer.js");
   const artifactPolicySource = moduleSource(
     global.NMPTrustedShellArtifactPolicy, "./trusted-shell-artifact-policy.js"
   );
@@ -23,7 +18,8 @@
     const hostModule = dependencies.hostModule || hostSource;
     const digestText = dependencies.digestText || ((value) => artifactPolicySource.digestText(global, value));
     const now = dependencies.now || Date.now;
-    if (!primitives || !hostModule || !contractSource || !artifactPolicySource ||
+    if (!primitives || !hostModule || !contractSource || !transferSource ||
+        !artifactPolicySource ||
         !environment || !environment.document ||
         !environment.parent || environment.parent === environment) {
       throw new Error("The trusted shell embedding bridge is unavailable");
@@ -40,6 +36,7 @@
     let messageWindowStartedAt = now();
     let messagesInWindow = 0;
     let parentRateLimited = false;
+    let transfers = null;
     function post(message) {
       parentWindow.postMessage(Object.freeze(message), "*");
     }
@@ -82,6 +79,7 @@
       const state = bindings.get(surfaceId);
       if (state) admission.release(state.admissionToken);
       pendingSurfaces.delete(surfaceId);
+      if (transfers) transfers.retire(surfaceId);
       bindings.delete(surfaceId);
       host.invalidateArtifactVerification();
       host.unmount(surfaceId);
@@ -189,6 +187,14 @@
         }
       }
     }
+    transfers = transferSource.createTransferManager(environment, {
+      artifactPolicy,
+      beforeBegin: invalidate,
+      contract,
+      onComplete(request) { void mount(request); },
+      primitives,
+      result
+    });
     function receiveParentMessage(event) {
       if (disposed || event.source !== parentWindow ||
           !primitives.isPlainObject(event.data)) return;
@@ -207,6 +213,7 @@
       }
       messagesInWindow += 1;
       const request = event.data;
+      if (transfers.handle(request)) return;
       if (request.type === "nmp.outer.mount") {
         void mount(request);
         return;
@@ -237,9 +244,10 @@
             !contract.validSession(request.session)) return;
         const state = currentBinding(request.surfaceId, request.session);
         const pending = pendingSurfaces.get(request.surfaceId);
+        const transferring = transfers.has(request.surfaceId, request.session);
         const removed = Boolean(state) || Boolean(
           pending && pending.session === request.session
-        );
+        ) || transferring;
         if (removed) invalidate(request.surfaceId);
         result(request.type, request, removed, removed ? null : "stale");
       } else if (request.type === "nmp.outer.dispose") {
@@ -263,6 +271,7 @@
       for (const surfaceId of surfaceIds) invalidate(surfaceId);
       bindings.clear();
       pendingSurfaces.clear();
+      transfers.dispose();
       admission.dispose();
       host.dispose();
       environment.removeEventListener("message", receiveParentMessage);
@@ -278,17 +287,14 @@
           bindings: bindings.size,
           pendingMounts,
           pendingSurfaces: pendingSurfaces.size,
+          ...transfers.counts(),
           ...admission.counts()
         });
       }
     });
   }
-  const exported = Object.freeze({
-    PROTOCOL_VERSION,
-    MAX_PENDING_MOUNTS,
-    MAX_PARENT_MESSAGES_PER_SECOND,
-    createEmbeddingBridge
-  });
+  const exported = Object.freeze({ PROTOCOL_VERSION, MAX_PENDING_MOUNTS,
+    MAX_PARENT_MESSAGES_PER_SECOND, createEmbeddingBridge });
   global.NMPTrustedShellEmbedding = exported;
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
 })(typeof window === "undefined" ? globalThis : window);

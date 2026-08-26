@@ -5,6 +5,9 @@ const crypto = require("node:crypto");
 const test = require("node:test");
 
 const { createEmbeddingBridge } = require("../trusted-shell-embedding.js");
+const {
+  ARTIFACT_CHUNK_BYTES
+} = require("../trusted-shell-embedding-transfer.js");
 const policyModule = require("../trusted-shell-artifact-policy.js");
 
 function digest(value) {
@@ -146,6 +149,41 @@ function mountRequest(artifactHTML, session = "session-large", surfaceId = "surf
   };
 }
 
+function chunkedMountRequests(
+  artifactHTML, session = "session-large", surfaceId = "surface-a"
+) {
+  const bytes = new TextEncoder().encode(artifactHTML);
+  const full = mountRequest(artifactHTML, session, surfaceId);
+  const configuration = { ...full.configuration, artifactBytes: bytes.byteLength };
+  delete configuration.artifactHTML;
+  const transferId = `begin-${session}`;
+  const requests = [{
+    type: "nmp.outer.mount.begin",
+    requestId: transferId,
+    surfaceId,
+    configuration
+  }];
+  for (let offset = 0; offset < bytes.byteLength; offset += ARTIFACT_CHUNK_BYTES) {
+    requests.push({
+      type: "nmp.outer.mount.chunk",
+      requestId: `chunk-${session}-${offset}`,
+      surfaceId,
+      session,
+      transferId,
+      offset,
+      bytes: bytes.slice(offset, offset + ARTIFACT_CHUNK_BYTES).buffer
+    });
+  }
+  requests.push({
+    type: "nmp.outer.mount.commit",
+    requestId: `commit-${session}`,
+    surfaceId,
+    session,
+    transferId
+  });
+  return requests;
+}
+
 async function dispatch(harness, data) {
   harness.listeners.get("message")({ source: harness.parent, data });
   await new Promise((resolve) => setImmediate(resolve));
@@ -178,6 +216,33 @@ test("exact elevated artifact is exclusive for one outer lifecycle", async () =>
   await dispatch(harness, mountRequest(exact.artifactHTML, "session-remount"));
   assert.equal(harness.calls.mounts, 1);
   assert.equal(harness.parent.posted.at(-1).error, "overloaded");
+});
+
+test("exact elevated artifact reconstructs through bounded chunks", async () => {
+  const exact = fixture();
+  const harness = createHarness(exact.policy);
+  for (const request of chunkedMountRequests(exact.artifactHTML)) {
+    await dispatch(harness, request);
+  }
+  assert.equal(harness.calls.materializations, 1);
+  assert.equal(harness.calls.mounts, 1);
+  assert.equal(harness.bridge.stateCounts().pendingTransfers, 0);
+  assert.equal(harness.bridge.stateCounts().reservedTransferBytes, 0);
+  assert.equal(harness.bridge.stateCounts().elevatedActive, 1);
+  assert.equal(harness.parent.posted.at(-1).ok, true);
+});
+
+test("mutated elevated chunk fails digest before materialization", async () => {
+  const exact = fixture();
+  const harness = createHarness(exact.policy);
+  const requests = chunkedMountRequests(exact.artifactHTML);
+  const chunk = requests[1].bytes;
+  new Uint8Array(chunk)[0] ^= 1;
+  for (const request of requests) await dispatch(harness, request);
+  assert.equal(harness.calls.materializations, 0);
+  assert.equal(harness.calls.mounts, 0);
+  assert.equal(harness.parent.posted.at(-1).error, "digest-mismatch");
+  assert.equal(harness.bridge.stateCounts().reservedTransferBytes, 0);
 });
 
 test("mutation, mount-selected policy, and materialized mismatch never reach srcdoc", async () => {

@@ -48,6 +48,16 @@ artifacts do not inherit the allowance.
 In-flight reservations survive cancellation until digest/materialization work
 settles; any later mount requires a fresh outer document and native lifecycle.
 
+Large authorized artifacts cross the top-to-outer boundary through the closed
+`nmp.outer.mount.begin`, `.chunk`, and `.commit` sequence. Begin reserves the
+exact policy-bound UTF-8 length; chunks are ordered, contiguous 256 KiB
+`ArrayBuffer` values bound to the begin request's transfer identifier; commit
+performs fatal UTF-8 reconstruction before the
+existing digest, materialization, receipt, and sole-`srcdoc` checks. Gaps,
+replay, overflow, remount, unmount, and page teardown retire the bounded
+transfer. The original one-message mount remains the compatibility path for
+small artifacts.
+
 Parent rate overflow emits one fixed `nmp.outer.rate-limited` diagnostic per
 rate window. Napplet rate overflow invalidates that surface once and reports a
 fixed surface error. Neither path reflects input fields. A new window or a

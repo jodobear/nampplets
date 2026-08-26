@@ -58,6 +58,20 @@ test("default policy preserves the existing byte ceilings", () => {
   ), false);
 });
 
+test("artifact byte admission is positive, finite, and policy-bound", () => {
+  const policy = policyModule.normalizeArtifactPolicy();
+  assert.equal(policyModule.acceptsArtifactHTMLBytes(policy, 1), true);
+  assert.equal(policyModule.acceptsArtifactHTMLBytes(
+    policy, policy.maximumArtifactHTMLBytes
+  ), true);
+  for (const value of [
+    0, -1, policy.maximumArtifactHTMLBytes + 1,
+    Number.MAX_SAFE_INTEGER + 1, 1.5
+  ]) {
+    assert.equal(policyModule.acceptsArtifactHTMLBytes(policy, value), false);
+  }
+});
+
 test("elevated policy is exact-artifact-bound under immutable hard ceilings", () => {
   const fixture = elevatedPolicy();
   const policy = policyModule.normalizeArtifactPolicy(fixture.input);
@@ -84,6 +98,15 @@ test("elevated policy is exact-artifact-bound under immutable hard ceilings", ()
     fixture.input
   );
   assert.equal(policyModule.acceptsArtifactHTML(policy, fixture.artifact), true);
+  assert.equal(policyModule.acceptsArtifactHTMLBytes(
+    policy, fixture.input.exactArtifactHTMLBytes
+  ), true);
+  assert.equal(policyModule.acceptsArtifactHTMLBytes(
+    policy, fixture.input.exactArtifactHTMLBytes - 1
+  ), false);
+  assert.equal(policyModule.acceptsArtifactHTMLBytes(
+    policy, fixture.input.exactArtifactHTMLBytes + 1
+  ), false);
   assert.equal(
     policyModule.acceptsArtifactHTML(policy, `${fixture.artifact}y`),
     false

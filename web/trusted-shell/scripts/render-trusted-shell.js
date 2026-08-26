@@ -29,6 +29,7 @@ const output = `<!doctype html>
   <script src="trusted-shell-artifact-verifier.js"></script>
   <script src="trusted-shell-surface-host.js"></script>
   <script src="trusted-shell-embedding-contract.js"></script>
+  <script src="trusted-shell-embedding-transfer.js"></script>
   <script src="trusted-shell-embedding.js"></script>
   <script>
     if (window.parent !== window) {
